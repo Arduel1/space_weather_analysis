@@ -99,6 +99,14 @@ This project relies on Docker for the database and Poetry for Python dependency 
         poetry shell
     ```
 
+3. Environment Variables
+
+    The Database uses environment variables to establish a conncetion. These variables can be injected via a `.env` file which can be loaded by Python with the `dotenv` Module.
+
+    The [example.env](example.env) file gives an example how the variable should look like and can be used for local deployment.
+
+    For that you need to change the filename to only `.env` or copy the content in a new file with that name.
+
 ## Data Sources
 
 The ETL pipeline is designed to acquire data from several key heliophysics data sources, primarily using the sunpy Python library.
