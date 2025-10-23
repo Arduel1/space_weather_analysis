@@ -1,6 +1,7 @@
 import logging
 import pandas as pd
 import numpy as np
+
 from pymongo.database import Database
 from pymongo.errors import BulkWriteError
 
@@ -93,7 +94,8 @@ def etl_silso_data(db: Database):
         logger.info(f"Loading {len(documents)} documents in batches of {DEFAULT_BATCH_SIZE}...")
 
         total_inserted = 0
-        for i, batch in enumerate(DataPreprocessor(batch_size=DEFAULT_BATCH_SIZE).batch_generator(documents)):
+        preprocessor = DataPreprocessor(batch_size=DEFAULT_BATCH_SIZE)
+        for i, batch in enumerate(preprocessor.batch_generator(documents)):
             if not batch:
                 continue
 

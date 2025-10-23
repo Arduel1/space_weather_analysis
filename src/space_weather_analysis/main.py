@@ -3,6 +3,7 @@ import sys
 from dotenv import load_dotenv
 
 from space_weather_analysis.database.connection import get_database
+from space_weather_analysis.etl.cme_catalog import etl_cme_data
 from space_weather_analysis.etl.sunspots import etl_silso_data
 
 load_dotenv()
@@ -29,6 +30,8 @@ def main():
     logger.info(f"Successfully connected to database: {db.name}")
 
     etl_silso_data(db)
+
+    etl_cme_data(db)
 
     try:
         collections = db.list_collection_names()
