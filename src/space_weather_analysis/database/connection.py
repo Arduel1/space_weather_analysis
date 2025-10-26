@@ -20,7 +20,15 @@ mongo_client = MongoClient(
 
 def get_database():
     """
-    Simple function to get the database object.
+    Retrieves the MongoDB database instance.
+
+    This function accesses the globally instantiated 'mongo_client'
+    and returns the specific database defined by the
+    'MONGO_DB_NAME' environment variable.
+
+    Returns:
+        pymongo.database.Database or None: The database object if the
+        environment variable is set, otherwise None.
     """
     client = mongo_client
     db_name = os.getenv("MONGO_DB_NAME")

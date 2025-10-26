@@ -20,16 +20,17 @@ The repository is organized as a modern Python package:
 
 ```bash
 .
-├── docker-compose.yml         # Defines the MongoDB service
+├── docker-compose.yml         # Defines the MongoDB service and starts the Python Script
 ├── poetry.lock                # Dependency lock file
 ├── pyproject.toml             # Project definition and dependencies (for Poetry)
+├── data                       # Contains all data source files
 ├── notebooks/                 # Jupyter notebooks for EDA and modeling
 ├── src/
 │   └── space_weather_analysis/
 │       ├── main.py            # Main entry point to run the ETL pipeline
-│       ├── etl/               # (Module) ETL logic (Extract, Transform, Load)
 │       ├── database/          # (Module) Database connection and setup
-│       └── util/              # (Module) Utility code (logging, exceptions)
+│       ├── etl/               # (Module) ETL logic (Extract, Transform, Load)
+│       └── util/              # (Module) Utility code (logging, exceptions, preprocessing)
 └── tests/                     # Unit and integration tests
 ```
 
@@ -119,4 +120,4 @@ The ETL pipeline is designed to acquire data from several key heliophysics data 
 
 * GFZ Potsdam: Provides the 3-hour Kp-Index, a measure of global geomagnetic activity used as the target variable for our predictive model.
 
-* DONKI (Database Of Notifications, Knowledge, Information): A NASA database used to source event catalogs for Coronal Mass Ejections (CMEs).
+* SOHO/LASCO CME CATALOG: Provides a extensive catalog of all measured Coronal Mass Ejection (CME's) events dating back to 1996.

@@ -18,7 +18,13 @@ logger = logging.getLogger(__name__)
 
 def main():
     """
-    Main entry point for the application.
+    Main entry point for the ETL application.
+
+    This function orchestrates the entire pipeline:
+    1. Sets up the database connection.
+    2. Runs the ETL process for SILSO sunspot data.
+    3. Runs the ETL process for SOHO/LASCO CME data.
+    4. Logs the final list of collections in the database.
     """
     logger.info("--- Application started ---")
 
@@ -29,10 +35,11 @@ def main():
 
     logger.info(f"Successfully connected to database: {db.name}")
 
+    # Run ETL processes sequentially
     etl_silso_data(db)
-
     etl_cme_data(db)
 
+    # Final check to log the state of the database
     try:
         collections = db.list_collection_names()
         logger.info(f"Current collections: {collections}")
