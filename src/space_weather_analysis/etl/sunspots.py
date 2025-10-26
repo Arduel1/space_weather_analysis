@@ -16,6 +16,20 @@ DEFAULT_BATCH_SIZE = 10000
 
 
 def etl_silso_data(db: Database):
+    """
+    Performs the ETL process for SILSO daily sunspot data.
+
+    This function orchestrates the three stages:
+    1.  **Extract**: Reads the raw CSV data from 'data/SN_d_tot_V2.0.csv'.
+    2.  **Transform**: Cleans the data, converts types, and structures it
+        into MongoDB documents.
+    3.  **Load**: Inserts the transformed documents into the
+        'silso_sunspot_daily' time series collection in MongoDB.
+
+    Args:
+        db (pymongo.database.Database): The MongoDB database instance where
+                                        the data will be loaded.
+    """
     logger.info(f"--- Starting ETL for SILSO: {FILE_PATH} ---")
 
     try:
@@ -40,11 +54,11 @@ def etl_silso_data(db: Database):
     except Exception as e:
         logger.error(f"Error reading SILSO file: {e}")
         return
-
+    # -1 indicates a missing value.
     df["sunspot_number"] = df["sunspot_number"].replace(-1, np.nan)
-
+    # Combine year, month, and day into a single timestamp for MongoDB.
     df["timestamp"] = pd.to_datetime(df[["year", "month", "day"]])
-
+    # 'indicator' is 0 or 1,
     df["indicator"] = df["indicator"].astype(bool)
 
     documents = []
@@ -61,6 +75,7 @@ def etl_silso_data(db: Database):
             {
                 "timestamp": row["timestamp"],
                 "metadata": {"source": "SILSO_V2.0"},
+                # Filter out NaN values to keep the documents clean.
                 "data": {k: v for k, v in data.items() if not pd.isna(v)},
             }
         )
@@ -77,10 +92,11 @@ def etl_silso_data(db: Database):
         logger.info(f"Creating new time series collection: {COLLECTION_NAME}")
         db.create_collection(
             COLLECTION_NAME,
+            # Create as a time series collection, optimized for daily bucketing.
             timeseries={
                 "timeField": "timestamp",
                 "metaField": "metadata",
-                "bucketMaxSpanSeconds": 86400,
+                "bucketMaxSpanSeconds": 86400,  # = 1 day
                 "bucketRoundingSeconds": 86400,
             },
         )
@@ -88,6 +104,7 @@ def etl_silso_data(db: Database):
         logger.info(f"Collection {COLLECTION_NAME} already exists.")
 
     try:
+        # Clear the collection to ensure the ETL process is idempotent.
         logger.info("Clearing existing data in collection...")
         collection.delete_many({})
 
@@ -95,6 +112,7 @@ def etl_silso_data(db: Database):
 
         total_inserted = 0
         preprocessor = DataPreprocessor(batch_size=DEFAULT_BATCH_SIZE)
+        # Use the batch generator to insert data in chunks.
         for i, batch in enumerate(preprocessor.batch_generator(documents)):
             if not batch:
                 continue
