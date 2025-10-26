@@ -9,10 +9,10 @@ The analysis follows the physical causal chain of events, starting from the Sun,
 The core components of this project are:
 
 1. A robust ETL pipeline to fetch, clean, and store multi-instrument space physics data in a MongoDB database.
-
 2. Exploratory Data Analysis (EDA) to investigate known physical relationships, such as the 11-year solar cycle and the in-situ signatures of Coronal Mass Ejections (CMEs).
-
 3. A predictive model to forecast geomagnetic activity (using the Kp-Index) based on real-time solar wind data.
+
+---
 
 ### Project Structure
 
@@ -23,16 +23,26 @@ The repository is organized as a modern Python package:
 ├── docker-compose.yml         # Defines the MongoDB service and starts the Python Script
 ├── poetry.lock                # Dependency lock file
 ├── pyproject.toml             # Project definition and dependencies (for Poetry)
-├── data                       # Contains all data source files
+├── data/                      # Contains all local data source files
+│   ├── SN_d_tot_V2.0.csv
+│   └── cme_catalog.txt
 ├── notebooks/                 # Jupyter notebooks for EDA and modeling
 ├── src/
 │   └── space_weather_analysis/
 │       ├── main.py            # Main entry point to run the ETL pipeline
 │       ├── database/          # (Module) Database connection and setup
-│       ├── etl/               # (Module) ETL logic (Extract, Transform, Load)
-│       └── util/              # (Module) Utility code (logging, exceptions, preprocessing)
+│       │   └── connection.py
+│       ├── etl/               # (Module) ETL logic
+│       │   ├── base_processor.py  # Abstract base class for ETL processes
+│       │   ├── cme_catalog.py   # ETL for SOHO/LASCO CME Catalog
+│       │   └── sunspots.py      # ETL for SILSO Sunspot Data
+│       └── util/              # (Module) Utility code
+│           ├── data_preprocessing.py
+│           └── exceptions.py
 └── tests/                     # Unit and integration tests
 ```
+
+---
 
 ### Authors
 
@@ -41,83 +51,89 @@ The repository is organized as a modern Python package:
 * Patrick Heß
 * Sebastian Straßner
 
+---
+
 ### License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
-## Preconditions & Installation
+---
 
-This project relies on Docker for the database and Poetry for Python dependency management.
+## Getting Started
 
-1. Database Setup (Docker)
+This project uses **Docker** to run the database and the main ETL application, and **Poetry** for Python dependency management.
 
-    The project requires a running MongoDB instance. We use Docker and Docker Compose to manage this service.
+### 1. Running the ETL Pipeline (Quick Start)
 
-    Install Docker: Ensure you have Docker and Docker Compose installed. We recommend using Docker Desktop for your operating system.
+This is the simplest way to run the entire application. It will start the MongoDB database and run the Python ETL script defined in `src/space_weather_analysis/main.py`.
 
+1. **Configure Environment:**
+    Copy the `example.env` file to `.env` and fill in your desired credentials.
+
+    ```bash
+    cp example.env .env
+    ```
+
+2. **Build and Run:**
+    Use `docker-compose` to build the Python image and start both the application and database containers.
     Start the Database Service: Navigate to the project's root directory (where [docker-compose.yml](docker-compose.yml) is located) and run:
 
-    ```Bash
-    # This starts the MongoDB container in detached mode (background)
-
-    docker-compose up -d
+    ```bash
+    docker-compose up --build -d
     ```
 
-    Stop the Database Service: When you are finished, you can stop the container:
+3. **Check Logs (Optional):**
+    To see the live output of the ETL process, you can follow the logs of the `app` service:
 
-    ```Bash
-    # This ends the MongoDB container. The -v flag also removes the volume and deletes all data inside of it.
-
-    docker-compose down -v
+    ```bash
+    docker-compose logs -f app
     ```
 
-    For futher explanations please consult the official [documentation](https://docs.docker.com/reference/cli/docker/compose/).
+4. **Stop the Services:**
+    When you are finished, stop the containers.
 
-2. Python Environment (Poetry)
+    ```bash
+    docker-compose down
+    ```
 
-    We use Poetry to manage all Python dependencies and virtual environments.
-    For installation and [configuration](https://python-poetry.org/docs/configuration/) (e.g. create virtual environments localy) consult the [documentation](https://python-poetry.org/docs/)
+    *To delete all data in the database volume as well, use `docker-compose down -v`.*
 
-    ```Bash
+---
+
+### 2. Setting up for Development (Analysis & Notebooks)
+
+If you want to contribute code, run tests, or work in the Jupyter notebooks, you need to set up the Python environment locally using Poetry. This assumes you already have Docker running the database (see step 1).
+
+1. **Install Poetry:**
+    Follow the [official Poetry documentation](https://python-poetry.org/docs/) to install it on your system.
+
+2. **Configure Poetry (Optional):**
+    To store the virtual environment inside the project folder (as `.venv`), run:
+
+    ```bash
     poetry config virtualenvs.in-project true
     ```
 
-    Install Dependencies: With Poetry installed, navigate to the project root and install all required packages:
+3. **Install Dependencies:**
+    Poetry will read the `pyproject.toml` file and install all required packages.
 
-    ```Bash
-    # This reads the pyproject.toml and installs dependencies
-
+    ```bash
     poetry install
     ```
 
-    Activate the Virtual Environment: To work within the project's environment, you can either:
+4. **Activate the Environment:**
+    You can now access the environment in two ways:
 
-    Run commands with poetry run `command` (e.g., poetry run python src/space_weather_analysis/main.py)
+      * **Spawn a shell:** `poetry shell` (Recommended)
+      * **Run a single command:** `poetry run jupyter lab`
 
-    Or, spawn a new shell inside the environment:
+With the environment active, you can now open the `notebooks/` directory and connect to the running MongoDB database to perform your analysis.
 
-    ```Bash
-        poetry shell
-    ```
-
-3. Environment Variables
-
-    The Database uses environment variables to establish a conncetion. These variables can be injected via a `.env` file which can be loaded by Python with the `dotenv` Module.
-
-    The [example.env](example.env) file gives an example how the variable should look like and can be used for local deployment.
-
-    For that you need to change the filename to only `.env` or copy the content in a new file with that name.
+---
 
 ## Data Sources
 
-The ETL pipeline is designed to acquire data from several key heliophysics data sources, primarily using the sunpy Python library.
+The ETL pipeline currently processes the following data sources from the `data/` directory:
 
-* GOES (Geostationary Operational Environmental Satellite): Provides X-ray flux data from the XRS instrument, used to identify solar flares.
-
-* OMNIWeb Database (via CDAWeb): Aggregates 1-minute resolution solar wind data from satellites at the L1 point (e.g., ACE, DSCOVR). Key parameters include IMF Bz​, solar wind speed (V), and density (N).
-
-* SILSO (Royal Observatory of Belgium): Provides historical sunspot number data, used as a proxy for the 11-year solar cycle.
-
-* GFZ Potsdam: Provides the 3-hour Kp-Index, a measure of global geomagnetic activity used as the target variable for our predictive model.
-
-* SOHO/LASCO CME CATALOG: Provides a extensive catalog of all measured Coronal Mass Ejection (CME's) events dating back to 1996.
+* **SILSO (Royal Observatory of Belgium):** Provides historical daily sunspot number data (`SN_d_tot_V2.0.csv`), used as a proxy for the 11-year solar cycle.
+* **SOHO/LASCO CME CATALOG:** Provides an extensive catalog of all measured Coronal Mass Ejection (CME) events (`cme_catalog.txt`) dating back to 1996.
