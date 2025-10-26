@@ -3,14 +3,14 @@ class DataPreprocessor:
     A utility class for common data preprocessing tasks, such as batching.
     """
 
-    def __init__(self, batch_size=10000) -> None:
+    def __init__(self, batch_size=5000) -> None:
         """
         Initializes the DataPreprocessor.
 
         Args:
             batch_size (int, optional): The default number of items
                                         to include in each batch.
-                                        Defaults to 10000.
+                                        Defaults to 5000.
         """
         self.batch_size = batch_size
 
@@ -29,4 +29,4 @@ class DataPreprocessor:
                   size 'self.batch_size'.
         """
         for i in range(0, len(data_list), self.batch_size):
-            yield data_list[i:i + self.batch_size]
+            yield data_list[i : i + self.batch_size]

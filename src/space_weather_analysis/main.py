@@ -3,8 +3,8 @@ import sys
 from dotenv import load_dotenv
 
 from space_weather_analysis.database.connection import get_database
-from space_weather_analysis.etl.cme_catalog import etl_cme_data
-from space_weather_analysis.etl.sunspots import etl_silso_data
+from space_weather_analysis.etl.cme_catalog import CmeETL
+from space_weather_analysis.etl.sunspots import SilsoETL
 
 load_dotenv()
 
@@ -22,9 +22,8 @@ def main():
 
     This function orchestrates the entire pipeline:
     1. Sets up the database connection.
-    2. Runs the ETL process for SILSO sunspot data.
-    3. Runs the ETL process for SOHO/LASCO CME data.
-    4. Logs the final list of collections in the database.
+    2. Initializes and runs all registered ETL processors.
+    3. Logs the final list of collections in the database.
     """
     logger.info("--- Application started ---")
 
@@ -36,8 +35,8 @@ def main():
     logger.info(f"Successfully connected to database: {db.name}")
 
     # Run ETL processes sequentially
-    etl_silso_data(db)
-    etl_cme_data(db)
+    SilsoETL(db).run()
+    CmeETL(db).run()
 
     # Final check to log the state of the database
     try:
