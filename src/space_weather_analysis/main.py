@@ -2,7 +2,8 @@ import logging
 import sys
 from dotenv import load_dotenv
 
-from space_weather_analysis.database.connection import get_database
+from space_weather_analysis.database.connection import DatabaseConnection
+
 from space_weather_analysis.etl.cme_catalog import CmeETL
 from space_weather_analysis.etl.sunspots import SilsoETL
 
@@ -27,7 +28,7 @@ def main():
     """
     logger.info("--- Application started ---")
 
-    db = get_database()
+    db = DatabaseConnection.get_database()
     if db is None:
         logger.critical("Could not get database connection. Exiting.")
         sys.exit(1)
@@ -44,8 +45,12 @@ def main():
         logger.info(f"Current collections: {collections}")
     except Exception as e:
         logger.error(f"Error listing collections: {e}")
-
-    logger.info("--- Application finished ---")
+    finally:
+        # Ensure the database connection is always closed on exit
+        # NOTE: This right now closes the Database connection directly after the ETL Pipeline finishes.
+        # For later usages in the analysis or in notebooks this needs to be considered. 
+        DatabaseConnection.close()
+        logger.info("--- Application finished ---")
 
 
 if __name__ == "__main__":
