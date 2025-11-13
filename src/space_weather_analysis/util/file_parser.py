@@ -61,10 +61,7 @@ def _parse_1d_timeseries_file(
     except NoMatchError:
         logger.info(f"Sunpy parser failed for {Path(file_path_str).name}. Will attempt xarray fallback.")
     except Exception as e:
-        logger.error(
-            f"Failed to parse data from file {Path(file_path_str).name}: {e}",
-            exc_info=True,
-        )
+        logger.error(f"Failed to parse data from file {Path(file_path_str).name}: {e}", exc_info=True)
     return []
 
 
@@ -114,10 +111,7 @@ def _handle_nd_datafile(file_path_obj: Path, variables_to_parse: List[str]) -> O
         return file_metadata
 
     except Exception as xr_e:
-        logger.error(
-            f"xarray/Dask processing failed for {file_path_obj.name}: {xr_e}",
-            exc_info=True,
-        )
+        logger.error(f"xarray/Dask processing failed for {file_path_obj.name}: {xr_e}", exc_info=True)
         return file_metadata  # Return metadata if extracted, even on failure
     finally:
         if ds:
@@ -147,16 +141,13 @@ def _concatenate_timeseries(
             ts_combined = ts_combined[0] if ts_combined else None
 
         if not ts_combined:
-            logger.error("Combination resulted in 'None' or empty object.")
+            logger.error("Combination resulted in 'None' or empty object.", exc_info=True)
             return None
 
         return ts_combined
 
     except Exception as e:
-        logger.error(
-            f"Failed to concatenate or truncate 1D TimeSeries: {e}",
-            exc_info=True,
-        )
+        logger.error(f"Failed to concatenate or truncate 1D TimeSeries: {e}", exc_info=True)
         return None
 
 

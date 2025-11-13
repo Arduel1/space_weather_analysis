@@ -1,37 +1,48 @@
 import logging
+import pathlib
 import sys
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from dotenv import load_dotenv
 
-from space_weather_analysis.data_pipeline.cdaweb_pipeline import CdawebPipeline
+# --- Local ETL Imports ---
 from space_weather_analysis.database.connection import DatabaseConnection
 from space_weather_analysis.etl.cme_catalog import CmeETL
 from space_weather_analysis.etl.sunspots import SilsoETL
+from space_weather_analysis.hapi_pipeline.catalog_manager import build_hapi_catalog
+from space_weather_analysis.hapi_pipeline.hapi_pipeline import GenericHapiPipeline
+from space_weather_analysis.sunpy_pipeline.cdaweb_pipeline import CdawebPipeline
 
+# Load environment variables (e.g., for database credentials)
 load_dotenv()
 
+# --- Global Path Definitions ---
+PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent
+DATA_ROOT = PROJECT_ROOT / "data"
+HAPI_CONFIG_DIR = DATA_ROOT / "hapi_config"
+HAPI_CATALOG_FILE = HAPI_CONFIG_DIR / "hapi_master_catalog.json"
+HAPI_SERVER_LIST_FILE = HAPI_CONFIG_DIR / "all.txt"  # Expects all.txt here
+FIDO_DOWNLOAD_DIR = DATA_ROOT / "cdaweb_fido_downloads"
+HAPI_OUTPUT_DIR = DATA_ROOT / "hapi_streaming_output"
+
+
+# --- Logging Configuration ---
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
+    handlers=[logging.FileHandler(PROJECT_ROOT / "pipeline.log", mode="w"), logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
 
 
-def run_data_ingestion(config: Dict[str, Any]):
+def run_fido_file_pipeline(config: Dict[str, Any]):
     """
-    Main entry point for running the CDAWeb data pipeline.
+    Main entry point for running the ORIGINAL Fido file-download pipeline.
 
     Args:
-        config (Dict[str, Any]): A dictionary containing run parameters.
-            Expected keys:
-            - "START_TIME" (datetime)
-            - "END_TIME" (datetime)
-            - "GROUP_FILTER" (Optional[List[str]])
-            - "DATASET_FILTER" (Optional[List[str]])
+        config (Dict[str, Any]): The configuration dictionary.
     """
     start_time = config.get("START_TIME")
     end_time = config.get("END_TIME")
@@ -39,28 +50,21 @@ def run_data_ingestion(config: Dict[str, Any]):
     dataset_filter = config.get("DATASET_FILTER")
 
     if not start_time or not end_time:
-        logger.error("START_TIME and END_TIME must be specified in config.")
+        logger.error("START_TIME and END_TIME must be specified in config.", exc_info=True)
         return
 
     logger.info("=========================================")
-    logger.info("Starting Data Ingestion Pipeline")
+    logger.info("Starting Fido (File) Ingestion Pipeline")
     logger.info(f"Time Range: {start_time} to {end_time}")
-
-    if group_filter:
-        logger.info(f"Group Filter: {group_filter}")
-    else:
-        logger.info("Group Filter: ALL")
-
-    if dataset_filter:
-        logger.info(f"Dataset Filter: {dataset_filter}")
-    else:
-        logger.info("Dataset Filter: ALL")
+    logger.info(f"Group Filter: {group_filter or 'ALL'}")
+    logger.info(f"Dataset Filter: {dataset_filter or 'ALL'}")
+    logger.info(f"Download Path: {FIDO_DOWNLOAD_DIR}")
     logger.info("=========================================")
 
     start_run_time = time.time()
     try:
-        pipeline = CdawebPipeline()
-
+        # Pass the specific download path to the pipeline
+        pipeline = CdawebPipeline(base_data_path=FIDO_DOWNLOAD_DIR)
         pipeline.run(
             start_time=start_time,
             end_time=end_time,
@@ -69,55 +73,133 @@ def run_data_ingestion(config: Dict[str, Any]):
         )
 
     except Exception as e:
-        logger.critical(f"Pipeline failed with unhandled exception: {e}", exc_info=True)
+        logger.critical(f"Fido Pipeline failed: {e}")
     finally:
         end_run_time = time.time()
         total_time = end_run_time - start_run_time
-        logger.info(f"Pipeline execution finished in {total_time:.2f} seconds.")
+        logger.info(f"Fido Pipeline finished in {total_time:.2f} seconds.")
 
 
-# def main():
-#     """
-#     Main entry point for the ETL application.
+def run_generic_hapi_pipeline(config: Dict[str, Any]):
+    """
+    Main entry point for running the NEW Generic HAPI streaming pipeline.
 
-#     This function orchestrates the entire pipeline:
-#     1. Sets up the database connection.
-#     2. Initializes and runs all registered ETL processors.
-#     3. Logs the final list of collections in the database.
-#     """
-#     logger.info("--- Application started ---")
+    Args:
+        config (Dict[str, Any]): The configuration dictionary.
+    """
+    start_time = config.get("START_TIME")
+    end_time = config.get("END_TIME")
+    datasets_to_process = config.get("DATASET_FILTER")
 
-#     db = DatabaseConnection.get_database()
-#     if db is None:
-#         logger.critical("Could not get database connection. Exiting.")
-#         sys.exit(1)
+    if not start_time or not end_time or not datasets_to_process:
+        logger.error(
+            "START_TIME, END_TIME, and DATASET_FILTER (list of datasets) must be specified for the HAPI pipeline.",
+            exc_info=True,
+        )
+        return
 
-#     logger.info(f"Successfully connected to database: {db.name}")
+    logger.info("=========================================")
+    logger.info("Starting Generic HAPI Pipeline")
+    logger.info(f"Time Range: {start_time} to {end_time}")
+    logger.info(f"Datasets: {datasets_to_process}")
+    logger.info(f"Catalog File: {HAPI_CATALOG_FILE}")
+    logger.info(f"Output Path: {HAPI_OUTPUT_DIR}")
+    logger.info("=========================================")
 
-#     # Run ETL processes sequentially
-#     SilsoETL(db).run()
-#     CmeETL(db).run()
+    start_run_time = time.time()
+    try:
+        pipeline = GenericHapiPipeline(catalog_path=HAPI_CATALOG_FILE, base_output_dir=HAPI_OUTPUT_DIR)
+        pipeline.run(
+            datasets_to_process=datasets_to_process,
+            start_time=start_time,
+            stop_time=end_time,
+        )
+    except Exception as e:
+        logger.critical(f"HAPI Pipeline failed: {e}")
+    finally:
+        end_run_time = time.time()
+        total_time = end_run_time - start_run_time
+        logger.info(f"HAPI Pipeline execution finished in {total_time:.2f} seconds.")
 
-#     # Final check to log the state of the database
-#     try:
-#         collections = db.list_collection_names()
-#         logger.info(f"Current collections: {collections}")
-#     except Exception as e:
-#         logger.error(f"Error listing collections: {e}")
-#     finally:
-#         # Ensure the database connection is always closed on exit
-#         # NOTE: This right now closes the Database connection directly after the ETL Pipeline finishes.
-#         # For later usages in the analysis or in notebooks this needs to be considered.
-#         DatabaseConnection.close()
-#         logger.info("--- Application finished ---")
+
+def run_local_file_etl():
+    """
+    Main entry point for the local file ETL application (SILSO, CME).
+    """
+    logger.info("--- Local ETL Application started ---")
+    db = DatabaseConnection.get_database()
+    if db is None:
+        logger.critical("Could not get database connection. Exiting.")
+        sys.exit(1)
+
+    logger.info(f"Successfully connected to database: {db.name}")
+
+    # Run ETL processes sequentially
+    SilsoETL(db).run()
+    CmeETL(db).run()
+
+    try:
+        collections = db.list_collection_names()
+        logger.info(f"Current collections: {collections}")
+    except Exception as e:
+        logger.error(f"Error listing collections: {e}", exc_info=True)
+    finally:
+        DatabaseConnection.close()
+        logger.info("--- Local ETL Application finished ---")
+
+
+def main():
+    """
+    Main entry point for the application.
+
+    Developer: Uncomment the action(s) you wish to perform.
+    """
+    logger.info("--- Application Main Entry Point Started ---")
+
+    # --- Action 1: Build HAPI Master Catalog ---
+
+    logger.info("Running: HAPI Catalog Build")
+    # build_hapi_catalog(
+    #     server_list_path=HAPI_SERVER_LIST_FILE,
+    #     catalog_output_path=HAPI_CATALOG_FILE,
+    #     include_test_servers=True  # Set to True to include TestData servers
+    # )
+
+    # --- Shared Pipeline Configuration ---
+    # This config is used by both Fido and HAPI pipelines
+    PIPELINE_CONFIG = {
+        # "START_TIME": datetime(2023, 11, 1, 0, 0, 0),
+        # "END_TIME": datetime(2024, 11, 2, 0, 0, 0),
+        "START_TIME": datetime(1997, 9, 3, 0, 0, 0),
+        "END_TIME": datetime(1998, 1, 1, 0, 0, 0),
+        # Config for Fido Pipeline
+        # "GROUP_FILTER": ["ACE"],
+        # Config for HAPI Pipeline
+        # 'WI_H1_SWE_RTN' and 'AC_H0_MFI' are from cdaweb.gsfc.nasa.gov
+        # 'ace' is from hapi-server.org/servers/SSCWeb/hapi
+        "DATASET_FILTER": ["AC_H0_MFI"],
+    }
+
+    # --- Action 2: Run Generic HAPI (Streaming) Pipeline ---
+    # (Requires the HAPI catalog to be built first via Action 1)
+    #
+    logger.info("Running: Generic HAPI Pipeline")
+    run_generic_hapi_pipeline(config=PIPELINE_CONFIG)
+
+    # --- Action 3: Run Fido (File Download) Pipeline ---
+    # (This is the original CDAWeb pipeline, retained for non-HAPI sources)
+    #
+    # logger.info("Running: Fido File Pipeline")
+    # run_fido_file_pipeline(config=PIPELINE_CONFIG)
+
+    # --- Action 4: Run Local ETL (CME, SILSO) ---
+    # (This populates the database from local files in /data)
+    #
+    # logger.info("Running: Local ETL Processes")
+    # run_local_file_etl()
+
+    logger.info("--- Application Main Entry Point Finished ---")
 
 
 if __name__ == "__main__":
-    # main()
-    PIPELINE_CONFIG = {
-        "START_TIME": datetime(2023, 11, 1, 0, 0, 0),
-        "END_TIME": datetime(2023, 11, 2, 0, 0, 0),
-        "GROUP_FILTER": None,
-        "DATASET_FILTER": None,
-    }
-    run_data_ingestion(config=PIPELINE_CONFIG)
+    main()

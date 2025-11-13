@@ -1,9 +1,10 @@
 import logging
+from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
+
 import pandas as pd
 from pymongo.database import Database
 from pymongo.errors import BulkWriteError
-from abc import ABC, abstractmethod
 
 from space_weather_analysis.util.data_preprocessing import DataPreprocessor
 
@@ -134,7 +135,7 @@ class BaseETLProcessor(ABC):
             logger.info(f"Data load complete. Total inserted: {total_inserted}")
 
         except BulkWriteError as bwe:
-            logger.error(f"Error during bulk insert: {bwe.details}")
+            logger.error(f"Error during bulk insert: {bwe.details}", exc_info=True)
         except Exception as e:
             logger.error(f"Error loading data to MongoDB: {e}", exc_info=True)
 

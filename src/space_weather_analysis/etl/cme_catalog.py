@@ -1,10 +1,11 @@
 import logging
 import re
-import pandas as pd
-import numpy as np
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 
+import numpy as np
+import pandas as pd
 from pymongo.database import Database
+
 from .base_processor import BaseETLProcessor  # Import the base class
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ class CmeETL(BaseETLProcessor):
             logger.info(f"Extracted and parsed {len(df)} rows from CME catalog.")
             return df
         except FileNotFoundError:
-            logger.error(f"CME catalog file not found at: {self.FILE_PATH}")
+            logger.error(f"CME catalog file not found at: {self.FILE_PATH}", exc_info=True)
             return None
         except Exception as e:
             logger.error(f"Error reading CME file: {e}", exc_info=True)
@@ -106,7 +107,7 @@ class CmeETL(BaseETLProcessor):
             raw_data.dropna(subset=["timestamp"], inplace=True)
             logger.info(f"Removed rows with invalid timestamps. New count: {len(raw_data)}")
         except Exception as e:
-            logger.error(f"Error creating timestamp for CMEs: {e}")
+            logger.error(f"Error creating timestamp for CMEs: {e}", exc_info=True)
             return []
 
         raw_data["is_halo"] = raw_data["central_pa"].str.contains("Halo", na=False)

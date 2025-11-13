@@ -1,7 +1,7 @@
 import logging
 import os
-
 from typing import Optional
+
 from pymongo import MongoClient
 from pymongo.database import Database
 from pymongo.errors import ConnectionFailure
@@ -74,7 +74,7 @@ class DatabaseConnection:
 
         db_name = os.getenv("MONGO_DB_NAME")
         if not db_name:
-            logger.error("MONGO_DB_NAME environment variable not set.")
+            logger.error("MONGO_DB_NAME environment variable not set.", exc_info=True)
             return None
 
         cls._db = client[db_name]

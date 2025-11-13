@@ -1,9 +1,10 @@
 import logging
 from typing import Any, Dict, List, Optional
-import pandas as pd
-import numpy as np
 
+import numpy as np
+import pandas as pd
 from pymongo.database import Database
+
 from .base_processor import BaseETLProcessor  # Import the base class
 
 logger = logging.getLogger(__name__)
@@ -56,10 +57,10 @@ class SilsoETL(BaseETLProcessor):
             logger.info(f"Extracted {len(df)} rows from CSV.")
             return df
         except FileNotFoundError:
-            logger.error(f"SILSO data file not found at: {self.FILE_PATH}")
+            logger.error(f"SILSO data file not found at: {self.FILE_PATH}", exc_info=True)
             return None
         except Exception as e:
-            logger.error(f"Error reading SILSO file: {e}")
+            logger.error(f"Error reading SILSO file: {e}", exc_info=True)
             return None
 
     def _transform(self, raw_data: Optional[pd.DataFrame]) -> List[Dict[str, Any]]:

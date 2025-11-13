@@ -9,7 +9,7 @@ from sunpy.net import Fido
 from sunpy.net import attrs as a
 from sunpy.net.cdaweb import attrs as cdaweb_attrs
 
-from space_weather_analysis.data_pipeline.cdaweb_client import CdawebClient
+from space_weather_analysis.sunpy_pipeline.cdaweb_client import CdawebClient
 from space_weather_analysis.util.file_parser import parse_datafiles
 from space_weather_analysis.util.metadata_generator import generate_metadata_file
 
@@ -117,7 +117,7 @@ class CdawebPipeline:
             # Get API metadata (variables)
             api_metadata = self.client.get_variables_for_dataset(dataset_id)
             if not api_metadata:
-                logger.error(f"Cannot proceed with {dataset_id}: No API metadata found.")
+                logger.error(f"Cannot proceed with {dataset_id}: No API metadata found.", exc_info=True)
                 return  # Skip this dataset
 
             # Search and download data
@@ -233,7 +233,7 @@ class CdawebPipeline:
         # Get all groups
         all_groups = self.client.get_observatory_groups()
         if all_groups is None or len(all_groups) == 0:
-            logger.error("Pipeline failed: Returned no groups. Cannot proceed.")
+            logger.error("Pipeline failed: Returned no groups. Cannot proceed.", exc_info=True)
             return
 
         # Filter groups if a filter is provided

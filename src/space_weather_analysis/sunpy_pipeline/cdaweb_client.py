@@ -115,9 +115,6 @@ class CdawebClient:
 
         except Exception as e:
             # hapiclient can raise various exceptions
-            logger.error(
-                f"Failed to get variables for {target_dataset} using hapiclient: {e}",
-                exc_info=True,
-            )
+            logger.error(f"Failed to get variables for {target_dataset} using hapiclient: {e}", exc_info=True)
 
         return []
