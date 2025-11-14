@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from space_weather_analysis.database.connection import DatabaseConnection
 from space_weather_analysis.etl.cme_catalog import CmeETL
 from space_weather_analysis.etl.sunspots import SilsoETL
-from space_weather_analysis.hapi_pipeline.catalog_manager import build_hapi_catalog
+from space_weather_analysis.hapi_pipeline.catalog_manager import run_catalog_build_task
 from space_weather_analysis.hapi_pipeline.hapi_pipeline import GenericHapiPipeline
 from space_weather_analysis.sunpy_pipeline.cdaweb_pipeline import CdawebPipeline
 
@@ -23,7 +23,7 @@ PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent
 DATA_ROOT = PROJECT_ROOT / "data"
 HAPI_CONFIG_DIR = DATA_ROOT / "hapi_config"
 HAPI_CATALOG_FILE = HAPI_CONFIG_DIR / "hapi_master_catalog.json"
-HAPI_SERVER_LIST_FILE = HAPI_CONFIG_DIR / "all.txt"  # Expects all.txt here
+HAPI_SERVER_LIST_FILE = HAPI_CONFIG_DIR / "all.txt"
 FIDO_DOWNLOAD_DIR = DATA_ROOT / "cdaweb_fido_downloads"
 HAPI_OUTPUT_DIR = DATA_ROOT / "hapi_streaming_output"
 
@@ -151,40 +151,40 @@ def run_local_file_etl():
 def main():
     """
     Main entry point for the application.
-
+    
     Developer: Uncomment the action(s) you wish to perform.
     """
     logger.info("--- Application Main Entry Point Started ---")
 
-    # --- Action 1: Build HAPI Master Catalog ---
-
-    logger.info("Running: HAPI Catalog Build")
-    # build_hapi_catalog(
+    # --- Action 1: Build Universal Catalog ---
+    # Run this once to create 'hapi_master_catalog.json'.
+    # This now includes HAPI AND Fido/CDAWeb sources.
+    
+    # logger.info("Running: Universal Catalog Build")
+    # run_catalog_build_task(
     #     server_list_path=HAPI_SERVER_LIST_FILE,
     #     catalog_output_path=HAPI_CATALOG_FILE,
-    #     include_test_servers=True  # Set to True to include TestData servers
+    #     include_test_servers=True # Include TestData for debugging
     # )
 
     # --- Shared Pipeline Configuration ---
-    # This config is used by both Fido and HAPI pipelines
     PIPELINE_CONFIG = {
-        # "START_TIME": datetime(2023, 11, 1, 0, 0, 0),
-        # "END_TIME": datetime(2024, 11, 2, 0, 0, 0),
-        "START_TIME": datetime(1997, 9, 3, 0, 0, 0),
-        "END_TIME": datetime(1998, 1, 1, 0, 0, 0),
-        # Config for Fido Pipeline
+        "START_TIME": datetime(1998, 1, 1, 0, 0, 0),
+        "END_TIME": datetime(1998, 1, 2, 0, 0, 0),
+        
         # "GROUP_FILTER": ["ACE"],
-        # Config for HAPI Pipeline
-        # 'WI_H1_SWE_RTN' and 'AC_H0_MFI' are from cdaweb.gsfc.nasa.gov
-        # 'ace' is from hapi-server.org/servers/SSCWeb/hapi
-        "DATASET_FILTER": ["AC_H0_MFI"],
+        
+        # This dataset is now in the catalog from two sources:
+        # 1. HAPI (from cdaweb.gsfc.nasa.gov)
+        # 2. FIDO_CDAWEB (from group "ACE")
+        "DATASET_FILTER": ["AC_OR_SSC"], 
     }
 
     # --- Action 2: Run Generic HAPI (Streaming) Pipeline ---
-    # (Requires the HAPI catalog to be built first via Action 1)
+    # This will use the new catalog and find the HAPI source for AC_H0_MFI
     #
-    logger.info("Running: Generic HAPI Pipeline")
-    run_generic_hapi_pipeline(config=PIPELINE_CONFIG)
+    # logger.info("Running: Generic HAPI Pipeline")
+    # run_generic_hapi_pipeline(config=PIPELINE_CONFIG)
 
     # --- Action 3: Run Fido (File Download) Pipeline ---
     # (This is the original CDAWeb pipeline, retained for non-HAPI sources)
