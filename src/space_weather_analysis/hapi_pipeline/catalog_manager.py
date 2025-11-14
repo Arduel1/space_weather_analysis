@@ -84,7 +84,7 @@ class UniversalCatalogManager:
                     continue
 
                 logger.info(f"Found {len(catalog)} datasets on {server_url}. Fetching info...")
-                for dataset in catalog[:100]:  # TODO: Limit to first 20 (only for testing)
+                for dataset in catalog:  # TODO: Limit to first 20 (only for testing)
                     dataset_id = dataset.get("id")
                     if not dataset_id:
                         continue
@@ -136,7 +136,7 @@ class UniversalCatalogManager:
             logger.info(f"FIDO_CDAWEB: Found {len(all_groups)} groups.")
 
             # 2. Iterate groups
-            for group_row in all_groups[:100]:  # TODO: Limit to first 20 (only for testing)
+            for group_row in all_groups:  # TODO: Limit to first 20 (only for testing)
                 group_name = group_row["Group"]
                 logger.info(f"FIDO_CDAWEB: Getting datasets for group: {group_name}")
 
@@ -221,26 +221,23 @@ class UniversalCatalogManager:
             logger.info(f"Sorting {len(self.master_catalog)} unique dataset IDs alphabetically...")
             sorted_items = sorted(
                 self.master_catalog.items(),
-                key=lambda item: item[0].lower() # Sort by lowercase key
+                key=lambda item: item[0].lower(),  # Sort by lowercase key
             )
             # Create a new dictionary that preserves this order
             sorted_master_catalog = dict(sorted_items)
 
             self.catalog_output_path.parent.mkdir(parents=True, exist_ok=True)
-            
+
             with open(self.catalog_output_path, "w", encoding="utf-8") as f:
                 # Save the sorted catalog
-                json.dump(sorted_master_catalog, f, indent=2) 
-                
-            logger.info(
-                f"Universal catalog built successfully with "
-                f"{len(self.master_catalog)} unique dataset IDs."
-            )
+                json.dump(sorted_master_catalog, f, indent=2)
+
+            logger.info(f"Universal catalog built successfully with {len(self.master_catalog)} unique dataset IDs.")
             logger.info(f"Catalog saved to: {self.catalog_output_path}")
 
         except IOError as e:
             logger.error(f"Failed to write catalog file: {e}", exc_info=True)
-        
+
         logger.info("--- Universal Catalog Build Finished ---")
 
 

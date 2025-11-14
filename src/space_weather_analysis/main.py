@@ -151,7 +151,7 @@ def run_local_file_etl():
 def main():
     """
     Main entry point for the application.
-    
+
     Developer: Uncomment the action(s) you wish to perform.
     """
     logger.info("--- Application Main Entry Point Started ---")
@@ -159,25 +159,23 @@ def main():
     # --- Action 1: Build Universal Catalog ---
     # Run this once to create 'hapi_master_catalog.json'.
     # This now includes HAPI AND Fido/CDAWeb sources.
-    
-    # logger.info("Running: Universal Catalog Build")
-    # run_catalog_build_task(
-    #     server_list_path=HAPI_SERVER_LIST_FILE,
-    #     catalog_output_path=HAPI_CATALOG_FILE,
-    #     include_test_servers=True # Include TestData for debugging
-    # )
+
+    logger.info("Running: Universal Catalog Build")
+    run_catalog_build_task(
+        server_list_path=HAPI_SERVER_LIST_FILE,
+        catalog_output_path=HAPI_CATALOG_FILE,
+        include_test_servers=True,  # Include TestData for debugging
+    )
 
     # --- Shared Pipeline Configuration ---
     PIPELINE_CONFIG = {
         "START_TIME": datetime(1998, 1, 1, 0, 0, 0),
         "END_TIME": datetime(1998, 1, 2, 0, 0, 0),
-        
         # "GROUP_FILTER": ["ACE"],
-        
         # This dataset is now in the catalog from two sources:
         # 1. HAPI (from cdaweb.gsfc.nasa.gov)
         # 2. FIDO_CDAWEB (from group "ACE")
-        "DATASET_FILTER": ["AC_OR_SSC"], 
+        "DATASET_FILTER": ["AC_OR_SSC"],
     }
 
     # --- Action 2: Run Generic HAPI (Streaming) Pipeline ---
