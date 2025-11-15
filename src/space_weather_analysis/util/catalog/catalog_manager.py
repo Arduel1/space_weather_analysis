@@ -3,7 +3,7 @@ import logging
 import pathlib
 from typing import Any, Dict, List
 
-from space_weather_analysis.catalog.abstract_discoverer import AbstractDiscoverer
+from space_weather_analysis.util.catalog.abstract_discoverer import AbstractDiscoverer
 
 logger = logging.getLogger(__name__)
 

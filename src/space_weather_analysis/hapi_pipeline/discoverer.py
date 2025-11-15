@@ -5,7 +5,7 @@ from typing import Any, Dict, Generator, List, Tuple
 from hapiclient import hapi
 from hapiclient.util import HAPIError
 
-from space_weather_analysis.catalog.abstract_discoverer import AbstractDiscoverer
+from space_weather_analysis.util.catalog.abstract_discoverer import AbstractDiscoverer
 
 logger = logging.getLogger(__name__)
 
