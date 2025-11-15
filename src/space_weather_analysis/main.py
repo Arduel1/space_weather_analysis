@@ -182,19 +182,19 @@ def main():
 
     # Build Universal Catalog
     # Run this once to create 'hapi_master_catalog.json'.
-    logger.info("Running: Universal Catalog Build")
-    run_catalog_build_task()
+    # logger.info("Running: Universal Catalog Build")
+    # run_catalog_build_task()
 
-    # --- Shared Pipeline Configuration ---
-    PIPELINE_CONFIG = {
-        "START_TIME": datetime(1998, 1, 1, 0, 0, 0),
-        "END_TIME": datetime(1998, 1, 2, 0, 0, 0),
-        # "GROUP_FILTER": ["ACE"],
-        # This dataset is now in the catalog from two sources:
-        # 1. HAPI (from cdaweb.gsfc.nasa.gov)
-        # 2. FIDO_CDAWEB (from group "ACE")
-        "DATASET_FILTER": ["AC_OR_SSC"],
-    }
+    # # --- Shared Pipeline Configuration ---
+    # PIPELINE_CONFIG = {
+    #     "START_TIME": datetime(1998, 1, 1, 0, 0, 0),
+    #     "END_TIME": datetime(1998, 1, 2, 0, 0, 0),
+    #     # "GROUP_FILTER": ["ACE"],
+    #     # This dataset is now in the catalog from two sources:
+    #     # 1. HAPI (from cdaweb.gsfc.nasa.gov)
+    #     # 2. FIDO_CDAWEB (from group "ACE")
+    #     "DATASET_FILTER": ["AC_OR_SSC"],
+    # }
 
     # --- Action 2: Run Generic HAPI (Streaming) Pipeline ---
     # This will use the new catalog and find the HAPI source for AC_H0_MFI
@@ -211,8 +211,8 @@ def main():
     # --- Action 4: Run Local ETL (CME, SILSO) ---
     # (This populates the database from local files in /data)
     #
-    # logger.info("Running: Local ETL Processes")
-    # run_local_file_etl()
+    logger.info("Running: Local ETL Processes")
+    run_local_file_etl()
 
     logger.info("--- Application Main Entry Point Finished ---")
 

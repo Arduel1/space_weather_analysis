@@ -59,6 +59,7 @@ class SilsoETL(BaseETLProcessor):
                 sep=";",
                 names=col_names,
                 dtype={"year": int, "month": int, "day": int},
+                skipinitialspace=True
             )
             logger.info(f"Extracted {len(df)} rows from CSV.")
             return df
