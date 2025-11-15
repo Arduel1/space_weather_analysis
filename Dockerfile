@@ -14,7 +14,7 @@ RUN pip install --upgrade pip && \
 COPY pyproject.toml poetry.lock ./
 
 # Install dependencies using Poetry
-RUN poetry install --only main --no-interaction --no-ansi
+RUN poetry install --only main --no-interaction --no-ansi --no-root
 
 COPY src ./src
 COPY data ./data
