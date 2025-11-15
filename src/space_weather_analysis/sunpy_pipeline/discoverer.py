@@ -1,8 +1,8 @@
 import logging
 from typing import Any, Dict, Generator, Tuple
 
-from space_weather_analysis.catalog.abstract_discoverer import AbstractDiscoverer
 from space_weather_analysis.sunpy_pipeline.cdaweb_client import CdawebClient
+from space_weather_analysis.util.catalog.abstract_discoverer import AbstractDiscoverer
 
 logger = logging.getLogger(__name__)
 
