@@ -14,8 +14,8 @@ class DatabaseConnection:
     A Singleton class to manage a single MongoDB connection.
 
     This class ensures that only one instance of the MongoClient is
-    created ("lazy loading") and provides methods to access the client
-    and a specific database.
+    created ("lazy loading") and provides class methods to access the
+    client and a specific database.
     """
 
     _client: Optional[MongoClient] = None
@@ -25,6 +25,13 @@ class DatabaseConnection:
     def _connect(cls) -> Optional[MongoClient]:
         """
         Internal method to establish the connection if it doesn't exist.
+
+        This method is called automatically by get_database() if no
+        connection is active.
+
+        Returns:
+            Optional[MongoClient]: The active MongoClient instance, or None
+                                   if connection fails.
         """
         if cls._client:
             return cls._client

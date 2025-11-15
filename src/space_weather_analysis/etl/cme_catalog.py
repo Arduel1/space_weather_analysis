@@ -1,4 +1,5 @@
 import logging
+import pathlib
 import re
 from typing import Any, Dict, List, Optional
 
@@ -6,7 +7,7 @@ import numpy as np
 import pandas as pd
 from pymongo.database import Database
 
-from .base_processor import BaseETLProcessor  # Import the base class
+from .base_processor import BaseETLProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -16,18 +17,19 @@ class CmeETL(BaseETLProcessor):
     ETL Processor for the SOHO/LASCO CME Catalog.
     """
 
-    FILE_PATH = "data/cme_catalog.txt"
     COLLECTION_NAME = "cme_catalog"
     DEFAULT_BATCH_SIZE = 5000
 
-    def __init__(self, db: Database):
+    def __init__(self, db: Database, file_path: pathlib.Path):
         """
         Initializes the CME ETL processor.
 
         Args:
             db (Database): The MongoDB database instance.
+            file_path (pathlib.Path): Path to the 'cme_catalog.txt' file.
         """
         super().__init__(db)
+        self.file_path = file_path
 
     def _extract(self) -> Optional[pd.DataFrame]:
         """
@@ -37,7 +39,11 @@ class CmeETL(BaseETLProcessor):
             Optional[pd.DataFrame]: A DataFrame containing the raw data,
                                     or None if extraction fails.
         """
-        logger.info(f"--- Starting Extract for LASCO CME: {self.FILE_PATH} ---")
+        logger.info(f"--- Starting Extract for LASCO CME: {self.file_path} ---")
+        if not self.file_path.exists():
+            logger.error(f"CME catalog file not found at: {self.file_path}")
+            return None
+
         try:
             col_names = [
                 "date",
@@ -56,7 +62,7 @@ class CmeETL(BaseETLProcessor):
             ]
 
             parsed_data = []
-            with open(self.FILE_PATH, "r") as f:
+            with open(self.file_path, "r") as f:
                 lines = f.readlines()
                 for line in lines[4:]:  # Start iterating after the header
                     line_normalized = re.sub(r"\s+", " ", line).strip()
@@ -65,16 +71,13 @@ class CmeETL(BaseETLProcessor):
                     try:
                         parts = line_normalized.split(" ", maxsplit=12)
                         if len(parts) == 12:
-                            parts.append("")
+                            parts.append("")  # Ensure remarks column exists
                         parsed_data.append(dict(zip(col_names, parts)))
                     except Exception as e:
                         logger.warning(f"Could not parse line: {line.strip()} | Error: {e}")
             df = pd.DataFrame(parsed_data)
             logger.info(f"Extracted and parsed {len(df)} rows from CME catalog.")
             return df
-        except FileNotFoundError:
-            logger.error(f"CME catalog file not found at: {self.FILE_PATH}", exc_info=True)
-            return None
         except Exception as e:
             logger.error(f"Error reading CME file: {e}", exc_info=True)
             return None
@@ -96,7 +99,7 @@ class CmeETL(BaseETLProcessor):
 
         logger.info("--- Starting Transform for CME Catalog ---")
         raw_data = raw_data.replace(r"-------", np.nan, regex=True)
-        raw_data = raw_data.replace(r"\*.*", "", regex=True)
+        raw_data = raw_data.replace(r"\*.*", "", regex=True)  # Remove annotations
 
         try:
             raw_data["timestamp"] = pd.to_datetime(
@@ -124,6 +127,8 @@ class CmeETL(BaseETLProcessor):
         ]
         for col in numeric_cols:
             raw_data[col] = pd.to_numeric(raw_data[col], errors="coerce")
+
+        # Replace NaNs with a specific value for numeric types in MongoDB
         raw_data[numeric_cols] = raw_data[numeric_cols].fillna(-1)
         raw_data["remarks"] = raw_data["remarks"].fillna("")
 

@@ -1,32 +1,24 @@
-class DataPreprocessor:
+from typing import Any, Generator, List
+
+
+def batch_generator(data_list: List[Any], batch_size: int = 5000) -> Generator[List[Any], None, None]:
     """
-    A utility class for common data preprocessing tasks, such as batching.
+    A generator function that yields data in batches.
+
+    This is used to split a large list of documents before a bulk
+    database insertion to avoid timeouts or memory issues.
+
+    Args:
+        data_list (List[Any]): The complete list of items to be batched.
+        batch_size (int): The maximum number of items to include in each
+                          batch. Defaults to 5000.
+
+    Yields:
+        Generator[List[Any], None, None]: A generator that yields
+                                          sub-lists (batches).
     """
+    if not data_list:
+        return
 
-    def __init__(self, batch_size=5000) -> None:
-        """
-        Initializes the DataPreprocessor.
-
-        Args:
-            batch_size (int, optional): The default number of items
-                                        to include in each batch.
-                                        Defaults to 5000.
-        """
-        self.batch_size = batch_size
-
-    def batch_generator(self, data_list):
-        """
-        A generator function that yields data in batches.
-
-        This is used to split a large list of documents before a bulk
-        database insertion to avoid timeouts.
-
-        Args:
-            data_list (list): The complete list of items to be batched.
-
-        Yields:
-            list: A sub-list (batch) of the original data_list of
-                  size 'self.batch_size'.
-        """
-        for i in range(0, len(data_list), self.batch_size):
-            yield data_list[i : i + self.batch_size]
+    for i in range(0, len(data_list), batch_size):
+        yield data_list[i : i + batch_size]

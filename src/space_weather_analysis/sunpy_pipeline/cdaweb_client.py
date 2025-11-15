@@ -8,7 +8,7 @@ from sunpy.net.cdaweb.helpers import get_datasets, get_observatory_groups
 
 logger = logging.getLogger(__name__)
 
-# HAPI Server URL aus der Demo
+# HAPI Server URL for CDAWeb
 HAPI_SERVER = "https://cdaweb.gsfc.nasa.gov/hapi"
 
 
@@ -24,11 +24,13 @@ class CdawebClient:
 
     def get_observatory_groups(self) -> Optional[Table]:
         """
-        Fetches all available observatory groups from CDAWeb
-        using the sunpy.net.cdaweb.helpers module.
+        Fetches all available observatory groups from CDAWeb.
+
+        Uses the sunpy.net.cdaweb.helpers module.
 
         Returns:
-            Optional[Table]: A table of observatory groups, or None on failure.
+            Optional[Table]: An astropy Table of observatory groups,
+                             or None on failure.
         """
         logger.info("Fetching all observatory groups...")
         try:
@@ -41,14 +43,15 @@ class CdawebClient:
 
     def get_datasets_for_group(self, group_name: str) -> Optional[Table]:
         """
-        Fetches all datasets for a specific observatory group
-        using the sunpy.net.cdaweb.helpers module.
+        Fetches all datasets for a specific observatory group.
+
+        Uses the sunpy.net.cdaweb.helpers module.
 
         Args:
             group_name (str): The name of the group to query.
 
         Returns:
-            Optional[Table]: A table of datasets, or None on failure.
+            Optional[Table]: An astropy Table of datasets, or None on failure.
         """
         logger.info(f"Fetching datasets for group '{group_name}'...")
         try:
@@ -61,19 +64,22 @@ class CdawebClient:
                 response_text = e.response.text
             logger.warning(
                 f"Failed for group '{group_name}'. API returned non-JSON response. "
-                f"Error: {e}. Response Text (first 100 chars): {response_text[:100]}"
+                f"Error: {e}. Response Text (first 100 chars): "
+                f"{response_text[:100]}"
             )
             return None
         except Exception as e:
-            logger.error(f"Failed to get datasets for group '{group_name}': {e}", exc_info=True)
+            logger.error(
+                f"Failed to get datasets for group '{group_name}': {e}",
+                exc_info=True,
+            )
             return None
 
     def get_variables_for_dataset(self, target_dataset: str) -> List[Dict[str, Any]]:
         """
-        Fetches variable metadata for a specific dataset ID
-        using the public CDAWeb HAPI client.
+        Fetches variable metadata for a specific dataset ID.
 
-        This avoids using private sunpy variables and manual requests.
+        Uses the public CDAWeb HAPI client to get parameter info.
 
         Args:
             target_dataset (str): The ID of the dataset (e.g., "WI_H1_SWE_RTN").
@@ -87,9 +93,7 @@ class CdawebClient:
 
         try:
             # Use hapiclient to fetch dataset metadata (info)
-            # wie in hapi_demo.py gezeigt
             meta = hapi(HAPI_SERVER, target_dataset)
-
             hapi_params = meta.get("parameters")
 
             # Normalize HAPI response to the format expected by the pipeline
@@ -115,6 +119,9 @@ class CdawebClient:
 
         except Exception as e:
             # hapiclient can raise various exceptions
-            logger.error(f"Failed to get variables for {target_dataset} using hapiclient: {e}", exc_info=True)
+            logger.error(
+                f"Failed to get variables for {target_dataset} using hapiclient: {e}",
+                exc_info=True,
+            )
 
         return []
