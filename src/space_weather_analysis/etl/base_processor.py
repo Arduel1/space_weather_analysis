@@ -6,7 +6,7 @@ import pandas as pd
 from pymongo.database import Database
 from pymongo.errors import BulkWriteError
 
-from space_weather_analysis.util.data_preprocessing import DataPreprocessor
+from space_weather_analysis.util.data_preprocessing import batch_generator
 
 logger = logging.getLogger(__name__)
 
@@ -122,15 +122,14 @@ class BaseETLProcessor(ABC):
             logger.info(f"Loading {len(documents)} documents in batches of {batch_size}...")
 
             total_inserted = 0
-            # Use the DataPreprocessor for batching
-            preprocessor = DataPreprocessor(batch_size=batch_size)
-            for i, batch in enumerate(preprocessor.batch_generator(documents)):
+            # Use the refactored batch_generator function
+            for i, batch in enumerate(batch_generator(documents, batch_size), start=1):
                 if not batch:
                     continue
 
                 collection.insert_many(batch, ordered=False)
                 total_inserted += len(batch)
-                logger.info(f"  ... inserted batch {i + 1} ({total_inserted}/{len(documents)} documents)")
+                logger.info(f"  ... inserted batch {i} ({total_inserted}/{len(documents)} documents)")
 
             logger.info(f"Data load complete. Total inserted: {total_inserted}")
 

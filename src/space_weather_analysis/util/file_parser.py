@@ -15,7 +15,18 @@ logger = logging.getLogger(__name__)
 
 
 def _get_cdf_file_metadata(cdf_file: CDF, variables_to_parse: List[str]) -> Dict[str, Any]:
-    """Helper to extract variable attributes from a single CDF file."""
+    """
+    Helper to extract variable attributes from a single CDF file.
+
+    Args:
+        cdf_file (CDF): An open cdflib.CDF file object.
+        variables_to_parse (List[str]): A list of variable names to extract
+                                        attributes for.
+
+    Returns:
+        Dict[str, Any]: A dictionary where keys are variable names and
+                        values are their attributes.
+    """
     cdf_metadata = {}
     for var in variables_to_parse:
         try:
@@ -26,7 +37,18 @@ def _get_cdf_file_metadata(cdf_file: CDF, variables_to_parse: List[str]) -> Dict
 
 
 def _get_xarray_file_metadata(ds: xr.Dataset, variables_to_parse: List[str]) -> Dict[str, Any]:
-    """Helper to extract variable attributes from an xarray Dataset."""
+    """
+    Helper to extract variable attributes from an xarray Dataset.
+
+    Args:
+        ds (xr.Dataset): An open xarray.Dataset object.
+        variables_to_parse (List[str]): A list of variable names to extract
+                                        attributes for.
+
+    Returns:
+        Dict[str, Any]: A dictionary where keys are variable names and
+                        values are their attributes.
+    """
     file_metadata = {}
     for var in variables_to_parse:
         if var in ds:
@@ -42,8 +64,15 @@ def _parse_1d_timeseries_file(
 ) -> List[sunpy.timeseries.TimeSeries]:
     """
     Attempts to parse a file using the native sunpy.timeseries.TimeSeries
-    parser. Returns a list of TimeSeries objects (usually one).
-    Returns empty list on failure.
+    parser.
+
+    Args:
+        file_path_str (str): The string path to the file.
+
+    Returns:
+        List[sunpy.timeseries.TimeSeries]: A list of valid TimeSeries objects
+                                           (usually one), or an empty
+                                           list on failure.
     """
     try:
         ts_from_file = sunpy.timeseries.TimeSeries(file_path_str)
@@ -61,7 +90,10 @@ def _parse_1d_timeseries_file(
     except NoMatchError:
         logger.info(f"Sunpy parser failed for {Path(file_path_str).name}. Will attempt xarray fallback.")
     except Exception as e:
-        logger.error(f"Failed to parse data from file {Path(file_path_str).name}: {e}", exc_info=True)
+        logger.error(
+            f"Failed to parse data from file {Path(file_path_str).name}: {e}",
+            exc_info=True,
+        )
     return []
 
 
@@ -71,6 +103,10 @@ def _handle_nd_datafile(file_path_obj: Path, variables_to_parse: List[str]) -> O
 
     This function logs the processing steps for N-D data and extracts
     metadata, but does not return TimeSeries data.
+
+    Args:
+        file_path_obj (Path): The pathlib.Path object for the file.
+        variables_to_parse (List[str]): List of variables to get metadata for.
 
     Returns:
         Optional[Dict[str, Any]]: File metadata if extracted, else None.
@@ -111,7 +147,10 @@ def _handle_nd_datafile(file_path_obj: Path, variables_to_parse: List[str]) -> O
         return file_metadata
 
     except Exception as xr_e:
-        logger.error(f"xarray/Dask processing failed for {file_path_obj.name}: {xr_e}", exc_info=True)
+        logger.error(
+            f"xarray/Dask processing failed for {file_path_obj.name}: {xr_e}",
+            exc_info=True,
+        )
         return file_metadata  # Return metadata if extracted, even on failure
     finally:
         if ds:
@@ -123,6 +162,15 @@ def _concatenate_timeseries(
 ) -> Optional[sunpy.timeseries.TimeSeries]:
     """
     Combines a list of 1D TimeSeries objects into a single, sorted TimeSeries.
+
+    Args:
+        ts_list (List[sunpy.timeseries.TimeSeries]): A list of 1D TimeSeries
+                                                     objects to combine.
+
+    Returns:
+        Optional[sunpy.timeseries.TimeSeries]: A single, combined and
+                                               sorted TimeSeries, or
+                                               None if list is empty.
     """
     if not ts_list:
         return None

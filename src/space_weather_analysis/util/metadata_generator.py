@@ -10,7 +10,7 @@ def generate_metadata_file(
     api_metadata: List[Dict[str, Any]],
     file_metadata: Dict[str, Any],
     output_dir: pathlib.Path,
-):
+) -> None:
     """
     Combines API and File metadata into a markdown document
     in the dataset's download directory.
@@ -52,7 +52,7 @@ def generate_metadata_file(
             for var_name in sorted(list(all_var_names)):
                 f.write(f"## Variable: `{var_name}`\n\n")
 
-                # 1. Get description from API
+                # Get description from API
                 api_attrs = api_meta_dict.get(var_name)
                 # Use 'LongDescription' as provided by CdawebClient
                 if api_attrs and api_attrs.get("LongDescription"):
@@ -60,7 +60,7 @@ def generate_metadata_file(
                 else:
                     f.write("**Description (API):** *N/A*\n\n")
 
-                # 2. Get attributes from File
+                # Get attributes from File
                 f.write("**File Attributes (CDF/NC):**\n\n")
                 if var_name in file_metadata and file_metadata[var_name]:
                     file_attrs = file_metadata[var_name]

@@ -1,11 +1,12 @@
 import logging
+import pathlib
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 from pymongo.database import Database
 
-from .base_processor import BaseETLProcessor  # Import the base class
+from .base_processor import BaseETLProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -15,28 +16,33 @@ class SilsoETL(BaseETLProcessor):
     ETL Processor for SILSO daily sunspot data.
     """
 
-    FILE_PATH = "data/SN_d_tot_V2.0.csv"
     COLLECTION_NAME = "silso_sunspot_daily"
     DEFAULT_BATCH_SIZE = 5000
 
-    def __init__(self, db: Database):
+    def __init__(self, db: Database, file_path: pathlib.Path):
         """
         Initializes the SILSO ETL processor.
 
         Args:
             db (Database): The MongoDB database instance.
+            file_path (pathlib.Path): Path to the 'SN_d_tot_V2.0.csv' file.
         """
-        super().__init__(db)  # Initialize the base class
+        super().__init__(db)
+        self.file_path = file_path
 
-    def _extract(self) -> pd.DataFrame | None:
+    def _extract(self) -> Optional[pd.DataFrame]:
         """
         Extracts SILSO data from the local CSV file.
 
         Returns:
-            pd.DataFrame or None: A DataFrame containing the raw data,
-                                  or None if extraction fails.
+            Optional[pd.DataFrame]: A DataFrame containing the raw data,
+                                    or None if extraction fails.
         """
-        logger.info(f"--- Starting Extract for SILSO: {self.FILE_PATH} ---")
+        logger.info(f"--- Starting Extract for SILSO: {self.file_path} ---")
+        if not self.file_path.exists():
+            logger.error(f"SILSO data file not found at: {self.file_path}")
+            return None
+
         try:
             col_names = [
                 "year",
@@ -49,16 +55,13 @@ class SilsoETL(BaseETLProcessor):
                 "indicator",
             ]
             df = pd.read_csv(
-                self.FILE_PATH,
+                self.file_path,
                 sep=";",
                 names=col_names,
                 dtype={"year": int, "month": int, "day": int},
             )
             logger.info(f"Extracted {len(df)} rows from CSV.")
             return df
-        except FileNotFoundError:
-            logger.error(f"SILSO data file not found at: {self.FILE_PATH}", exc_info=True)
-            return None
         except Exception as e:
             logger.error(f"Error reading SILSO file: {e}", exc_info=True)
             return None
@@ -83,7 +86,7 @@ class SilsoETL(BaseETLProcessor):
         raw_data["sunspot_number"] = raw_data["sunspot_number"].replace(-1, np.nan)
         # Combine year, month, and day into a single timestamp for MongoDB.
         raw_data["timestamp"] = pd.to_datetime(raw_data[["year", "month", "day"]])
-        # 'indicator' is 0 or 1,
+        # 'indicator' is 0 or 1
         raw_data["indicator"] = raw_data["indicator"].astype(bool)
 
         documents = []

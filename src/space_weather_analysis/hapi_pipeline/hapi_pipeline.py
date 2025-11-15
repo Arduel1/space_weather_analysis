@@ -4,6 +4,9 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from space_weather_analysis.hapi_pipeline.hapi_client import GenericHapiClient
+from space_weather_analysis.hapi_pipeline.hapi_converter import (
+    convert_hapi_to_timeseries,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +35,23 @@ class GenericHapiPipeline:
         if not self.output_dir.exists():
             self.output_dir.mkdir(parents=True)
 
-    def _generate_hapi_metadata_file(self, meta: Dict[str, Any], start_time: datetime, stop_time: datetime, dataset_id: str, output_path: pathlib.Path):
+    def _generate_hapi_metadata_file(
+        self,
+        meta: Dict[str, Any],
+        start_time: datetime,
+        stop_time: datetime,
+        dataset_id: str,
+        output_path: pathlib.Path,
+    ):
         """
         Generates a markdown metadata file directly from HAPI metadata.
 
+        Args:
+            meta (Dict[str, Any]): The metadata from the HAPI client.
+            start_time (datetime): The requested pipeline start time.
+            stop_time (datetime): The requested pipeline stop time.
+            dataset_id (str): The target dataset ID.
+            output_path (pathlib.Path): The path to write the .md file to.
         """
         if output_path.exists():
             logger.info(f"Metadata document {output_path} already exists. Skipping.")
@@ -45,7 +61,6 @@ class GenericHapiPipeline:
         try:
             with open(output_path, "w", encoding="utf-8") as f:
                 f.write(f"# Metadata for Dataset: {dataset_id}\n\n")
-                # 'x_server_url' is now added by the client
                 f.write(f"**Source HAPI Server:** {meta.get('x_server_url', 'N/A')}\n")
                 f.write(f"**Start Date:** {start_time}\n")
                 f.write(f"**Stop Date:** {stop_time}\n")
@@ -110,8 +125,8 @@ class GenericHapiPipeline:
                     )
                     continue
 
-                # 2. Convert to TimeSeries
-                ts = self.client.convert_hapi_to_timeseries(data, meta)
+                # Convert to TimeSeries (using the imported converter)
+                ts = convert_hapi_to_timeseries(data, meta)
                 if ts:
                     logger.info(
                         f"Successfully converted {dataset_id} data to "
@@ -120,7 +135,7 @@ class GenericHapiPipeline:
                 else:
                     logger.warning(f"Failed to convert {dataset_id} to TimeSeries.")
 
-                # 3. Generate metadata document
+                # Generate metadata document
                 dataset_output_dir = self.output_dir / dataset_id
                 dataset_output_dir.mkdir(parents=True, exist_ok=True)
                 output_path = dataset_output_dir / f"{dataset_id}_metadata.md"

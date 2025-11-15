@@ -15,27 +15,21 @@ from space_weather_analysis.util.metadata_generator import generate_metadata_fil
 
 logger = logging.getLogger(__name__)
 
-# Define the root of the project (assuming this file is in space_weather_pipeline/data_pipeline)
-PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent
-# Define the base directory for all CDAWeb downloads
-BASE_DOWNLOAD_DIR = PROJECT_ROOT / "data"
-
 
 class CdawebPipeline:
     """
     Orchestrates the end-to-end process of fetching, downloading, parsing,
-    and documenting data from the CDAWeb service.
+    and documenting data from the CDAWeb service using Fido.
     """
 
-    def __init__(self, base_data_path: pathlib.Path = BASE_DOWNLOAD_DIR):
+    def __init__(self, base_data_path: pathlib.Path):
         """
         Initializes the pipeline.
 
         Args:
-            base_data_path (pathlib.Path, optional):
-                The root directory where all downloaded data and
-                metadata files will be stored.
-                Defaults to BASE_DOWNLOAD_DIR.
+            base_data_path (pathlib.Path): The root directory where all
+                                           downloaded data and metadata
+                                           files will be stored.
         """
         self.client = CdawebClient()
         self.base_data_dir = base_data_path
@@ -71,8 +65,7 @@ class CdawebPipeline:
         logger.info(f"Searching Fido for '{target_dataset}'...")
 
         try:
-            # Define the download path but do not create it.
-            # Parfive (used by Fido) will create it only if files are found.
+            # Define the download path. Parfive will create it.
             specific_download_dir = self.base_data_dir / group_name / target_dataset
 
             time_query = a.Time(start_time, end_time)
@@ -86,7 +79,7 @@ class CdawebPipeline:
 
             logger.info(f"Fido found results. Downloading files to: {specific_download_dir}")
 
-            file_results: ParfiveResults = Fido.fetch(query_response, path=specific_download_dir / "{file}")
+            file_results: ParfiveResults = Fido.fetch(query_response, path=str(specific_download_dir / "{file}"))
 
             downloaded_file_paths = [str(fp) for fp in file_results.data]
 
@@ -107,17 +100,26 @@ class CdawebPipeline:
         group_name: str,
         start_time: datetime,
         end_time: datetime,
-    ):
+    ) -> None:
         """
         Runs the full pipeline (API metadata, download, parse, docgen)
         for a single dataset.
+
+        Args:
+            dataset_id (str): The dataset ID to process.
+            group_name (str): The group name (for the download path).
+            start_time (datetime): The start time for the data query.
+            end_time (datetime): The end time for the data query.
         """
         logger.info(f"--- Processing Dataset: {dataset_id} ---")
         try:
             # Get API metadata (variables)
             api_metadata = self.client.get_variables_for_dataset(dataset_id)
             if not api_metadata:
-                logger.error(f"Cannot proceed with {dataset_id}: No API metadata found.", exc_info=True)
+                logger.error(
+                    f"Cannot proceed with {dataset_id}: No API metadata found.",
+                    exc_info=True,
+                )
                 return  # Skip this dataset
 
             # Search and download data
@@ -164,9 +166,17 @@ class CdawebPipeline:
         start_time: datetime,
         end_time: datetime,
         dataset_filter: Optional[List[str]] = None,
-    ):
+    ) -> None:
         """
         Fetches and processes all datasets within a single group.
+
+        Args:
+            group_row (Dict[str, Any]): A dictionary representing a row
+                                        from the observatory groups table.
+            start_time (datetime): The start time for the data query.
+            end_time (datetime): The end time for the data query.
+            dataset_filter (Optional[List[str]]): A list of specific
+                                                  dataset IDs to process.
         """
         group_name = group_row["Group"]
         logger.info(f"===== Processing Group: {group_name} =====")
@@ -185,8 +195,6 @@ class CdawebPipeline:
             dataset_id = dataset_row["Id"]
 
             # --- Dataset Filter Logic ---
-            # If a dataset_filter is provided and this dataset_id
-            # is not in the filter, skip it.
             if dataset_filter and dataset_id not in dataset_filter:
                 logger.debug(f"Skipping {dataset_id} (not in dataset_filter).")
                 continue
@@ -202,7 +210,7 @@ class CdawebPipeline:
         end_time: datetime,
         group_filter: Optional[List[str]] = None,
         dataset_filter: Optional[List[str]] = None,
-    ):
+    ) -> None:
         """
         Runs the complete data pipeline orchestration.
 
@@ -230,20 +238,19 @@ class CdawebPipeline:
         logger.info(f"Data Root: {self.base_data_dir}")
         logger.info("=========================================")
 
-        # Get all groups
         all_groups = self.client.get_observatory_groups()
         if all_groups is None or len(all_groups) == 0:
-            logger.error("Pipeline failed: Returned no groups. Cannot proceed.", exc_info=True)
+            logger.error(
+                "Pipeline failed: Returned no groups. Cannot proceed.",
+                exc_info=True,
+            )
             return
 
-        # Filter groups if a filter is provided
+        # Filter groups
         if group_filter:
             logger.info(f"Filtering {len(all_groups)} total groups to {len(group_filter)} requested.")
             groups_to_test = [g for g in all_groups if g["Group"] in group_filter]
         elif dataset_filter:
-            # If *only* a dataset filter is provided, we still need to
-            # iterate all groups to find which group a dataset belongs to.
-            # A future optimization could map dataset IDs to groups first.
             logger.info(f"Processing all {len(all_groups)} groups to find specific datasets...")
             groups_to_test = all_groups
         else:

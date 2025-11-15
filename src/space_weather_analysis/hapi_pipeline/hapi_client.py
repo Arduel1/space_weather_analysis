@@ -4,10 +4,8 @@ import pathlib
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-import pandas as pd
-import sunpy.timeseries
+import numpy as np
 from hapiclient import hapi
-from hapiclient.hapitime import hapitime2datetime
 from hapiclient.util import HAPIError
 
 logger = logging.getLogger(__name__)
@@ -16,7 +14,15 @@ logger = logging.getLogger(__name__)
 def _parse_hapi_time(time_str: str) -> datetime:
     """
     Safely parses HAPI ISO time strings.
+
     Ensures the resulting datetime is always timezone-aware (UTC).
+
+    Args:
+        time_str (str): The HAPI ISO time string.
+
+    Returns:
+        datetime: A timezone-aware datetime object. Returns datetime.min
+                  in UTC if parsing fails.
     """
     try:
         if time_str.endswith("Z"):
@@ -41,7 +47,19 @@ def _calculate_time_intersection(
 ) -> Optional[Tuple[datetime, datetime]]:
     """
     Calculates the overlapping time range (intersection).
+
     Requires all inputs to be timezone-aware.
+
+    Args:
+        config_start (datetime): Desired start time (aware).
+        config_stop (datetime): Desired stop time (aware).
+        server_start (datetime): Server available start time (aware).
+        server_stop (datetime): Server available stop time (aware).
+
+    Returns:
+        Optional[Tuple[datetime, datetime]]: The (start, stop) of the
+                                             overlapping period, or None
+                                             if no overlap.
     """
     valid_start = max(config_start, server_start)
     valid_stop = min(config_stop, server_stop)
@@ -63,7 +81,8 @@ class GenericHapiClient:
         Initializes the client.
 
         Args:
-            catalog_path (pathlib.Path): Path to the 'hapi_master_catalog.json'.
+            catalog_path (pathlib.Path): Path to the
+                                         'hapi_master_catalog.json'.
         """
         self.catalog_map = self._load_catalog(catalog_path)
         if self.catalog_map:
@@ -86,6 +105,12 @@ class GenericHapiClient:
         """
         Finds the list of catalog entries (servers and time ranges)
         for a given dataset ID.
+
+        Args:
+            dataset_id (str): The dataset ID to find.
+
+        Returns:
+            Optional[List[Dict[str, Any]]]: A list of server entries, or None.
         """
         entries = self.catalog_map.get(dataset_id)
         if not entries:
@@ -98,7 +123,7 @@ class GenericHapiClient:
         config_start: datetime,
         config_stop: datetime,
         parameters: Optional[List[str]] = None,
-    ) -> Tuple[Optional[Any], Optional[Dict[str, Any]]]:
+    ) -> Tuple[Optional[np.ndarray], Optional[Dict[str, Any]]]:
         """
         Fetches both data and metadata from the correct HAPI server.
 
@@ -113,7 +138,7 @@ class GenericHapiClient:
             parameters (Optional[List[str]]): Specific parameters to fetch.
 
         Returns:
-            Tuple[Optional[Any], Optional[Dict[str, Any]]]:
+            Tuple[Optional[np.ndarray], Optional[Dict[str, Any]]]:
                 - The data as a NumPy structured array.
                 - The metadata dictionary (with 'x_server_url' added).
                 Returns (None, None) if all fallbacks fail.
@@ -134,7 +159,7 @@ class GenericHapiClient:
                 logger.warning("Skipping entry: catalog entry is incomplete.")
                 continue
 
-            # --- 1. Check Time Intersection ---
+            # Check Time Intersection
             server_start = _parse_hapi_time(time_range.get("start_time"))
             server_stop = _parse_hapi_time(time_range.get("end_time"))
 
@@ -149,7 +174,7 @@ class GenericHapiClient:
             valid_start, valid_stop = valid_range
             logger.info(f"Requesting valid intersection: {valid_start} to {valid_stop}")
 
-            # --- 2. Attempt Data Download ---
+            # Attempt Data Download
             try:
                 start_str = valid_start.isoformat(timespec="seconds").replace("+00:00", "Z")
                 stop_str = valid_stop.isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -158,21 +183,21 @@ class GenericHapiClient:
 
                 data, meta = hapi(server_url, dataset_id, params_str, start_str, stop_str, logging=True)
 
-                # Success!
                 logger.info(f"Successfully fetched {dataset_id} from {server_url}")
                 meta["x_server_url"] = server_url  # Add provenance
                 return data, meta
 
             except HAPIError as e:
                 logger.error(
-                    f"HAPI data request failed for {dataset_id} at {server_url}. Server responded: {e}", exc_info=True
+                    f"HAPI data request failed for {dataset_id} at {server_url}. Server responded: {e}",
+                    exc_info=True,
                 )
                 # Continue to the next server (fallback)
             except Exception as e:
                 logger.error(
-                    f"Unexpected error during HAPI request for {dataset_id} from {server_url}: {e}", exc_info=True
+                    f"Unexpected error during HAPI request for {dataset_id} from {server_url}: {e}",
+                    exc_info=True,
                 )
-                # Continue to the next server (fallback)
 
         logger.error(f"All fallbacks failed for dataset '{dataset_id}'.")
         return None, None
@@ -208,49 +233,3 @@ class GenericHapiClient:
 
         logger.error(f"Could not retrieve metadata for {dataset_id} from any server.")
         return None
-
-    @staticmethod
-    def convert_hapi_to_timeseries(data: Any, meta: Dict[str, Any]) -> Optional[sunpy.timeseries.TimeSeries]:
-        """
-        Converts a HAPI NumPy array and metadata into a
-        sunpy.timeseries.TimeSeries object.
-        """
-        if data is None or meta is None or len(data) == 0:
-            logger.warning("Cannot convert empty data to TimeSeries.")
-            return None
-
-        try:
-            # 1. Convert time
-            time_values = hapitime2datetime(data["Time"])
-            df = pd.DataFrame(index=pd.Index(time_values, name="Time"))
-
-            # 2. Process parameters
-            for param in meta.get("parameters", []):
-                param_name = param.get("name")
-                if param_name == "Time" or param_name not in data.dtype.names:
-                    continue
-
-                param_data = data[param_name]
-                param_size = param.get("size")
-
-                if param_size:
-                    # Array parameter (e.g., vector) -> split into columns
-                    if len(param_data.shape) == 2 and param_data.shape[1] == param_size[0]:
-                        labels = param.get("label")
-                        if isinstance(labels, list) and len(labels) == param_size[0]:
-                            col_names = [f"{param_name}_{l}" for l in labels]
-                        else:
-                            col_names = [f"{param_name}_{i}" for i in range(param_size[0])]
-
-                        df_param = pd.DataFrame(param_data, index=df.index, columns=col_names)
-                        df = pd.concat([df, df_param], axis=1)
-                else:
-                    # Scalar parameter
-                    df[param_name] = param_data
-
-            # 3. Convert to TimeSeries object
-            return sunpy.timeseries.TimeSeries(df, meta)
-
-        except Exception as e:
-            logger.error(f"Failed to convert HAPI data to TimeSeries: {e}", exc_info=True)
-            return None

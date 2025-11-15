@@ -6,33 +6,35 @@ from datetime import datetime
 from typing import Any, Dict
 
 from dotenv import load_dotenv
+from space_weather_analysis.config import (
+    CME_CATALOG_FILE,
+    FIDO_DOWNLOAD_DIR,
+    CATALOG_FILE,
+    HAPI_OUTPUT_DIR,
+    HAPI_SERVER_LIST_FILE,
+    PROJECT_ROOT,
+    SILSO_FILE,
+)
 
-# --- Local ETL Imports ---
+
 from space_weather_analysis.database.connection import DatabaseConnection
 from space_weather_analysis.etl.cme_catalog import CmeETL
 from space_weather_analysis.etl.sunspots import SilsoETL
-from space_weather_analysis.hapi_pipeline.catalog_manager import run_catalog_build_task
 from space_weather_analysis.hapi_pipeline.hapi_pipeline import GenericHapiPipeline
 from space_weather_analysis.sunpy_pipeline.cdaweb_pipeline import CdawebPipeline
+from space_weather_analysis.catalog.catalog_manager import UniversalCatalogManager
+from space_weather_analysis.hapi_pipeline.discoverer import HapiDiscoverer
+from space_weather_analysis.sunpy_pipeline.discoverer import FidoCdawebDiscoverer
 
-# Load environment variables (e.g., for database credentials)
+
+# Load environment variables
 load_dotenv()
 
-# --- Global Path Definitions ---
-PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent
-DATA_ROOT = PROJECT_ROOT / "data"
-HAPI_CONFIG_DIR = DATA_ROOT / "hapi_config"
-HAPI_CATALOG_FILE = HAPI_CONFIG_DIR / "hapi_master_catalog.json"
-HAPI_SERVER_LIST_FILE = HAPI_CONFIG_DIR / "all.txt"
-FIDO_DOWNLOAD_DIR = DATA_ROOT / "cdaweb_fido_downloads"
-HAPI_OUTPUT_DIR = DATA_ROOT / "hapi_streaming_output"
-
-
-# --- Logging Configuration ---
+# Logging Configuration
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
-    handlers=[logging.FileHandler(PROJECT_ROOT / "pipeline.log", mode="w"), logging.StreamHandler(sys.stdout)],
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
 
@@ -63,7 +65,7 @@ def run_fido_file_pipeline(config: Dict[str, Any]):
 
     start_run_time = time.time()
     try:
-        # Pass the specific download path to the pipeline
+        # Pass the specific download path (from config) to the pipeline
         pipeline = CdawebPipeline(base_data_path=FIDO_DOWNLOAD_DIR)
         pipeline.run(
             start_time=start_time,
@@ -73,7 +75,7 @@ def run_fido_file_pipeline(config: Dict[str, Any]):
         )
 
     except Exception as e:
-        logger.critical(f"Fido Pipeline failed: {e}")
+        logger.critical(f"Fido Pipeline failed: {e}", exc_info=True)
     finally:
         end_run_time = time.time()
         total_time = end_run_time - start_run_time
@@ -102,20 +104,21 @@ def run_generic_hapi_pipeline(config: Dict[str, Any]):
     logger.info("Starting Generic HAPI Pipeline")
     logger.info(f"Time Range: {start_time} to {end_time}")
     logger.info(f"Datasets: {datasets_to_process}")
-    logger.info(f"Catalog File: {HAPI_CATALOG_FILE}")
+    logger.info(f"Catalog File: {CATALOG_FILE}")
     logger.info(f"Output Path: {HAPI_OUTPUT_DIR}")
     logger.info("=========================================")
 
     start_run_time = time.time()
     try:
-        pipeline = GenericHapiPipeline(catalog_path=HAPI_CATALOG_FILE, base_output_dir=HAPI_OUTPUT_DIR)
+        # Pass config paths to the pipeline
+        pipeline = GenericHapiPipeline(catalog_path=CATALOG_FILE, base_output_dir=HAPI_OUTPUT_DIR)
         pipeline.run(
             datasets_to_process=datasets_to_process,
             start_time=start_time,
             stop_time=end_time,
         )
     except Exception as e:
-        logger.critical(f"HAPI Pipeline failed: {e}")
+        logger.critical(f"HAPI Pipeline failed: {e}", exc_info=True)
     finally:
         end_run_time = time.time()
         total_time = end_run_time - start_run_time
@@ -134,38 +137,57 @@ def run_local_file_etl():
 
     logger.info(f"Successfully connected to database: {db.name}")
 
-    # Run ETL processes sequentially
-    SilsoETL(db).run()
-    CmeETL(db).run()
-
     try:
+        # Run ETL processes sequentially, injecting the file paths from config
+        SilsoETL(db, file_path=SILSO_FILE).run()
+        CmeETL(db, file_path=CME_CATALOG_FILE).run()
+
         collections = db.list_collection_names()
         logger.info(f"Current collections: {collections}")
     except Exception as e:
-        logger.error(f"Error listing collections: {e}", exc_info=True)
+        logger.error(f"Error during local ETL: {e}", exc_info=True)
     finally:
         DatabaseConnection.close()
         logger.info("--- Local ETL Application finished ---")
 
 
+def run_catalog_build_task():
+    """
+    Initializes and runs the universal catalog build process.
+
+    This function instantiates the required discoverer strategies
+    and injects them into the UniversalCatalogManager.
+    """
+    logger.info("--- Running: Universal Catalog Build ---")
+
+    # Instantiate the concrete discoverer strategies
+    hapi_discoverer = HapiDiscoverer(
+        server_list_path=HAPI_SERVER_LIST_FILE,
+        include_test_servers=True,  # Include TestData for debugging
+    )
+    fido_discoverer = FidoCdawebDiscoverer()
+
+    # Create the list of discoverers to inject
+    discoverers = [hapi_discoverer, fido_discoverer]
+
+    # Instantiate the manager with the discoverers
+    manager = UniversalCatalogManager(discoverers=discoverers, catalog_output_path=CATALOG_FILE)
+
+    # Run the build process
+    manager.build_catalog()
+    logger.info("--- Finished: Universal Catalog Build ---")
+
+
 def main():
     """
     Main entry point for the application.
-
-    Developer: Uncomment the action(s) you wish to perform.
     """
     logger.info("--- Application Main Entry Point Started ---")
 
-    # --- Action 1: Build Universal Catalog ---
+    # Build Universal Catalog
     # Run this once to create 'hapi_master_catalog.json'.
-    # This now includes HAPI AND Fido/CDAWeb sources.
-
     logger.info("Running: Universal Catalog Build")
-    run_catalog_build_task(
-        server_list_path=HAPI_SERVER_LIST_FILE,
-        catalog_output_path=HAPI_CATALOG_FILE,
-        include_test_servers=True,  # Include TestData for debugging
-    )
+    run_catalog_build_task()
 
     # --- Shared Pipeline Configuration ---
     PIPELINE_CONFIG = {
