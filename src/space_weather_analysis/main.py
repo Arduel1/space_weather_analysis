@@ -1,31 +1,27 @@
 import logging
-import pathlib
 import sys
 import time
 from datetime import datetime
 from typing import Any, Dict
 
 from dotenv import load_dotenv
+
 from space_weather_analysis.config import (
+    CATALOG_FILE,
     CME_CATALOG_FILE,
     FIDO_DOWNLOAD_DIR,
-    CATALOG_FILE,
     HAPI_OUTPUT_DIR,
     HAPI_SERVER_LIST_FILE,
-    PROJECT_ROOT,
     SILSO_FILE,
 )
-
-
 from space_weather_analysis.database.connection import DatabaseConnection
 from space_weather_analysis.etl.cme_catalog import CmeETL
 from space_weather_analysis.etl.sunspots import SilsoETL
+from space_weather_analysis.hapi_pipeline.discoverer import HapiDiscoverer
 from space_weather_analysis.hapi_pipeline.hapi_pipeline import GenericHapiPipeline
 from space_weather_analysis.sunpy_pipeline.cdaweb_pipeline import CdawebPipeline
-from space_weather_analysis.catalog.catalog_manager import UniversalCatalogManager
-from space_weather_analysis.hapi_pipeline.discoverer import HapiDiscoverer
 from space_weather_analysis.sunpy_pipeline.discoverer import FidoCdawebDiscoverer
-
+from space_weather_analysis.util.catalog.catalog_manager import UniversalCatalogManager
 
 # Load environment variables
 load_dotenv()
