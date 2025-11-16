@@ -49,8 +49,6 @@ class MongoLoaderBase(ABC):
         if collection_name not in self.db.list_collection_names():
             logger.info(f"Creating new time series collection: {collection_name}")
 
-            # Define defaults and merge with user-provided options
-            # This avoids mutating the input dict (a side effect)
             options: Dict[str, Any] = {"granularity": "seconds"}
             options.update(timeseries_options)
 
@@ -70,7 +68,7 @@ class MongoLoaderBase(ABC):
         collection_name: str,
         documents: List[Dict[str, Any]],
         batch_size: Optional[int] = None,
-        clear_collection: bool = True,
+        clear_collection: bool = False,
     ) -> None:
         """
         Handles the "Load" step by inserting documents in batches.
@@ -79,8 +77,9 @@ class MongoLoaderBase(ABC):
             collection_name (str): The name of the collection to load into.
             documents (List[Dict[str, Any]]): A list of documents to insert.
             batch_size (Optional[int]): The number of documents per batch.
-            clear_collection (bool): If True, clears all existing data
+            clear_collection (bool): If True, clears ALL existing data
                                      in the collection before loading.
+                                     Defaults to False (Append).
         """
         if not documents:
             logger.info(f"No documents to load for collection '{collection_name}'.")
@@ -91,8 +90,7 @@ class MongoLoaderBase(ABC):
 
         try:
             if clear_collection:
-                # Clear the collection to ensure the ETL process is idempotent
-                logger.info(f"Clearing existing data in {collection_name}...")
+                logger.warning(f"Clearing ALL existing data in {collection_name} (clear_collection=True)...")
                 collection.delete_many({})
 
             logger.info(
@@ -104,8 +102,6 @@ class MongoLoaderBase(ABC):
                 if not batch:
                     continue
 
-                # Use ordered=False to increase performance; the insert operation
-                # will not stop if one document in the batch fails.
                 collection.insert_many(batch, ordered=False)
                 total_inserted += len(batch)
                 logger.info(f"  ... inserted batch {i} ({total_inserted}/{len(documents)} documents)")

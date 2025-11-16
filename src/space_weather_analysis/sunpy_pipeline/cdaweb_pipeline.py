@@ -214,8 +214,6 @@ class CdawebPipeline(MongoLoaderBase):
         """
         Safely parses the timestamp from an xarray slice.
 
-        Handles scalar datetimes, array-like objects, and masked values.
-
         Args:
             ts_slice (xr.Dataset): The single time-slice of the dataset.
             time_coord (str): The name of the time coordinate.
@@ -271,15 +269,12 @@ class CdawebPipeline(MongoLoaderBase):
         """
         Generator to convert an N-D Dataset into MongoDB documents.
 
-        Large N-D data payloads are serialized and stored in GridFS.
-
         Args:
             ds (xr.Dataset): The dataset to process.
             source_info (str): A string identifying the data source.
             time_dim (str): The name of the time dimension.
             time_coord (str): The name of the time coordinate.
-            collection_name (str): The name of the target MongoDB collection
-                                   (used for metadata in GridFS).
+            collection_name (str): The name of the target MongoDB collection.
 
         Yields:
             Generator[Dict[str, Any], None, None]:
@@ -348,39 +343,8 @@ class CdawebPipeline(MongoLoaderBase):
         df_to_load: pd.DataFrame = data_object.to_dataframe()
         documents: List[Dict[str, Any]] = self._transform_dataframe_to_docs(df_to_load, source_id)
 
-        # Set clear_collection=False to append data from chunks
-        self._load_data(collection_name, documents, clear_collection=False)
+        self._load_data(collection_name, documents)
         logger.info(f"Successfully loaded {len(documents)} documents into collection '{collection_name}'")
-
-    def _clear_stale_gridfs_data(self, collection_name: str) -> None:
-        """
-        Clears all GridFS files and chunks associated with a collection.
-
-        This method finds all files in 'fs.files' matching the
-        'metadata.collection' field and deletes them along with their
-        corresponding 'fs.chunks'.
-
-        Args:
-            collection_name (str): The name of the collection to clear.
-        """
-        logger.info(f"Clearing existing data and stale GridFS files for {collection_name}...")
-        try:
-            old_files = self.db["fs.files"].find({"metadata.collection": collection_name})
-            old_ids: List[ObjectId] = [f["_id"] for f in old_files]
-
-            if old_ids:
-                logger.info(f"Deleting {len(old_ids)} old GridFS chunks from 'fs.chunks'...")
-                self.db["fs.chunks"].delete_many({"files_id": {"$in": old_ids}})
-                self.db["fs.files"].delete_many({"_id": {"$in": old_ids}})
-                logger.info("Old GridFS files deleted.")
-
-            # Also clear the main collection itself
-            self.db[collection_name].delete_many({})
-        except Exception as e:
-            logger.error(
-                f"Error clearing stale GridFS data for {collection_name}: {e}",
-                exc_info=True,
-            )
 
     def _load_nd_data_to_gridfs(
         self,
@@ -404,7 +368,6 @@ class CdawebPipeline(MongoLoaderBase):
         logger.info(f"N-D data for {collection_name} is parsed. Storing payloads in GridFS...")
         opened_datasets.extend([ds for ds, _, _ in data_object])
 
-        # Data is cleared once in the `run` method, not here.
         total_loaded = 0
         n_files = len(data_object)
         logger.info(f"Starting file processing for {n_files} files (sequentially)...")
@@ -429,7 +392,6 @@ class CdawebPipeline(MongoLoaderBase):
                         self._load_data(
                             collection_name,
                             documents_batch,
-                            clear_collection=False,  # Append chunks
                         )
                         total_loaded += len(documents_batch)
                         logger.info(f"    -> ... batch loaded. Total docs so far: {total_loaded}")
@@ -439,7 +401,6 @@ class CdawebPipeline(MongoLoaderBase):
                     self._load_data(
                         collection_name,
                         documents_batch,
-                        clear_collection=False,  # Append final batch
                     )
                     total_loaded += len(documents_batch)
                     logger.info(f"    -> ... final batch loaded. Total docs so far: {total_loaded}")
@@ -513,7 +474,6 @@ class CdawebPipeline(MongoLoaderBase):
                 source_id = f"{FIDO_CDAWEB_SOURCE_ID}/{group_name}"
 
                 if data_object is not None:
-                    # Collection is ensured once in the `run` method.
                     if isinstance(data_object, GenericTimeSeries):
                         self._handle_1d_data(data_object, collection_name, source_id)
                     elif isinstance(data_object, list):
@@ -560,8 +520,7 @@ class CdawebPipeline(MongoLoaderBase):
 
         This method iterates through the specified time range in 7-day
         chunks to avoid failures on large requests with data gaps.
-        It also handles the one-time clearing of data for 1D and N-D
-        datasets before processing chunks.
+        It checks if data for a chunk already exists before fetching.
 
         Args:
             datasets_to_process (List[str]): A list of dataset IDs to fetch.
@@ -585,6 +544,8 @@ class CdawebPipeline(MongoLoaderBase):
 
         chunk_delta = timedelta(days=7)
         time_chunks = generate_time_chunks(start_time, end_time, chunk_delta)
+        time_field = "timestamp"  # The field to check for existence
+
         logger.info(f"Time range {start_time} to {end_time} split into {len(time_chunks)} chunk(s).")
 
         for dataset_id in datasets_to_process:
@@ -596,24 +557,28 @@ class CdawebPipeline(MongoLoaderBase):
                 )
                 continue
 
-            # --- One-Time Setup per Dataset ---
             collection_name = sanitize_collection_name(dataset_id)
+            collection = self.db[collection_name]
 
-            # Ensure collection exists
             self._ensure_timeseries_collection(
                 collection_name,
-                time_field="timestamp",
+                time_field=time_field,
                 meta_field="metadata",
             )
 
-            # Clear all old data (1D and N-D) for this dataset ONCE.
-            # This makes the chunk-loop an "append" operation.
-            logger.info(f"Preparing collection '{collection_name}' by clearing all existing data.")
-            self._clear_stale_gridfs_data(collection_name)
-
             logger.info(f"Processing dataset {dataset_id} (group {group_name}) for all {len(time_chunks)} chunks...")
             for i, (chunk_start, chunk_stop) in enumerate(time_chunks):
-                logger.info(f"  -> Processing chunk {i + 1}/{len(time_chunks)}: {chunk_start} to {chunk_stop}")
+                logger.info(f"  -> Checking chunk {i + 1}/{len(time_chunks)}: {chunk_start} to {chunk_stop}")
+
+                # Check if data for this chunk already exists
+                query = {time_field: {"$gte": chunk_start, "$lt": chunk_stop}}
+                exists = collection.find_one(query, {"_id": 1})
+
+                if exists:
+                    logger.info("Skipping chunk: Data already exists in DB.")
+                    continue
+
+                logger.info("Processing chunk: No data found in DB.")
                 self._process_dataset(dataset_id, group_name, chunk_start, chunk_stop)
 
         logger.info("=========================================")

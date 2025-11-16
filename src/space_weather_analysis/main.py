@@ -42,8 +42,8 @@ def main() -> None:
     # --- Test Configurations ---
     # Define specific configurations for pipeline tests.
     hapi_test_config = {
-        "START_TIME": datetime(2015, 3, 1, 0, 0, 0),
-        "END_TIME": datetime(2016, 5, 30, 0, 0, 0),
+        "START_TIME": datetime(2008, 3, 1, 0, 0, 0),
+        "END_TIME": datetime(2017, 5, 30, 0, 0, 0),
         "DATASET_FILTER": ["a02/baseline_all/PT1M/NEZ"],
     }
     fido_test_config = { 

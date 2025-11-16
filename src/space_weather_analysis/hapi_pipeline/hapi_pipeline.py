@@ -177,7 +177,6 @@ class GenericHapiPipeline(MongoLoaderBase):
         """
         logger.info(f"--- Processing Dataset Chunk: {dataset_id} ---")
         try:
-            # config_start and config_stop are now chunk-sized
             data, meta = self.client.get_data_and_meta(dataset_id, config_start, config_stop)
 
             if data is None or meta is None:
@@ -191,8 +190,6 @@ class GenericHapiPipeline(MongoLoaderBase):
 
             if ts:
                 self._load_data_to_db(ts, dataset_id, meta)
-                # Metadata is saved idempotently (upsert), so it's safe
-                # to call this on every chunk that returns data.
                 self._save_metadata_to_db(meta, dataset_id)
             else:
                 logger.warning(f"Failed to convert {dataset_id} to TimeSeries. Cannot load to DB.")
@@ -216,6 +213,7 @@ class GenericHapiPipeline(MongoLoaderBase):
 
         This method iterates through the specified time range in 7-day
         chunks to avoid failures on large requests with data gaps.
+        It checks if data for a chunk already exists before fetching.
 
         Args:
             datasets_to_process (List[str]): A list of dataset IDs to fetch.
@@ -233,15 +231,35 @@ class GenericHapiPipeline(MongoLoaderBase):
 
         chunk_delta = timedelta(days=7)
         time_chunks = generate_time_chunks(config_start, config_stop, chunk_delta)
+        time_field = "timestamp"  # The field to check for existence
 
         logger.info(f"Time range {config_start} to {config_stop} split into {len(time_chunks)} chunk(s).")
 
         for dataset_id in datasets_to_process:
             logger.info(f"Processing dataset {dataset_id} for all {len(time_chunks)} chunks...")
 
+            collection_name = sanitize_collection_name(dataset_id)
+            collection = self.db[collection_name]
+
+            # Ensure collection exists
+            self._ensure_timeseries_collection(
+                collection_name,
+                time_field=time_field,
+                meta_field="metadata",
+            )
+
             for i, (chunk_start, chunk_stop) in enumerate(time_chunks):
-                logger.info(f"  -> Processing chunk {i + 1}/{len(time_chunks)}: {chunk_start} to {chunk_stop}")
-                # _process_dataset logs its own errors and continues
+                logger.info(f"  -> Checking chunk {i + 1}/{len(time_chunks)}: {chunk_start} to {chunk_stop}")
+
+                # Check if data for this chunk already exists
+                query = {time_field: {"$gte": chunk_start, "$lt": chunk_stop}}
+                exists = collection.find_one(query, {"_id": 1})
+
+                if exists:
+                    logger.info("Skipping chunk: Data already exists in DB.")
+                    continue
+
+                logger.info("Processing chunk: No data found in DB.")
                 self._process_dataset(dataset_id, chunk_start, chunk_stop)
 
         logger.info(f"--- Generic {HAPI_SOURCE_ID} Pipeline Finished ---")
