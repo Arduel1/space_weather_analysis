@@ -236,14 +236,14 @@ class Application:
         else:
             logger.warning("No HAPI test configuration found. Skipping.")
 
-        # fido_config = self.test_configs.get("fido_config")
-        # if fido_config:
-        #     logger.info(
-        #         f"--- [Test 2/2] Running File (CDAWeb) Pipeline for "
-        #         f"'{fido_config.get('DATASET_FILTER')}' ---"
-        #     )
-        #     self._run_fido_file_pipeline(config=fido_config)
-        # else:
-        #     logger.warning("No FIDO test configuration found. Skipping.")
+        fido_config = self.test_configs.get("fido_config")
+        if fido_config:
+            logger.info(
+                f"--- [Test 2/2] Running File (CDAWeb) Pipeline for "
+                f"'{fido_config.get('DATASET_FILTER')}' ---"
+            )
+            self._run_fido_file_pipeline(config=fido_config)
+        else:
+            logger.warning("No FIDO test configuration found. Skipping.")
 
         logger.info("===== Combined Pipeline Test Finished =====")

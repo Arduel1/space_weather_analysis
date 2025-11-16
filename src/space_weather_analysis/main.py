@@ -46,9 +46,13 @@ def main() -> None:
         "END_TIME": datetime(2015, 5, 30, 0, 0, 0),
         "DATASET_FILTER": ["a02/baseline_all/PT1M/NEZ"],
     }
-    # fido_test_config = { ... }
+    fido_test_config = { 
+        "START_TIME": datetime(2023, 11, 22, 0, 0, 0),
+        "END_TIME": datetime(2023, 12, 1, 0, 0, 0),
+        "DATASET_FILTER": ["AWE_L3A_TMP"],
+    }
 
-    TEST_CONFIGS: Dict[str, Any] = {"hapi_config": hapi_test_config}
+    TEST_CONFIGS: Dict[str, Any] = {"hapi_config": hapi_test_config, "fido_config": fido_test_config}
 
     # --- Database Connection Lifecycle ---
     # Manage the connection lifecycle for all DB-dependent tasks.
