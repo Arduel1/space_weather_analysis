@@ -1,6 +1,8 @@
 import logging
-import pathlib
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
+
+import numpy as np
+from pymongo.database import Database
 
 from space_weather_analysis.util.metadata.variable_metadata import VariableMetadata
 
@@ -9,81 +11,113 @@ logger = logging.getLogger(__name__)
 
 class MetadataWriter:
     """
-    Creates Markdown metadata files from standardized VariableMetadata objects.
+    Creates and saves standardized metadata documents to MongoDB.
     """
 
-    def write_metadata_file(
+    COLLECTION_NAME = "dataset_metadata"
+
+    def __init__(self, db: Database):
+        """
+        Initializes the writer with a database connection.
+
+        Args:
+            db (Database): The MongoDB database instance.
+        """
+        self.db = db
+        self.collection = self.db[self.COLLECTION_NAME]
+
+    def _sanitize_value(self, value: Any) -> Any:
+        """
+        Recursively sanitizes a value to make it BSON-compatible.
+
+        - Converts numpy integers/floats to standard python int/float.
+        - Converts numpy bools to standard python bool.
+        - Converts np.nan and np.inf to None.
+        - Decodes bytes to utf-8 strings.
+
+        Args:
+            value (Any): The value to sanitize.
+
+        Returns:
+            Any: A BSON-compatible value.
+        """
+        if isinstance(value, dict):
+            # Recurse into dictionaries
+            return {k: self._sanitize_value(v) for k, v in value.items()}
+        if isinstance(value, list):
+            # Recurse into lists
+            return [self._sanitize_value(v) for v in value]
+
+        # --- Handle NumPy/Float Special Values (NaN/Inf) ---
+        if isinstance(value, (np.floating, float)):
+            if np.isnan(value) or np.isinf(value):
+                return None  # Convert NaN/Inf to None (BSON null)
+            return float(value)  # Convert np.float32 -> float
+
+        # --- Handle other NumPy types ---
+        if isinstance(value, np.integer):
+            return int(value)  # Convert np.int32/64 -> int
+        if isinstance(value, np.bool_):
+            return bool(value)  # Convert np.bool_ -> bool
+
+        # --- Handle Bytes ---
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="ignore")
+
+        # Return the value if it's already a compatible type
+        return value
+
+    def save_metadata_to_db(
         self,
         dataset_id: str,
-        output_dir: pathlib.Path,
         variables: List[VariableMetadata],
         source_info: Optional[Dict[str, str]] = None,
     ) -> None:
         """
-        Combines metadata and writes it to a markdown document.
+        Combines metadata and upserts it into the MongoDB collection.
 
         Args:
-            dataset_id (str): The ID of the dataset.
-            output_dir (pathlib.Path): The output directory.
+            dataset_id (str): The ID of the dataset. This will be used
+                              as the '_id' for the MongoDB document.
             variables (List[VariableMetadata]): A list of standardized
                                                 variable metadata objects.
             source_info (Optional[Dict[str, str]]): Optional header info,
                                                    such as source server or citation.
         """
-        logger.info(f"Generating metadata document for {dataset_id}...")
+        logger.info(f"Saving metadata document for {dataset_id} to MongoDB...")
 
         if not variables:
-            logger.warning("No variable metadata provided. Skipping document generation.")
-            return
-
-        output_path = output_dir / f"{dataset_id}_metadata.md"
-
-        if output_path.exists():
-            logger.info(f"Metadata document {output_path} already exists. Skipping.")
+            logger.warning(f"No variable metadata provided for {dataset_id}. Skipping save.")
             return
 
         try:
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(f"# Metadata for Dataset: {dataset_id}\n\n")
-
-                if source_info:
-                    for key, value in source_info.items():
-                        f.write(f"**{key}:** {value}\n")
-                    f.write("\n")
-
-                f.write(
-                    "This document combines metadata from the data source API "
-                    "(e.g., HAPI) and, if available, attributes from the "
-                    "downloaded data files (CDF/NC).\n\n"
+            # Convert VariableMetadata objects to simple dicts for serialization
+            variable_docs = []
+            for var in sorted(variables, key=lambda v: v.name):
+                sanitized_attrs = self._sanitize_value(var.file_attributes)
+                variable_docs.append(
+                    {
+                        "name": var.name,
+                        "description": var.description,
+                        "units": var.units,
+                        "fill": var.fill,
+                        "type": var.type,
+                        "size": var.size,
+                        "file_attributes": sanitized_attrs,  # Use sanitized dict
+                    }
                 )
-                f.write("---\n\n## Variables\n\n")
 
-                for var in sorted(variables, key=lambda v: v.name):
-                    f.write(f"### Variable: `{var.name}`\n\n")
+            # Create the complete document
+            metadata_document = {
+                "_id": dataset_id,
+                "source_info": source_info or {},
+                "variables": variable_docs,
+            }
 
-                    # API/HAPI metadata
-                    f.write("**Source Attributes (API/HAPI):**\n\n")
-                    f.write(f"- **Description:** {var.description or 'N/A'}\n")
-                    f.write(f"- **Type:** {var.type or 'N/A'}\n")
-                    f.write(f"- **Units:** {var.units or 'N/A'}\n")
-                    f.write(f"- **Fill Value:** `{var.fill or 'N/A'}`\n")
-                    if var.size:
-                        f.write(f"- **Size:** {var.size}\n")
-                    f.write("\n")
+            # Use update_one with upsert=True to create or replace
+            self.collection.update_one({"_id": dataset_id}, {"$set": metadata_document}, upsert=True)
 
-                    # File metadata (if present)
-                    if var.file_attributes:
-                        f.write("**File Attributes (CDF/NC):**\n\n")
-                        f.write("| Attribute | Value |\n")
-                        f.write("|---|---|\n")
-                        for key, value in var.file_attributes.items():
-                            if isinstance(value, bytes):
-                                value = value.decode("utf-8", errors="ignore")
-                            value_str = str(value).replace("\n", " ")
-                            f.write(f"| `{key}` | `{value_str}` |\n")
-                        f.write("\n")
-
-            logger.info(f"Successfully generated metadata: {output_path}")
+            logger.info(f"Successfully saved metadata for {dataset_id} to collection '{self.COLLECTION_NAME}'")
 
         except Exception as e:
-            logger.error(f"Failed to write metadata file: {e}", exc_info=True)
+            logger.error(f"Failed to write metadata document to MongoDB: {e}", exc_info=True)

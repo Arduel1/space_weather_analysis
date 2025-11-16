@@ -3,6 +3,11 @@ import pathlib
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
+import pandas as pd
+import sunpy.timeseries
+from pymongo.database import Database
+
+from space_weather_analysis.database.mongo_loader_base import MongoLoaderBase
 from space_weather_analysis.hapi_pipeline.hapi_client import GenericHapiClient
 from space_weather_analysis.hapi_pipeline.hapi_converter import convert_hapi_to_timeseries
 from space_weather_analysis.util.metadata.metadata_generator import MetadataWriter
@@ -11,28 +16,30 @@ from space_weather_analysis.util.metadata.variable_metadata import VariableMetad
 logger = logging.getLogger(__name__)
 
 
-class GenericHapiPipeline:
+class GenericHapiPipeline(MongoLoaderBase):
     """
-    Orchestrates the data streaming and metadata generation
-    using the generic HAPI client.
+    Orchestrates the data streaming, metadata generation, and data loading
+    using the generic HAPI client, which reads its catalog from MongoDB.
     """
 
     def __init__(
         self,
-        catalog_path: pathlib.Path,
+        db: Database,
         base_output_dir: pathlib.Path,
     ):
         """
         Initializes the pipeline.
 
         Args:
-            catalog_path (pathlib.Path): Path to 'hapi_master_catalog.json'.
-            base_output_dir (pathlib.Path): Root directory to save
-                                            metadata documents.
+            db (Database): The MongoDB database instance.
+            base_output_dir (pathlib.Path): Root directory for any potential
+                                            data file outputs (if needed).
+                                            Metadata is now saved to DB.
         """
-        self.client = GenericHapiClient(catalog_path)
+        super().__init__(db)
+        self.client = GenericHapiClient(db)
         self.output_dir = base_output_dir
-        self.metadata_writer = MetadataWriter()
+        self.metadata_writer = MetadataWriter(db)
         if not self.output_dir.exists():
             self.output_dir.mkdir(parents=True)
 
@@ -61,6 +68,46 @@ class GenericHapiPipeline:
             )
         return variables
 
+    def _transform_timeseries_to_docs(self, ts: sunpy.timeseries.TimeSeries, source_info: str) -> List[Dict[str, Any]]:
+        """
+        Converts a SunPy TimeSeries into a list of MongoDB documents.
+
+        Args:
+            ts (sunpy.timeseries.TimeSeries): The 1D TimeSeries data.
+            source_info (str): A string identifying the data source.
+
+        Returns:
+            List[Dict[str, Any]]: A list of formatted MongoDB documents.
+        """
+        logger.info(f"Transforming {len(ts.to_table())} TimeSeries rows to MongoDB documents...")
+        documents = []
+
+        df = ts.data
+
+        # Iterate over DataFrame rows
+        for timestamp, row in df.iterrows():
+            data_payload = {k: v for k, v in row.items() if not pd.isna(v)}
+
+            # Ensure timestamp is a native Python datetime
+            ts_py: datetime = timestamp.to_pydatetime()
+
+            documents.append(
+                {
+                    "timestamp": ts_py,
+                    "metadata": {"source": source_info},
+                    "data": data_payload,
+                }
+            )
+        logger.info(f"Transformed {len(documents)} documents.")
+        return documents
+
+    def _sanitize_collection_name(self, dataset_id: str) -> str:
+        """
+        Replaces characters that are invalid in MongoDB collection names.
+        """
+        # Replace / and - with _
+        return dataset_id.replace("/", "_").replace("-", "_")
+
     def run(
         self,
         datasets_to_process: List[str],
@@ -77,7 +124,7 @@ class GenericHapiPipeline:
         """
         logger.info("--- Starting Generic HAPI Pipeline ---")
         if not self.client.catalog_map:
-            logger.error("HAPI client has no catalog. Aborting pipeline.")
+            logger.error("HAPI client has no catalog map loaded from DB. Aborting pipeline.")
             return
 
         logger.info(f"Processing {len(datasets_to_process)} datasets...")
@@ -105,18 +152,33 @@ class GenericHapiPipeline:
                     continue
 
                 ts = convert_hapi_to_timeseries(data, meta)
+
+                # --- Data Loading Logic ---
                 if ts:
                     logger.info(
                         f"Successfully converted {dataset_id} data to "
                         f"sunpy.timeseries.TimeSeries with {len(ts.to_table())} rows."
                     )
+
+                    # Transform
+                    source_url = meta.get("x_server_url", "HAPI")
+                    documents = self._transform_timeseries_to_docs(ts, source_info=source_url)
+
+                    # Get safe collection name
+                    collection_name = self._sanitize_collection_name(dataset_id)
+
+                    # Ensure Collection Exists (inherited)
+                    self._ensure_timeseries_collection(collection_name, time_field="timestamp", meta_field="metadata")
+
+                    # Load Data (inherited)
+                    self._load_data(collection_name, documents)
+
                 else:
-                    logger.warning(f"Failed to convert {dataset_id} to TimeSeries.")
+                    logger.warning(f"Failed to convert {dataset_id} to TimeSeries. Cannot load to DB.")
+                # --- End Data Loading ---
 
-                # Normalize the raw HAPI metadata to standard format
+                # --- Metadata Saving (Schema) ---
                 variables = self._normalize_hapi_meta_to_variables(meta)
-
-                # Prepare header info for the markdown file
                 source_info = {
                     "Source HAPI Server": meta.get("x_server_url", "N/A"),
                     "Data Start Date": meta.get("startDate", "N/A"),
@@ -124,18 +186,12 @@ class GenericHapiPipeline:
                     "Description": meta.get("description", "N/A"),
                     "Citation": meta.get("datasetCitation", "N/A"),
                 }
-
-                # Generate metadata document
-                dataset_output_dir = self.output_dir / dataset_id
-                dataset_output_dir.mkdir(parents=True, exist_ok=True)
-
-                # Call the central MetadataWriter
-                self.metadata_writer.write_metadata_file(
+                self.metadata_writer.save_metadata_to_db(
                     dataset_id=dataset_id,
-                    output_dir=dataset_output_dir,
                     variables=variables,
                     source_info=source_info,
                 )
+                # --- End Metadata Saving ---
 
             except Exception as e:
                 logger.error(

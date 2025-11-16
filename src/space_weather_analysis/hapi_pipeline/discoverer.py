@@ -75,7 +75,7 @@ class HapiDiscoverer(AbstractDiscoverer):
                         continue
 
                     try:
-                        logger.debug(f"Getting info for {dataset_id} from {server_url}")
+                        logger.info(f"Getting info for {dataset_id} from {server_url}")
                         info_meta = hapi(server_url, dataset_id, logging=True)
 
                         start_date = info_meta.get("startDate")

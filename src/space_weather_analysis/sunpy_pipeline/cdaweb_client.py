@@ -1,25 +1,20 @@
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
 from astropy.table import Table
-from hapiclient import hapi
 from requests.exceptions import JSONDecodeError
 from sunpy.net.cdaweb.helpers import get_datasets, get_observatory_groups
 
 logger = logging.getLogger(__name__)
-
-# HAPI Server URL for CDAWeb
-HAPI_SERVER = "https://cdaweb.gsfc.nasa.gov/hapi"
 
 
 class CdawebClient:
     """
     A client for interacting with the CDAWeb API.
 
-    This class provides methods to fetch observatory groups,
-    datasets, and variable metadata. It uses public sunpy helpers
-    for group/dataset discovery and the public HAPI client
-    for variable metadata.
+    This class provides methods to fetch observatory groups
+    and datasets using public sunpy helpers.
+    Metadata is no longer fetched here, but from the files themselves.
     """
 
     def get_observatory_groups(self) -> Optional[Table]:
@@ -74,54 +69,3 @@ class CdawebClient:
                 exc_info=True,
             )
             return None
-
-    def get_variables_for_dataset(self, target_dataset: str) -> List[Dict[str, Any]]:
-        """
-        Fetches variable metadata for a specific dataset ID.
-
-        Uses the public CDAWeb HAPI client to get parameter info.
-
-        Args:
-            target_dataset (str): The ID of the dataset (e.g., "WI_H1_SWE_RTN").
-
-        Returns:
-            List[Dict[str, Any]]: A list of dictionaries, each containing
-                                  metadata for a single variable.
-                                  Returns empty list on failure.
-        """
-        logger.info(f"Fetching variables for dataset '{target_dataset}' using hapiclient...")
-
-        try:
-            # Use hapiclient to fetch dataset metadata (info)
-            meta = hapi(HAPI_SERVER, target_dataset)
-            hapi_params = meta.get("parameters")
-
-            # Normalize HAPI response to the format expected by the pipeline
-            variables_metadata = []
-            if hapi_params:
-                for param in hapi_params:
-                    # Pipeline expects 'Name' and 'LongDescription'
-                    # HAPI provides 'name' and 'description'
-                    variables_metadata.append(
-                        {
-                            "Name": param.get("name"),
-                            "LongDescription": param.get("description"),
-                            "Units": param.get("units"),
-                            "Fill": param.get("fill"),
-                            "Type": param.get("type"),
-                        }
-                    )
-                logger.info(f"Successfully found {len(variables_metadata)} variables for '{target_dataset}'.")
-                return variables_metadata
-            else:
-                logger.warning(f"HAPI client returned no variables for '{target_dataset}'.")
-                return []
-
-        except Exception as e:
-            # hapiclient can raise various exceptions
-            logger.error(
-                f"Failed to get variables for {target_dataset} using hapiclient: {e}",
-                exc_info=True,
-            )
-
-        return []

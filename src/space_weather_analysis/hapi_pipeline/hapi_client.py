@@ -1,12 +1,11 @@
-import json
 import logging
-import pathlib
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from hapiclient import hapi
 from hapiclient.util import HAPIError
+from pymongo.database import Database
 
 logger = logging.getLogger(__name__)
 
@@ -72,39 +71,53 @@ def _calculate_time_intersection(
 
 class GenericHapiClient:
     """
-    A generic HAPI client that uses a master catalog to find and
+    A generic HAPI client that uses a master catalog from MongoDB to find and
     stream data from any HAPI server. Implements server fallback logic.
     """
 
-    def __init__(self, catalog_path: pathlib.Path):
+    CATALOG_COLLECTION = "master_catalog"
+
+    def __init__(self, db: Database):
         """
-        Initializes the client.
+        Initializes the client using a MongoDB database connection.
 
         Args:
-            catalog_path (pathlib.Path): Path to the
-                                         'hapi_master_catalog.json'.
+            db (Database): The MongoDB database instance.
         """
-        self.catalog_map = self._load_catalog(catalog_path)
+        self.db = db
+        self.catalog_map = self._load_catalog_from_db()
         if self.catalog_map:
-            logger.info(f"Loaded HAPI master catalog with {len(self.catalog_map)} entries.")
+            logger.info(f"Loaded HAPI master catalog from DB with {len(self.catalog_map)} entries.")
+        else:
+            logger.error("Failed to load HAPI master catalog from database. Client may not function.")
 
-    def _load_catalog(self, catalog_path: pathlib.Path) -> Dict[str, List[Dict]]:
-        """Loads the master catalog JSON file into a dictionary."""
-        if not catalog_path.exists():
-            logger.error(f"HAPI master catalog not found at: {catalog_path}")
-            logger.error("Please run 'python -m space_weather_analysis.main' with 'build_hapi_catalog' uncommented.")
-            return {}
+    def _load_catalog_from_db(self) -> Dict[str, List[Dict]]:
+        """
+        Loads the master catalog from the MongoDB collection into a
+        dictionary (map) for fast lookups.
+
+        Returns:
+            Dict[str, List[Dict]]: A dictionary mapping dataset_id to a
+                                   list of source entries.
+        """
         try:
-            with open(catalog_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+            collection = self.db[self.CATALOG_COLLECTION]
+            # Find all documents, exclude the MongoDB '_id' field
+            catalog_data = collection.find({}, {"_id": 0})
+
+            # Convert the list of documents back into the dictionary map
+            # {dataset_id: [sources...]} format that the class expects.
+            catalog_map = {doc["dataset_id"]: doc.get("sources", []) for doc in catalog_data if "dataset_id" in doc}
+            return catalog_map
+
         except Exception as e:
-            logger.error(f"Failed to load HAPI master catalog: {e}")
+            logger.error(f"Failed to load HAPI master catalog from MongoDB: {e}", exc_info=True)
             return {}
 
     def get_catalog_entries(self, dataset_id: str) -> Optional[List[Dict[str, Any]]]:
         """
         Finds the list of catalog entries (servers and time ranges)
-        for a given dataset ID.
+        for a given dataset ID from the loaded catalog map.
 
         Args:
             dataset_id (str): The dataset ID to find.
@@ -114,7 +127,7 @@ class GenericHapiClient:
         """
         entries = self.catalog_map.get(dataset_id)
         if not entries:
-            logger.error(f"Dataset '{dataset_id}' not found in HAPI master catalog.")
+            logger.error(f"Dataset '{dataset_id}' not found in HAPI master catalog map.")
         return entries
 
     def get_data_and_meta(
@@ -147,10 +160,23 @@ class GenericHapiClient:
         if not entries:
             return None, None
 
-        params_str = ",".join(parameters) if parameters else ""
+        # If no specific parameters are requested, fetch metadata first to
+        # get the explicit parameter list. This prevents the hapiclient
+        # parser from failing on ambiguous CSVs.
+        params_to_use = parameters
+        if not params_to_use:
+            logger.info(f"No parameters specified for {dataset_id}. Fetching metadata first...")
+            meta_info = self.get_metadata(dataset_id)
+            if meta_info and "parameters" in meta_info:
+                params_to_use = [p["name"] for p in meta_info["parameters"] if p.get("name") != "Time"]
+                logger.info(f"Found parameters: {params_to_use}")
+            else:
+                logger.warning(f"Could not retrieve metadata for {dataset_id}. Proceeding without explicit params.")
+
+        params_str = ",".join(params_to_use) if params_to_use else ""
 
         for i, entry in enumerate(entries):
-            server_url = entry.get("server")
+            server_url = entry.get("source_id")
             time_range = entry.get("time_range")
 
             logger.info(f"Attempting source {i + 1}/{len(entries)} for {dataset_id} from: {server_url}")
@@ -179,7 +205,9 @@ class GenericHapiClient:
                 start_str = valid_start.isoformat(timespec="seconds").replace("+00:00", "Z")
                 stop_str = valid_stop.isoformat(timespec="seconds").replace("+00:00", "Z")
 
-                logger.debug(f"HAPI Request: dataset={dataset_id}, start={start_str}, stop={stop_str}")
+                logger.info(
+                    f"HAPI Request: dataset={dataset_id}, start={start_str}, stop={stop_str}, params={params_str}"
+                )
 
                 data, meta = hapi(server_url, dataset_id, params_str, start_str, stop_str, logging=True)
 
@@ -218,7 +246,8 @@ class GenericHapiClient:
             return None
 
         for entry in entries:
-            server_url = entry.get("server")
+            server_url = entry.get("source_id")
+
             if not server_url:
                 continue
 
@@ -228,7 +257,7 @@ class GenericHapiClient:
                 return meta  # Return on first success
             except HAPIError:
                 # Logged as debug, as this is expected during fallback
-                logger.debug(f"Metadata fallback failed for {dataset_id} at {server_url}.")
+                logger.info(f"Metadata fallback failed for {dataset_id} at {server_url}.")
                 continue
 
         logger.error(f"Could not retrieve metadata for {dataset_id} from any server.")

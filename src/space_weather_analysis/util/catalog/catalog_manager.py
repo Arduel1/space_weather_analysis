@@ -69,7 +69,7 @@ class UniversalCatalogManager:
         # Check for duplicates
         for existing_entry in self.master_catalog[dataset_id]:
             if existing_entry["type"] == entry["type"] and existing_entry["source_id"] == entry["source_id"]:
-                logger.debug(f"Skipping duplicate entry for {dataset_id} from {entry['source_id']}")
+                logger.info(f"Skipping duplicate entry for {dataset_id} from {entry['source_id']}")
                 return
 
         self.master_catalog[dataset_id].append(entry)

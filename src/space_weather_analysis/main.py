@@ -15,6 +15,7 @@ from space_weather_analysis.config import (
     SILSO_FILE,
 )
 from space_weather_analysis.database.connection import DatabaseConnection
+from space_weather_analysis.etl.catalog import CatalogETL
 from space_weather_analysis.etl.cme_catalog import CmeETL
 from space_weather_analysis.etl.sunspots import SilsoETL
 from space_weather_analysis.hapi_pipeline.discoverer import HapiDiscoverer
@@ -28,7 +29,7 @@ load_dotenv()
 
 # Logging Configuration
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
@@ -38,36 +39,43 @@ logger = logging.getLogger(__name__)
 def run_fido_file_pipeline(config: Dict[str, Any]):
     """
     Main entry point for running the ORIGINAL Fido file-download pipeline.
+    This pipeline now reads its dataset list from the config and
+    finds group info from the MongoDB catalog.
 
     Args:
         config (Dict[str, Any]): The configuration dictionary.
     """
     start_time = config.get("START_TIME")
     end_time = config.get("END_TIME")
-    group_filter = config.get("GROUP_FILTER")
-    dataset_filter = config.get("DATASET_FILTER")
+    datasets_to_process = config.get("DATASET_FILTER")
 
-    if not start_time or not end_time:
-        logger.error("START_TIME and END_TIME must be specified in config.", exc_info=True)
+    if not start_time or not end_time or not datasets_to_process:
+        logger.error(
+            "START_TIME, END_TIME, and DATASET_FILTER (list of datasets) must be specified for the FIDO pipeline.",
+            exc_info=True,
+        )
         return
 
     logger.info("=========================================")
     logger.info("Starting Fido (File) Ingestion Pipeline")
     logger.info(f"Time Range: {start_time} to {end_time}")
-    logger.info(f"Group Filter: {group_filter or 'ALL'}")
-    logger.info(f"Dataset Filter: {dataset_filter or 'ALL'}")
+    logger.info(f"Dataset Filter: {datasets_to_process}")
     logger.info(f"Download Path: {FIDO_DOWNLOAD_DIR}")
     logger.info("=========================================")
 
     start_run_time = time.time()
+    db = DatabaseConnection.get_database()
+    if db is None:
+        logger.critical("Could not get database connection for FIDO pipeline. Exiting.")
+        return
+
     try:
-        # Pass the specific download path (from config) to the pipeline
-        pipeline = CdawebPipeline(base_data_path=FIDO_DOWNLOAD_DIR)
+        # Pass the DB connection to the pipeline
+        pipeline = CdawebPipeline(db=db, base_data_path=FIDO_DOWNLOAD_DIR)
         pipeline.run(
+            datasets_to_process=datasets_to_process,
             start_time=start_time,
             end_time=end_time,
-            group_filter=group_filter,
-            dataset_filter=dataset_filter,
         )
 
     except Exception as e:
@@ -75,6 +83,7 @@ def run_fido_file_pipeline(config: Dict[str, Any]):
     finally:
         end_run_time = time.time()
         total_time = end_run_time - start_run_time
+        DatabaseConnection.close()  # Close the DB connection
         logger.info(f"Fido Pipeline finished in {total_time:.2f} seconds.")
 
 
@@ -100,14 +109,19 @@ def run_generic_hapi_pipeline(config: Dict[str, Any]):
     logger.info("Starting Generic HAPI Pipeline")
     logger.info(f"Time Range: {start_time} to {end_time}")
     logger.info(f"Datasets: {datasets_to_process}")
-    logger.info(f"Catalog File: {CATALOG_FILE}")
+    logger.info("Catalog Source: MongoDB")
     logger.info(f"Output Path: {HAPI_OUTPUT_DIR}")
     logger.info("=========================================")
 
     start_run_time = time.time()
+    db = DatabaseConnection.get_database()
+    if db is None:
+        logger.critical("Could not get database connection for HAPI pipeline. Exiting.")
+        return
+
     try:
-        # Pass config paths to the pipeline
-        pipeline = GenericHapiPipeline(catalog_path=CATALOG_FILE, base_output_dir=HAPI_OUTPUT_DIR)
+        # Pass the DB connection to the pipeline
+        pipeline = GenericHapiPipeline(db=db, base_output_dir=HAPI_OUTPUT_DIR)
         pipeline.run(
             datasets_to_process=datasets_to_process,
             start_time=start_time,
@@ -118,6 +132,7 @@ def run_generic_hapi_pipeline(config: Dict[str, Any]):
     finally:
         end_run_time = time.time()
         total_time = end_run_time - start_run_time
+        DatabaseConnection.close()  # Close the DB connection
         logger.info(f"HAPI Pipeline execution finished in {total_time:.2f} seconds.")
 
 
@@ -174,45 +189,83 @@ def run_catalog_build_task():
     logger.info("--- Finished: Universal Catalog Build ---")
 
 
+def run_catalog_etl_task():
+    """
+    Runs the ETL process for the master catalog.
+    This task loads 'master_catalog.json' into MongoDB.
+    This should be run after 'run_catalog_build_task'.
+    """
+    logger.info("--- Running: Master Catalog ETL---")
+    db = DatabaseConnection.get_database()
+    if db is None:
+        logger.critical("Could not get database connection for Catalog ETL. Exiting.")
+        sys.exit(1)
+
+    try:
+        CatalogETL(db, file_path=CATALOG_FILE).run()
+    except Exception as e:
+        logger.error(f"Error during catalog ETL: {e}", exc_info=True)
+    finally:
+        DatabaseConnection.close()
+    logger.info("--- Finished: Master Catalog ETL---")
+
+
+def run_combined_pipeline_test():
+    """
+    Runs a test query for one HAPI dataset and one FIDO dataset
+    to ensure the MongoDB-driven pipelines are working.
+    """
+    logger.info("===== Starting Combined Pipeline Test =====")
+
+    # Config for HAPI Test: 'ave/P1Y/xyz'
+    # Time range within catalog's 1967-2004
+    # hapi_config = {
+    #     "START_TIME": datetime(1998, 1, 1, 0, 0, 0),
+    #     "END_TIME": datetime(1998, 1, 2, 0, 0, 0),
+    #     "DATASET_FILTER": ["AC_H0_MFI"],
+    # }
+    hapi_config = {
+        "START_TIME": datetime(2015, 3,1,0,0,0),
+        "END_TIME": datetime(2015,5,30,0,0,0),
+        "DATASET_FILTER": ["a02/baseline_all/PT1M/NEZ"]
+    }
+
+    logger.info("--- [Test 1/2] Running Generic HAPI Pipeline for 'ave/P1Y/xyz' ---")
+    run_generic_hapi_pipeline(config=hapi_config)
+
+    # Config for FIDO Test: 'AWE_L3A_TMP'
+    # Time range within catalog's 2023-2025
+    # fido_config = {
+    #     "START_TIME": datetime(2024, 1, 1, 0, 0, 0),
+    #     "END_TIME": datetime(2024, 1, 31, 0, 0, 0),
+    #     "DATASET_FILTER": ["AWE_L3A_TMP"],
+    # }
+
+    # logger.info("--- [Test 2/2] Running Fido (CDAWeb) Pipeline for 'AWE_L3A_TMP' ---")
+    # run_fido_file_pipeline(config=fido_config)
+
+    logger.info("===== Combined Pipeline Test Finished =====")
+
+
 def main():
     """
     Main entry point for the application.
     """
     logger.info("--- Application Main Entry Point Started ---")
 
-    # Build Universal Catalog
-    # Run this once to create 'hapi_master_catalog.json'.
+
     # logger.info("Running: Universal Catalog Build")
     # run_catalog_build_task()
 
-    # # --- Shared Pipeline Configuration ---
-    # PIPELINE_CONFIG = {
-    #     "START_TIME": datetime(1998, 1, 1, 0, 0, 0),
-    #     "END_TIME": datetime(1998, 1, 2, 0, 0, 0),
-    #     # "GROUP_FILTER": ["ACE"],
-    #     # This dataset is now in the catalog from two sources:
-    #     # 1. HAPI (from cdaweb.gsfc.nasa.gov)
-    #     # 2. FIDO_CDAWEB (from group "ACE")
-    #     "DATASET_FILTER": ["AC_OR_SSC"],
-    # }
 
-    # --- Action 2: Run Generic HAPI (Streaming) Pipeline ---
-    # This will use the new catalog and find the HAPI source for AC_H0_MFI
-    #
-    # logger.info("Running: Generic HAPI Pipeline")
-    # run_generic_hapi_pipeline(config=PIPELINE_CONFIG)
+    logger.info("Running: Master Catalog ETL")
+    run_catalog_etl_task()
 
-    # --- Action 3: Run Fido (File Download) Pipeline ---
-    # (This is the original CDAWeb pipeline, retained for non-HAPI sources)
-    #
-    # logger.info("Running: Fido File Pipeline")
-    # run_fido_file_pipeline(config=PIPELINE_CONFIG)
+    # logger.info("Running: Local ETL Processes (SILSO, CME)")
+    # run_local_file_etl()
 
-    # --- Action 4: Run Local ETL (CME, SILSO) ---
-    # (This populates the database from local files in /data)
-    #
-    logger.info("Running: Local ETL Processes")
-    run_local_file_etl()
+    logger.info("Running: Combined HAPI/FIDO Pipeline Test")
+    run_combined_pipeline_test()
 
     logger.info("--- Application Main Entry Point Finished ---")
 
