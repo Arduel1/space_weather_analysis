@@ -48,7 +48,7 @@ def main() -> None:
     }
     fido_test_config = { 
         "START_TIME": datetime(2023, 11, 22, 0, 0, 0),
-        "END_TIME": datetime(2023, 12, 1, 0, 0, 0),
+        "END_TIME": datetime(2023, 11, 24, 0, 0, 0),
         "DATASET_FILTER": ["AWE_L3A_TMP"],
     }
 

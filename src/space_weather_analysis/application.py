@@ -1,5 +1,7 @@
 import logging
 import time
+import tempfile
+import pathlib
 from typing import Any, Dict
 
 from pymongo.database import Database
@@ -7,8 +9,6 @@ from pymongo.database import Database
 from space_weather_analysis.config import (
     CATALOG_FILE,
     CME_CATALOG_FILE,
-    FIDO_DOWNLOAD_DIR,
-    HAPI_OUTPUT_DIR,
     HAPI_SERVER_LIST_FILE,
     SILSO_FILE,
 )
@@ -93,28 +93,33 @@ class Application:
             )
             return
 
-        logger.info("=========================================")
-        logger.info("Starting File Ingestion Pipeline")
-        logger.info(f"Time Range: {start_time} to {end_time}")
-        logger.info(f"Dataset Filter: {datasets_to_process}")
-        logger.info(f"Download Path: {FIDO_DOWNLOAD_DIR}")
-        logger.info("=========================================")
+        # Create a temporary directory that is automatically cleaned up
+        with tempfile.TemporaryDirectory() as temp_dir_path_str:
+            temp_data_path = pathlib.Path(temp_dir_path_str)
 
-        start_run_time = time.time()
-        try:
-            pipeline = CdawebPipeline(db=self.db, base_data_path=FIDO_DOWNLOAD_DIR)
-            pipeline.run(
-                datasets_to_process=datasets_to_process,
-                start_time=start_time,
-                end_time=end_time,
-            )
+            logger.info("=========================================")
+            logger.info("Starting File Ingestion Pipeline")
+            logger.info(f"Time Range: {start_time} to {end_time}")
+            logger.info(f"Dataset Filter: {datasets_to_process}")
+            logger.info(f"Using temporary download path: {temp_data_path}")
+            logger.info("=========================================")
 
-        except Exception as e:
-            logger.critical(f"File Pipeline failed: {e}", exc_info=True)
-        finally:
-            end_run_time = time.time()
-            total_time = end_run_time - start_run_time
-            logger.info(f"File Pipeline finished in {total_time:.2f} seconds.")
+            start_run_time = time.time()
+            try:
+                # Pass the temporary path to the pipeline
+                pipeline = CdawebPipeline(db=self.db, base_data_path=temp_data_path)
+                pipeline.run(
+                    datasets_to_process=datasets_to_process,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
+
+            except Exception as e:
+                logger.critical(f"File Pipeline failed: {e}", exc_info=True)
+            finally:
+                end_run_time = time.time()
+                total_time = end_run_time - start_run_time
+                logger.info(f"File Pipeline finished in {total_time:.2f} seconds.")
 
     def _run_generic_hapi_pipeline(self, config: Dict[str, Any]) -> None:
         """
@@ -140,12 +145,11 @@ class Application:
         logger.info("Starting Generic Streaming Pipeline")
         logger.info(f"Time Range: {start_time} to {end_time}")
         logger.info(f"Datasets: {datasets_to_process}")
-        logger.info(f"Output Path: {HAPI_OUTPUT_DIR}")
         logger.info("=========================================")
 
         start_run_time = time.time()
         try:
-            pipeline = GenericHapiPipeline(db=self.db, base_output_dir=HAPI_OUTPUT_DIR)
+            pipeline = GenericHapiPipeline(db=self.db)
             pipeline.run(
                 datasets_to_process=datasets_to_process,
                 start_time=start_time,
@@ -238,10 +242,7 @@ class Application:
 
         fido_config = self.test_configs.get("fido_config")
         if fido_config:
-            logger.info(
-                f"--- [Test 2/2] Running File (CDAWeb) Pipeline for "
-                f"'{fido_config.get('DATASET_FILTER')}' ---"
-            )
+            logger.info(f"--- [Test 2/2] Running File (CDAWeb) Pipeline for '{fido_config.get('DATASET_FILTER')}' ---")
             self._run_fido_file_pipeline(config=fido_config)
         else:
             logger.warning("No FIDO test configuration found. Skipping.")

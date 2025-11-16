@@ -1,5 +1,4 @@
 import logging
-import pathlib
 from datetime import datetime, timezone
 from typing import Any, Dict, Hashable, List, Tuple
 
@@ -27,22 +26,16 @@ class GenericHapiPipeline(MongoLoaderBase):
     def __init__(
         self,
         db: Database,
-        base_output_dir: pathlib.Path,
     ):
         """
         Initializes the pipeline.
 
         Args:
             db (Database): The MongoDB database instance.
-            base_output_dir (pathlib.Path): Root directory for any potential
-                                            data file outputs.
         """
         super().__init__(db)
         self.client = GenericHapiClient(db)
-        self.output_dir = base_output_dir
         self.metadata_writer = MetadataWriter(db)
-        if not self.output_dir.exists():
-            self.output_dir.mkdir(parents=True)
 
     def _normalize_hapi_meta_to_variables(self, hapi_meta: Dict[str, Any]) -> List[VariableMetadata]:
         """
@@ -91,7 +84,7 @@ class GenericHapiPipeline(MongoLoaderBase):
             {
                 "timestamp": ts_py,
                 "metadata": metadata,
-                # FIX 3: Ensure keys are strings for MongoDB.
+                # Ensure keys are strings for MongoDB.
                 "data": {str(k): v for k, v in data.items() if not pd.isna(v)},
             }
             for ts_py, data in zip(timestamps, data_payloads)

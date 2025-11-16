@@ -26,14 +26,6 @@ HAPI_CONFIG_DIR = DATA_ROOT / "hapi_config"
 HAPI_SERVER_LIST_FILE = HAPI_CONFIG_DIR / "all.txt"
 """Path to the text file containing a list of HAPI server URLs."""
 
-HAPI_OUTPUT_DIR = DATA_ROOT / "hapi_streaming_output"
-"""Root output directory for data streamed from the HAPI pipeline."""
-
-
-# --- Fido/CDAWeb Pipeline Configuration ---
-FIDO_DOWNLOAD_DIR = DATA_ROOT / "cdaweb_fido_downloads"
-"""Root output directory for files downloaded via the Fido/CDAWeb pipeline."""
-
 
 # --- Local ETL File Paths ---
 CME_CATALOG_FILE = DATA_ROOT / "cme_catalog.txt"
