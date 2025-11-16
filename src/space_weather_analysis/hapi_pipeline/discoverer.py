@@ -5,6 +5,7 @@ from typing import Any, Dict, Generator, List, Tuple
 from hapiclient import hapi
 from hapiclient.util import HAPIError
 
+from space_weather_analysis.config import HAPI_SOURCE_ID
 from space_weather_analysis.util.catalog.abstract_discoverer import AbstractDiscoverer
 
 logger = logging.getLogger(__name__)
@@ -88,7 +89,7 @@ class HapiDiscoverer(AbstractDiscoverer):
 
             if start_date and stop_date:
                 new_entry = {
-                    "type": "HAPI",
+                    "type": HAPI_SOURCE_ID,
                     "source_id": server_url,
                     "time_range": {
                         "start_time": start_date,
@@ -140,7 +141,7 @@ class HapiDiscoverer(AbstractDiscoverer):
         catalog, and yields standardized entries for each dataset found.
         """
         server_urls = self._read_server_list()
-        logger.info(f"--- Starting HAPI Source Discovery ({len(server_urls)} servers) ---")
+        logger.info(f"--- Starting {HAPI_SOURCE_ID} Source Discovery ({len(server_urls)} servers) ---")
         for server_url in server_urls:
             try:
                 logger.info(f"Querying catalog from: {server_url}")
@@ -154,4 +155,4 @@ class HapiDiscoverer(AbstractDiscoverer):
                     f"An unexpected error occurred for {server_url}: {e}",
                     exc_info=True,
                 )
-        logger.info("--- HAPI Source Discovery Finished ---")
+        logger.info(f"--- {HAPI_SOURCE_ID} Source Discovery Finished ---")

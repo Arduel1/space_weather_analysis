@@ -33,3 +33,9 @@ CME_CATALOG_FILE = DATA_ROOT / "cme_catalog.txt"
 
 SILSO_FILE = DATA_ROOT / "SN_d_tot_V2.0.csv"
 """Path to the SILSO daily sunspot data CSV file."""
+
+
+# --- Catalog Fiel Configuration ---
+FIDO_CDAWEB_SOURCE_ID = "FIDO_CDAWEB"
+
+HAPI_SOURCE_ID = "HAPI"

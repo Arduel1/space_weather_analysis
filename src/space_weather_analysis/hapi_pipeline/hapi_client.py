@@ -7,6 +7,8 @@ from hapiclient import hapi
 from hapiclient.util import HAPIError
 from pymongo.database import Database
 
+from space_weather_analysis.config import HAPI_SOURCE_ID
+
 logger = logging.getLogger(__name__)
 
 
@@ -216,7 +218,9 @@ class GenericHapiClient:
             start_str = valid_start.isoformat(timespec="seconds").replace("+00:00", "Z")
             stop_str = valid_stop.isoformat(timespec="seconds").replace("+00:00", "Z")
 
-            logger.info(f"HAPI Request: dataset={dataset_id}, start={start_str}, stop={stop_str}, params={params_str}")
+            logger.info(
+                f"{HAPI_SOURCE_ID} Request: dataset={dataset_id}, start={start_str}, stop={stop_str}, params={params_str}"
+            )
 
             data, meta = hapi(server_url, dataset_id, params_str, start_str, stop_str, logging=True)
 
