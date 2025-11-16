@@ -13,26 +13,38 @@ logger = logging.getLogger(__name__)
 
 class SilsoETL(BaseETLProcessor):
     """
-    ETL Processor for SILSO daily sunspot data.
+    ETL Processor for daily sunspot data.
     """
 
     COLLECTION_NAME = "silso_sunspot_daily"
     DEFAULT_BATCH_SIZE = 5000
 
+    # Defines the column names for the CSV file
+    _COLUMN_NAMES = [
+        "year",
+        "month",
+        "day",
+        "date_fraction_year",
+        "sunspot_number",
+        "std_dev",
+        "num_observations",
+        "indicator",
+    ]
+
     def __init__(self, db: Database, file_path: pathlib.Path):
         """
-        Initializes the SILSO ETL processor.
+        Initializes the sunspot data ETL processor.
 
         Args:
             db (Database): The MongoDB database instance.
-            file_path (pathlib.Path): Path to the 'SN_d_tot_V2.0.csv' file.
+            file_path (pathlib.Path): Path to the sunspot data CSV file.
         """
         super().__init__(db)
         self.file_path = file_path
 
     def _extract(self) -> Optional[pd.DataFrame]:
         """
-        Extracts SILSO data from the local CSV file.
+        Extracts sunspot data from the local CSV file.
 
         Returns:
             Optional[pd.DataFrame]: A DataFrame containing the raw data,
@@ -44,22 +56,12 @@ class SilsoETL(BaseETLProcessor):
             return None
 
         try:
-            col_names = [
-                "year",
-                "month",
-                "day",
-                "date_fraction_year",
-                "sunspot_number",
-                "std_dev",
-                "num_observations",
-                "indicator",
-            ]
             df = pd.read_csv(
                 self.file_path,
                 sep=";",
-                names=col_names,
+                names=self._COLUMN_NAMES,
                 dtype={"year": int, "month": int, "day": int},
-                skipinitialspace=True
+                skipinitialspace=True,
             )
             logger.info(f"Extracted {len(df)} rows from CSV.")
             return df
@@ -69,7 +71,7 @@ class SilsoETL(BaseETLProcessor):
 
     def _transform(self, raw_data: Optional[pd.DataFrame]) -> List[Dict[str, Any]]:
         """
-        Transforms the raw SILSO DataFrame into MongoDB documents.
+        Transforms the raw sunspot DataFrame into MongoDB documents.
 
         Args:
             raw_data (Optional[pd.DataFrame]): The raw data from _extract().
@@ -90,39 +92,42 @@ class SilsoETL(BaseETLProcessor):
         # 'indicator' is 0 or 1
         raw_data["indicator"] = raw_data["indicator"].astype(bool)
 
-        documents = []
-        for _, row in raw_data.iterrows():
-            data = {
-                "sunspot_number": row["sunspot_number"],
-                "std_dev": row["std_dev"],
-                "num_observations": row["num_observations"],
-                "indicator": row["indicator"],
-                "date_fraction_year": row["date_fraction_year"],
+        # Define the columns that will be nested in the 'data' field
+        data_columns = [
+            "sunspot_number",
+            "std_dev",
+            "num_observations",
+            "indicator",
+            "date_fraction_year",
+        ]
+
+        # Vectorized document creation
+        data_payloads = raw_data[data_columns].to_dict("records")
+        timestamps = raw_data["timestamp"].to_list()
+        metadata = {"source": "SILSO_V2.0"}
+
+        documents = [
+            {
+                "timestamp": ts,
+                "metadata": metadata,
+                # Filter out NaN values to keep the documents clean.
+                "data": {k: v for k, v in data_dict.items() if not pd.isna(v)},
             }
-            documents.append(
-                {
-                    "timestamp": row["timestamp"],
-                    "metadata": {"source": "SILSO_V2.0"},
-                    # Filter out NaN values to keep the documents clean.
-                    "data": {k: v for k, v in data.items() if not pd.isna(v)},
-                }
-            )
+            for ts, data_dict in zip(timestamps, data_payloads)
+        ]
+
         logger.info(f"Transformed {len(documents)} documents.")
         return documents
 
-    def run(self):
+    def run(self) -> None:
         """
-        Main orchestration method for the SILSO ETL process.
+        Main orchestration method for the sunspot data ETL process.
         """
         logger.info("--- Starting ETL process for SILSO ---")
 
-        # Extract
         raw_data_df = self._extract()
-
-        # Transform
         documents = self._transform(raw_data_df)
 
-        # Load
         self._ensure_timeseries_collection(
             self.COLLECTION_NAME,
             time_field="timestamp",
@@ -130,5 +135,6 @@ class SilsoETL(BaseETLProcessor):
             bucketMaxSpanSeconds=86400,  # 1 day
             bucketRoundingSeconds=86400,
         )
+
         self._load_data(self.COLLECTION_NAME, documents, self.DEFAULT_BATCH_SIZE)
         logger.info("--- Finished ETL process for SILSO ---")

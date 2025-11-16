@@ -14,7 +14,8 @@ class MongoLoaderBase(ABC):
     """
     Abstract Base Class providing common MongoDB loading functionality.
 
-    Handles TimeSeries collection creation and batched data insertion.
+    Handles TimeSeries collection creation and batched data insertion
+    for inheriting classes.
     """
 
     DEFAULT_BATCH_SIZE = 5000
@@ -33,8 +34,8 @@ class MongoLoaderBase(ABC):
         collection_name: str,
         time_field: str,
         meta_field: str,
-        **timeseries_options,
-    ):
+        **timeseries_options: Any,
+    ) -> None:
         """
         Helper method to create a MongoDB time series collection if it
         does not exist.
@@ -43,20 +44,22 @@ class MongoLoaderBase(ABC):
             collection_name (str): The name of the collection.
             time_field (str): The name of the field containing the timestamp.
             meta_field (str): The name of the field containing metadata.
-            **timeseries_options: Additional options (e.g., bucketMaxSpanSeconds).
+            **timeseries_options: Additional options for the timeseries.
         """
         if collection_name not in self.db.list_collection_names():
             logger.info(f"Creating new time series collection: {collection_name}")
-            # Default granularity to 'seconds' if not provided
-            if "granularity" not in timeseries_options:
-                timeseries_options["granularity"] = "seconds"
+
+            # Define defaults and merge with user-provided options
+            # This avoids mutating the input dict (a side effect)
+            options: Dict[str, Any] = {"granularity": "seconds"}
+            options.update(timeseries_options)
 
             self.db.create_collection(
                 collection_name,
                 timeseries={
                     "timeField": time_field,
                     "metaField": meta_field,
-                    **timeseries_options,
+                    **options,
                 },
             )
         else:
@@ -68,18 +71,16 @@ class MongoLoaderBase(ABC):
         documents: List[Dict[str, Any]],
         batch_size: Optional[int] = None,
         clear_collection: bool = True,
-    ):
+    ) -> None:
         """
         Handles the "Load" step by inserting documents in batches.
 
         Args:
-            collection_name (str): The name of the collection to load data into.
-            documents (List[Dict[str, Any]]): A list of dictionaries to insert.
+            collection_name (str): The name of the collection to load into.
+            documents (List[Dict[str, Any]]): A list of documents to insert.
             batch_size (Optional[int]): The number of documents per batch.
-                                        Defaults to DEFAULT_BATCH_SIZE.
-            clear_collection (bool): If True (default), clears all existing
-                                     data in the collection before loading.
-                                     Set to False for batch-wise appends.
+            clear_collection (bool): If True, clears all existing data
+                                     in the collection before loading.
         """
         if not documents:
             logger.info(f"No documents to load for collection '{collection_name}'.")
@@ -103,6 +104,8 @@ class MongoLoaderBase(ABC):
                 if not batch:
                     continue
 
+                # Use ordered=False to increase performance; the insert operation
+                # will not stop if one document in the batch fails.
                 collection.insert_many(batch, ordered=False)
                 total_inserted += len(batch)
                 logger.info(f"  ... inserted batch {i} ({total_inserted}/{len(documents)} documents)")
@@ -110,6 +113,12 @@ class MongoLoaderBase(ABC):
             logger.info(f"Data load complete for {collection_name}. Total inserted: {total_inserted}")
 
         except BulkWriteError as bwe:
-            logger.error(f"Error during bulk insert into {collection_name}: {bwe.details}", exc_info=True)
+            logger.error(
+                f"Error during bulk insert into {collection_name}: {bwe.details}",
+                exc_info=True,
+            )
         except Exception as e:
-            logger.error(f"Error loading data to MongoDB collection {collection_name}: {e}", exc_info=True)
+            logger.error(
+                f"Error loading data to MongoDB collection {collection_name}: {e}",
+                exc_info=True,
+            )

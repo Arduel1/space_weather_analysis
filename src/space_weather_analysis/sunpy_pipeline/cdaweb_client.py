@@ -13,15 +13,12 @@ class CdawebClient:
     A client for interacting with the CDAWeb API.
 
     This class provides methods to fetch observatory groups
-    and datasets using public sunpy helpers.
-    Metadata is no longer fetched here, but from the files themselves.
+    and datasets using sunpy helper functions.
     """
 
     def get_observatory_groups(self) -> Optional[Table]:
         """
         Fetches all available observatory groups from CDAWeb.
-
-        Uses the sunpy.net.cdaweb.helpers module.
 
         Returns:
             Optional[Table]: An astropy Table of observatory groups,
@@ -40,13 +37,12 @@ class CdawebClient:
         """
         Fetches all datasets for a specific observatory group.
 
-        Uses the sunpy.net.cdaweb.helpers module.
-
         Args:
             group_name (str): The name of the group to query.
 
         Returns:
-            Optional[Table]: An astropy Table of datasets, or None on failure.
+            Optional[Table]: An astropy Table of datasets,
+                             or None on failure.
         """
         logger.info(f"Fetching datasets for group '{group_name}'...")
         try:
@@ -54,6 +50,7 @@ class CdawebClient:
             logger.info(f"Found {len(datasets)} datasets for '{group_name}'.")
             return datasets
         except JSONDecodeError as e:
+            # Handle cases where the API returns non-JSON (e.g., HTML error)
             response_text = "No response text available"
             if hasattr(e, "response") and e.response is not None:
                 response_text = e.response.text

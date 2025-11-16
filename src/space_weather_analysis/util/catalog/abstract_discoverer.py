@@ -1,8 +1,5 @@
-import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Generator, Tuple
-
-logger = logging.getLogger(__name__)
 
 
 class AbstractDiscoverer(ABC):
@@ -10,8 +7,7 @@ class AbstractDiscoverer(ABC):
     Abstract Base Class for a catalog discovery strategy.
 
     Each concrete implementation of this class is responsible for querying
-    a specific type of data source (e.g., HAPI servers, Fido/CDAWeb) and
-    yielding standardized catalog entries.
+    a specific type of data source and yielding standardized catalog entries.
     """
 
     @abstractmethod
@@ -19,13 +15,10 @@ class AbstractDiscoverer(ABC):
         """
         Runs the discovery process for the specific source.
 
-        This method should yield its findings one by one to keep
-        memory usage low.
+        This method should yield its findings one by one as a generator
+        to minimize memory usage.
 
         Yields:
-            Generator[Tuple[str, Dict[str, Any]], None, None]:
-                A generator yielding Tuples, where the first element is the
-                dataset_id (str) and the second is the catalog entry
-                dictionary (Dict[str, Any]).
+            A generator of (dataset_id, catalog_entry) tuples.
         """
         pass

@@ -88,7 +88,7 @@ class DatabaseConnection:
         return cls._db
 
     @classmethod
-    def close(cls):
+    def close(cls) -> None:
         """
         Closes the global MongoDB client connection, if it exists.
         """

@@ -1,10 +1,9 @@
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Hashable, List, Optional, Tuple, Union, cast
 
-import dask.dataframe as dd
-import pandas as pd  # Import pandas for robust type checking
+import pandas as pd
 import xarray as xr
 from astropy.table import Table
 from astropy.table import vstack as vstack_tables
@@ -19,27 +18,45 @@ logger = logging.getLogger(__name__)
 def _get_cdf_file_metadata(cdf_file: CDF, variables_to_parse: List[str]) -> Dict[str, Any]:
     """
     Helper to extract variable attributes from a single CDF file.
+
+    Args:
+        cdf_file (CDF): An opened cdflib.CDF object.
+        variables_to_parse (List[str]): A specific list of variables to extract.
+            If empty, all variables are extracted.
+
+    Returns:
+        Dict[str, Any]: A dictionary where keys are variable names and
+        values are dictionaries of their attributes.
     """
-    cdf_metadata = {}
-    vars_to_process = variables_to_parse
+    cdf_metadata: Dict[str, Any] = {}
+    vars_to_process: List[str] = variables_to_parse
     if not vars_to_process:
-        vars_to_process = cdf_file.cdf_info().get("zVariables", [])
+        vars_to_process = cast(Dict[str, Any], cdf_file.cdf_info()).get("zVariables", [])
         logger.info(f"No variables specified. Discovering all {len(vars_to_process)} variables from CDF.")
 
     for var in vars_to_process:
         try:
             cdf_metadata[var] = cdf_file.varattsget(var)
         except Exception:
-            logger.info(f"Could not get attributes for variable '{var}'.")
+            logger.warning(f"Could not get attributes for variable '{var}'.")
     return cdf_metadata
 
 
 def _get_xarray_file_metadata(ds: xr.Dataset, variables_to_parse: List[str]) -> Dict[str, Any]:
     """
     Helper to extract variable attributes from an xarray Dataset.
+
+    Args:
+        ds (xr.Dataset): The xarray Dataset to parse.
+        variables_to_parse (List[str]): A specific list of variables to extract.
+            If empty, all data variables are extracted.
+
+    Returns:
+        Dict[str, Any]: A dictionary where keys are variable names and
+        values are dictionaries of their attributes.
     """
-    file_metadata = {}
-    vars_to_process = variables_to_parse
+    file_metadata: Dict[str, Any] = {}
+    vars_to_process: List[str] = variables_to_parse
     if not vars_to_process:
         vars_to_process = list(ds.data_vars)
         logger.info(f"No variables specified. Discovering all {len(vars_to_process)} variables from xarray Dataset.")
@@ -55,16 +72,26 @@ def _get_xarray_file_metadata(ds: xr.Dataset, variables_to_parse: List[str]) -> 
 
 def _parse_1d_timeseries_file(
     file_path_str: str,
-) -> List[TimeSeries]:
+) -> List[GenericTimeSeries]:
     """
     Attempts to parse a file using the native sunpy.timeseries.TimeSeries
-    parser.
+    factory.
+
+    This function handles files that can be loaded as 1D time series.
+
+    Args:
+        file_path_str (str): The path to the file.
+
+    Returns:
+        List[GenericTimeSeries]: A list of valid, non-empty
+        GenericTimeSeries objects parsed from the file.
     """
     try:
-        ts_from_file = TimeSeries(file_path_str)
-        flat_list = expand_list([ts_from_file])
+        # TimeSeries factory can return a single instance or a list
+        ts_from_file: Union[GenericTimeSeries, List[GenericTimeSeries]] = TimeSeries(file_path_str)
+        flat_list: List[Any] = expand_list([ts_from_file])
 
-        valid_ts_list = []
+        valid_ts_list: List[GenericTimeSeries] = []
         for ts in flat_list:
             if isinstance(ts, GenericTimeSeries) and len(ts.to_table()) > 0:
                 valid_ts_list.append(ts)
@@ -83,26 +110,33 @@ def _parse_1d_timeseries_file(
     return []
 
 
-def _find_time_dimension(ds: xr.Dataset) -> Tuple[Optional[str], Optional[str]]:
+def _find_time_dimension(
+    ds: xr.Dataset,
+) -> Tuple[Optional[str], Optional[str]]:
     """
-    Robustly finds the time dimension and time coordinate in an xarray.Dataset.
-    It checks both coordinates and data variables for time-like data.
+    Robustly finds the time dimension and coordinate in an xarray.Dataset.
+
+    It checks both coordinates and data variables for time-like data,
+    first by checking dtype, then by falling back to common names.
+
+    Args:
+        ds (xr.Dataset): The xarray Dataset to search.
 
     Returns:
-        Tuple[Optional[str], Optional[str]]: (time_dimension_name, time_coordinate_name)
+        Tuple[Optional[str], Optional[str]]: A tuple of
+        (time_dimension_name, time_coordinate_name), or (None, None)
+        if not found.
     """
-
-    # Find all potential time coordinates (in coords OR data_vars)
-    time_coord_name = None
+    time_coord_name: Optional[str] = None
 
     # Combine coords and data_vars for a complete search
-    all_vars = {**ds.coords, **ds.data_vars}
-    possible_coords = []
+    all_vars: Dict[Hashable, xr.DataArray] = {**ds.coords, **ds.data_vars}
+    possible_coords: List[str] = []
 
-    # Method 1: Check dtype
+    # Check dtype
     for var_name, var in all_vars.items():
         if pd.api.types.is_datetime64_any_dtype(var.dtype):
-            possible_coords.append(var_name)
+            possible_coords.append(str(var_name))
 
     if possible_coords:
         time_coord_name = possible_coords[0]  # Take the first one
@@ -110,7 +144,8 @@ def _find_time_dimension(ds: xr.Dataset) -> Tuple[Optional[str], Optional[str]]:
             time_coord_name = "Epoch"
         logger.info(f"Found time coordinate via dtype: {time_coord_name}")
 
-    # Method 2: Fallback to names if dtype check fails
+    # TODO: Remove
+    # Fallback to names if dtype check fails
     if not time_coord_name:
         fallback_names = ["Epoch", "time", "Time"]
         for name in fallback_names:
@@ -121,27 +156,27 @@ def _find_time_dimension(ds: xr.Dataset) -> Tuple[Optional[str], Optional[str]]:
 
     if not time_coord_name:
         logger.error(
-            f"Could not find any time-like coordinate. "
-            f"Coords: {list(ds.coords.keys())}, Data Vars: {list(ds.data_vars.keys())}"
+            "Could not find any time-like coordinate. "
+            f"Coords: {list(ds.coords.keys())}, "
+            f"Data Vars: {list(ds.data_vars.keys())}"
         )
         return None, None
 
-    # Now get the dimension(s) for this coordinate
     try:
-        # Access the variable from its original location (coords or data_vars)
-        time_var = ds.coords[time_coord_name] if time_coord_name in ds.coords else ds.data_vars[time_coord_name]
-        time_dims = time_var.dims
+        time_var: xr.DataArray = (
+            ds.coords[time_coord_name] if time_coord_name in ds.coords else ds.data_vars[time_coord_name]
+        )
+        # FIX: Dims are a tuple of Hashable
+        time_dims: Tuple[Hashable, ...] = time_var.dims
     except KeyError:
         logger.error(f"Identified time coord '{time_coord_name}' but could not access it.")
         return None, None
 
     if len(time_dims) == 0:
-        # It's a scalar coordinate, which can't be an index
         logger.error(f"Time coordinate '{time_coord_name}' is a scalar (0 dimensions).")
         return None, None
 
-    # Assume the *first* dimension listed is the time dimension
-    time_dim_name = time_dims[0]
+    time_dim_name: str = str(time_dims[0])
 
     if len(time_dims) > 1:
         logger.warning(
@@ -162,10 +197,30 @@ def _find_time_dimension(ds: xr.Dataset) -> Tuple[Optional[str], Optional[str]]:
 
 def _handle_nd_datafile(
     file_path_obj: Path, variables_to_parse: List[str]
-) -> Tuple[Optional[xr.Dataset], Optional[Dict[str, Any]], Optional[str], Optional[str]]:
+) -> Tuple[
+    Optional[xr.Dataset],
+    Optional[Dict[str, Any]],
+    Optional[str],
+    Optional[str],
+]:
     """
     Handles N-dimensional data files (typically .nc) using xarray.
-    Returns the dataset, metadata, time dimension name, and time coordinate name.
+
+    Opens the dataset, attempts to find time dimensions, decodes time,
+    and extracts metadata.
+
+    Args:
+        file_path_obj (Path): The path to the .nc file.
+        variables_to_parse (List[str]): A specific list of variables to
+            extract metadata for.
+
+    Returns:
+        Tuple[Optional[xr.Dataset], Optional[Dict[str, Any]],
+              Optional[str], Optional[str]]:
+            - The opened xr.Dataset (or None on failure).
+            - The extracted file metadata (or None).
+            - The identified time dimension name (or None).
+            - The identified time coordinate name (or None).
     """
     ds: Optional[xr.Dataset] = None
     file_metadata: Optional[Dict[str, Any]] = None
@@ -186,7 +241,6 @@ def _handle_nd_datafile(
 
         logger.info(f"Successfully opened {file_path_obj.name} with xarray (lazy load, times not decoded).")
 
-        # Find the time dim and coord *before* decoding
         time_dim, time_coord = _find_time_dimension(ds)
 
         if not time_dim or not time_coord:
@@ -195,12 +249,10 @@ def _handle_nd_datafile(
                 ds.close()
             return None, None, None, None
 
-        # Now, explicitly promote the time coordinate if it's a data_var
         if time_coord in ds.data_vars:
             logger.info(f"Promoting data variable '{time_coord}' to a coordinate.")
             ds = ds.set_coords(time_coord)
 
-        # Attempt CF-decoding
         logger.info("Applying CF time decoding...")
         try:
             ds = xr.decode_cf(ds)
@@ -208,18 +260,12 @@ def _handle_nd_datafile(
         except Exception as e_decode:
             logger.warning(f"CF time decoding failed: {e_decode}. Will proceed with raw time values.")
 
-        # Re-run finder to get the final state
         time_dim, time_coord = _find_time_dimension(ds)
         if not time_dim or not time_coord:
             logger.error("Failed to find time dimension after CF-decoding attempt.")
             if ds:
                 ds.close()
             return None, None, None, None
-
-        # --- REMOVED FAULTY CHECK ---
-        # The check that required 'Epoch' to be datetime64 is removed.
-        # We now rely on the pipeline to handle the conversion.
-        # --- END REMOVED BLOCK ---
 
         file_metadata = _get_xarray_file_metadata(ds, variables_to_parse)
         logger.info(f"Extracted xarray attributes from: {file_path_obj.name}")
@@ -237,10 +283,18 @@ def _handle_nd_datafile(
 
 
 def _concatenate_timeseries(
-    ts_list: List[TimeSeries],
-) -> Optional[TimeSeries]:
+    ts_list: List[GenericTimeSeries],
+) -> Optional[GenericTimeSeries]:
     """
     Combines a list of 1D TimeSeries objects into a single, sorted TimeSeries.
+
+    Args:
+        ts_list (List[GenericTimeSeries]): A list of 1D TimeSeries objects
+            to combine.
+
+    Returns:
+        Optional[GenericTimeSeries]: A single, combined, and sorted
+        TimeSeries object, or None if combination fails.
     """
     if not ts_list:
         return None
@@ -251,21 +305,30 @@ def _concatenate_timeseries(
             return ts_list[0]
 
         all_tables: List[Table] = [ts.to_table() for ts in ts_list]
-        combined_table = vstack_tables(all_tables)
+        combined_table: Table = vstack_tables(all_tables)
         combined_table.sort("date")
 
-        ts_combined = TimeSeries(combined_table, ts_list[0].meta)
-        if isinstance(ts_combined, list):
-            ts_combined = ts_combined[0] if ts_combined else None
+        ts_combined: Union[GenericTimeSeries, List[GenericTimeSeries]] = TimeSeries(combined_table, ts_list[0].meta)
 
-        if not ts_combined:
-            logger.error("Combination resulted in 'None' or empty object.", exc_info=True)
+        if isinstance(ts_combined, list):
+            ts_combined_obj = ts_combined[0] if ts_combined else None
+        else:
+            ts_combined_obj = ts_combined
+
+        if not ts_combined_obj:
+            logger.error(
+                "Combination resulted in 'None' or empty object.",
+                exc_info=True,
+            )
             return None
 
-        return ts_combined
+        return ts_combined_obj
 
     except Exception as e:
-        logger.error(f"Failed to concatenate or truncate 1D TimeSeries: {e}", exc_info=True)
+        logger.error(
+            f"Failed to concatenate or truncate 1D TimeSeries: {e}",
+            exc_info=True,
+        )
         return None
 
 
@@ -274,21 +337,41 @@ def parse_datafiles(
     start_time: datetime,
     end_time: datetime,
     variables_to_parse: List[str],
-) -> Tuple[Optional[Union[TimeSeries, List[Tuple[xr.Dataset, str, str]]]], Dict[str, Any]]:
+) -> Tuple[
+    Optional[Union[GenericTimeSeries, List[Tuple[xr.Dataset, str, str]]]],
+    Dict[str, Any],
+]:
     """
     Parses downloaded files (CDF, NC) and extracts metadata.
 
+    This function iterates through files, attempts to parse them as 1D
+    sunpy TimeSeries, and falls back to parsing them as N-D xarray Datasets.
+    It returns either a single combined 1D TimeSeries or a list of N-D
+    Datasets.
+
+    Args:
+        file_paths (List[str]): List of file paths to parse.
+        start_time (datetime): The start time for truncating 1D data.
+        end_time (datetime): The end time for truncating 1D data.
+        variables_to_parse (List[str]): Specific variables to extract
+            metadata for.
+
     Returns:
-        - A single TimeSeries for 1D data.
-        - OR a LIST of Tuples [(xr.Dataset, time_dim, time_coord), ...] for N-D data.
-        - AND the file metadata dictionary.
+        Tuple[
+            Optional[Union[GenericTimeSeries, List[Tuple[xr.Dataset, str, str]]]],
+            Dict[str, Any]
+        ]:
+            - A single `GenericTimeSeries` for 1D data.
+            - OR a LIST of Tuples [(xr.Dataset, time_dim, time_coord), ...]
+              for N-D data.
+            - AND the file metadata dictionary.
     """
 
     logger.info(f"Parsing {len(file_paths)} data files...")
 
     file_metadata: Dict[str, Any] = {}
-    all_1d_timeseries: List[TimeSeries] = []
-    all_nd_datasets: List[Tuple[xr.Dataset, str, str]] = []  # MODIFIED
+    all_1d_timeseries: List[GenericTimeSeries] = []
+    all_nd_datasets: List[Tuple[xr.Dataset, str, str]] = []
     has_extracted_metadata = False
 
     if not file_paths:
@@ -313,16 +396,20 @@ def parse_datafiles(
         if parsed_ts_list:
             all_1d_timeseries.extend(parsed_ts_list)
         else:
-            # MODIFIED: Handle new return signature
-            nd_data, nd_metadata, time_dim, time_coord = _handle_nd_datafile(file_path_obj, variables_to_parse)
+            (
+                nd_data,
+                nd_metadata,
+                time_dim,
+                time_coord,
+            ) = _handle_nd_datafile(file_path_obj, variables_to_parse)
+
             if nd_data is not None and time_dim is not None and time_coord is not None:
-                all_nd_datasets.append((nd_data, time_dim, time_coord))  # Add the tuple
+                all_nd_datasets.append((nd_data, time_dim, time_coord))
             if nd_metadata and not has_extracted_metadata:
                 file_metadata = nd_metadata
                 has_extracted_metadata = True
 
     if all_1d_timeseries:
-        # --- Close any N-D datasets that were opened but not used ---
         for ds, _, _ in all_nd_datasets:
             ds.close()
 
@@ -331,7 +418,7 @@ def parse_datafiles(
             return None, file_metadata
         try:
             logger.info(f"Filtering combined 1D TimeSeries to range: {start_time} to {end_time}")
-            ts_filtered = ts_combined.truncate(start_time, end_time)
+            ts_filtered: GenericTimeSeries = ts_combined.truncate(start_time, end_time)
             logger.info(f"Filtered 1D TimeSeries contains {len(ts_filtered.to_table())} entries.")
             return ts_filtered, file_metadata
         except Exception as e:
@@ -340,7 +427,7 @@ def parse_datafiles(
 
     elif all_nd_datasets:
         logger.info(f"Returning a list of {len(all_nd_datasets)} N-D xarray.Dataset objects (not concatenated).")
-        return all_nd_datasets, file_metadata  # MODIFIED
+        return all_nd_datasets, file_metadata
 
     logger.warning("No 1D or N-D data could be parsed.")
     return None, file_metadata
