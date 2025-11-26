@@ -1,29 +1,22 @@
 import logging
-import time
 import tempfile
 import pathlib
-from typing import Any, Dict
+import time
+from typing import Any, Dict, List, Tuple
 
 from pymongo.database import Database
 
 from space_weather_analysis.config import (
     CATALOG_FILE,
-    CME_CATALOG_FILE,
     HAPI_SERVER_LIST_FILE,
-    SILSO_FILE,
+    HAPI_SOURCE_ID,
+    FIDO_CDAWEB_SOURCE_ID,
 )
 from space_weather_analysis.etl.master_catalog import CatalogETL
-from space_weather_analysis.etl.cme_catalog import CmeETL
-from space_weather_analysis.etl.sunspots import SilsoETL
 from space_weather_analysis.hapi_pipeline.discoverer import HapiDiscoverer
-from space_weather_analysis.hapi_pipeline.hapi_pipeline import (
-    GenericHapiPipeline,
-)
-from space_weather_analysis.sunpy_pipeline.cdaweb_pipeline import CdawebPipeline
 from space_weather_analysis.sunpy_pipeline.discoverer import FidoCdawebDiscoverer
-from space_weather_analysis.util.catalog.catalog_manager import (
-    UniversalCatalogManager,
-)
+from space_weather_analysis.util.catalog.catalog_manager import UniversalCatalogManager
+from space_weather_analysis.pipelines.factory import PipelineFactory
 
 logger = logging.getLogger(__name__)
 
@@ -70,132 +63,41 @@ class Application:
             self._run_local_file_etl()
 
         if run_config.get("run_pipeline_test"):
-            self._run_combined_pipeline_test()
+            self._run_unified_pipeline_test()
 
         logger.info("Application run finished.")
 
-    def _run_fido_file_pipeline(self, config: Dict[str, Any]) -> None:
-        """
-        Runs the file-download pipeline for a given configuration.
-
-        Args:
-            config (Dict[str, Any]): The configuration dictionary containing
-                                     START_TIME, END_TIME, and DATASET_FILTER.
-        """
-        start_time = config.get("START_TIME")
-        end_time = config.get("END_TIME")
-        datasets_to_process = config.get("DATASET_FILTER")
-
-        if not start_time or not end_time or not datasets_to_process:
-            logger.error(
-                "START_TIME, END_TIME, and DATASET_FILTER (list of datasets) must be specified for the file pipeline.",
-                exc_info=True,
-            )
-            return
-
-        # Create a temporary directory that is automatically cleaned up
-        with tempfile.TemporaryDirectory() as temp_dir_path_str:
-            temp_data_path = pathlib.Path(temp_dir_path_str)
-
-            logger.info("=========================================")
-            logger.info("Starting File Ingestion Pipeline")
-            logger.info(f"Time Range: {start_time} to {end_time}")
-            logger.info(f"Dataset Filter: {datasets_to_process}")
-            logger.info(f"Using temporary download path: {temp_data_path}")
-            logger.info("=========================================")
-
-            start_run_time = time.time()
-            try:
-                # Pass the temporary path to the pipeline
-                pipeline = CdawebPipeline(db=self.db, base_data_path=temp_data_path)
-                pipeline.run(
-                    datasets_to_process=datasets_to_process,
-                    start_time=start_time,
-                    end_time=end_time,
-                )
-
-            except Exception as e:
-                logger.critical(f"File Pipeline failed: {e}", exc_info=True)
-            finally:
-                end_run_time = time.time()
-                total_time = end_run_time - start_run_time
-                logger.info(f"File Pipeline finished in {total_time:.2f} seconds.")
-
-    def _run_generic_hapi_pipeline(self, config: Dict[str, Any]) -> None:
-        """
-        Runs the streaming data pipeline for a given configuration.
-
-        Args:
-            config (Dict[str, Any]): The configuration dictionary containing
-                                     START_TIME, END_TIME, and DATASET_FILTER.
-        """
-        start_time = config.get("START_TIME")
-        end_time = config.get("END_TIME")
-        datasets_to_process = config.get("DATASET_FILTER")
-
-        if not start_time or not end_time or not datasets_to_process:
-            logger.error(
-                "START_TIME, END_TIME, and DATASET_FILTER (list of datasets) "
-                "must be specified for the streaming pipeline.",
-                exc_info=True,
-            )
-            return
-
-        logger.info("=========================================")
-        logger.info("Starting Generic Streaming Pipeline")
-        logger.info(f"Time Range: {start_time} to {end_time}")
-        logger.info(f"Datasets: {datasets_to_process}")
-        logger.info("=========================================")
-
-        start_run_time = time.time()
-        try:
-            pipeline = GenericHapiPipeline(db=self.db)
-            pipeline.run(
-                datasets_to_process=datasets_to_process,
-                start_time=start_time,
-                stop_time=end_time,
-            )
-        except Exception as e:
-            logger.critical(f"Streaming Pipeline failed: {e}", exc_info=True)
-        finally:
-            end_run_time = time.time()
-            total_time = end_run_time - start_run_time
-            logger.info(f"Streaming Pipeline execution finished in {total_time:.2f} seconds.")
-
     def _run_local_file_etl(self) -> None:
         """
-        Main entry point for the local file ETL application.
+        Runs the local file ETLs using the factory mechanism.
         """
         logger.info("--- Local ETL Application started ---")
-        logger.info(f"Successfully connected to database: {self.db.name}")
+        # We use a temporary context just to initialize the factory,
+        # though local files don't strictly need a temp dir.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            factory = PipelineFactory(self.db, pathlib.Path(temp_dir))
 
-        try:
-            logger.info("Starting Sunspot ETL process...")
-            SilsoETL(self.db, file_path=SILSO_FILE).run()
-            logger.info("Finished Sunspot ETL process.")
+            local_jobs = ["LOCAL_SILSO", "LOCAL_CME"]
 
-            logger.info("Starting CME Catalog ETL process...")
-            CmeETL(self.db, file_path=CME_CATALOG_FILE).run()
-            logger.info("Finished CME Catalog ETL process.")
+            for job_type in local_jobs:
+                try:
+                    logger.info(f"Starting pipeline for {job_type}...")
+                    pipeline = factory.get_pipeline(job_type)
+                    # Local pipelines ignore arguments, so we pass empty/dummy values
+                    pipeline.run([], None, None)
+                    logger.info(f"Finished pipeline for {job_type}.")
+                except Exception as e:
+                    logger.error(f"Error running local pipeline {job_type}: {e}", exc_info=True)
 
-            collections = self.db.list_collection_names()
-            logger.info(f"Current collections: {collections}")
-        except Exception as e:
-            logger.error(f"Error during local ETL: {e}", exc_info=True)
-        finally:
-            logger.info("--- Local ETL Application finished ---")
+        logger.info("--- Local ETL Application finished ---")
 
     def _run_catalog_build_task(self) -> None:
         """
         Initializes and runs the universal catalog build process.
-
-        This function instantiates the required discoverer strategies
-        and injects them into the UniversalCatalogManager.
         """
         logger.info("--- Running: Universal Catalog Build ---")
 
         try:
-            # Instantiate the concrete discoverer strategies
             hapi_discoverer = HapiDiscoverer(
                 server_list_path=HAPI_SERVER_LIST_FILE,
                 include_test_servers=True,
@@ -214,7 +116,6 @@ class Application:
     def _run_catalog_etl_task(self) -> None:
         """
         Runs the ETL process for the master catalog.
-        This task loads the generated catalog file into MongoDB.
         """
         logger.info("--- Running: Master Catalog ETL ---")
         try:
@@ -224,27 +125,57 @@ class Application:
         finally:
             logger.info("--- Finished: Master Catalog ETL ---")
 
-    def _run_combined_pipeline_test(self) -> None:
+    def _run_unified_pipeline_test(self) -> None:
         """
-        Runs a test query for one or more pipelines
-        to ensure the MongoDB-driven pipelines are working.
+        Runs a test query for one or more pipelines using the unified Factory approach.
         """
-        logger.info("===== Starting Combined Pipeline Test =====")
+        logger.info("===== Starting Unified Pipeline Test =====")
 
-        hapi_config = self.test_configs.get("hapi_config")
-        if hapi_config:
-            logger.info(
-                f"--- [Test 1/2] Running Generic Streaming Pipeline for '{hapi_config.get('DATASET_FILTER')}' ---"
-            )
-            self._run_generic_hapi_pipeline(config=hapi_config)
+        # Define jobs based on config availability
+        jobs: List[Tuple[str, str]] = []
+
+        if self.test_configs.get("hapi_config"):
+            jobs.append(("hapi_config", HAPI_SOURCE_ID))
         else:
             logger.warning("No HAPI test configuration found. Skipping.")
 
-        fido_config = self.test_configs.get("fido_config")
-        if fido_config:
-            logger.info(f"--- [Test 2/2] Running File (CDAWeb) Pipeline for '{fido_config.get('DATASET_FILTER')}' ---")
-            self._run_fido_file_pipeline(config=fido_config)
+        if self.test_configs.get("fido_config"):
+            jobs.append(("fido_config", FIDO_CDAWEB_SOURCE_ID))
         else:
             logger.warning("No FIDO test configuration found. Skipping.")
 
-        logger.info("===== Combined Pipeline Test Finished =====")
+        # Use a temporary directory context for file-based pipelines
+        with tempfile.TemporaryDirectory() as temp_dir_str:
+            temp_path = pathlib.Path(temp_dir_str)
+            logger.info(f"Using temporary path for file pipelines: {temp_path}")
+
+            # Initialize the Factory once
+            factory = PipelineFactory(self.db, temp_path)
+
+            for config_key, source_type in jobs:
+                config = self.test_configs.get(config_key, {})
+                datasets = config.get("DATASET_FILTER")
+                start_time = config.get("START_TIME")
+                end_time = config.get("END_TIME")
+
+                if not datasets or not start_time or not end_time:
+                    logger.warning(f"Skipping {source_type}: Incomplete configuration.")
+                    continue
+
+                logger.info(f"--- Running Pipeline for {source_type} ---")
+                start_run_time = time.time()
+
+                try:
+                    # Get the correct pipeline strategy
+                    pipeline = factory.get_pipeline(source_type)
+
+                    # Execute securely via interface
+                    pipeline.run(datasets, start_time, end_time)
+
+                except Exception as e:
+                    logger.critical(f"Pipeline execution failed for {source_type}: {e}", exc_info=True)
+                finally:
+                    duration = time.time() - start_run_time
+                    logger.info(f"--- Finished {source_type} in {duration:.2f}s ---")
+
+        logger.info("===== Unified Pipeline Test Finished =====")

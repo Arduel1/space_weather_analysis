@@ -10,6 +10,7 @@ from sunpy.timeseries.timeseriesbase import GenericTimeSeries
 from space_weather_analysis.config import HAPI_SOURCE_ID
 from space_weather_analysis.database.mongo_loader_base import MongoLoaderBase
 from space_weather_analysis.hapi_pipeline.hapi_client import GenericHapiClient
+from space_weather_analysis.pipelines.base_pipeline import BasePipeline
 from space_weather_analysis.util.converters.hapi_converter import convert_hapi_to_timeseries
 from space_weather_analysis.util.data_preprocessing import generate_time_chunks, sanitize_collection_name
 from space_weather_analysis.util.metadata.metadata_generator import MetadataWriter
@@ -18,7 +19,7 @@ from space_weather_analysis.util.metadata.variable_metadata import VariableMetad
 logger = logging.getLogger(__name__)
 
 
-class GenericHapiPipeline(MongoLoaderBase):
+class GenericHapiPipeline(MongoLoaderBase, BasePipeline):
     """
     Orchestrates data streaming, metadata generation, and data loading
     using the generic client, which reads its catalog from MongoDB.
@@ -94,22 +95,22 @@ class GenericHapiPipeline(MongoLoaderBase):
         logger.info(f"Transformed {len(documents)} documents.")
         return documents
 
-    def _ensure_time_range_is_aware(self, start_time: datetime, stop_time: datetime) -> Tuple[datetime, datetime]:
+    def _ensure_time_range_is_aware(self, start_time: datetime, end_time: datetime) -> Tuple[datetime, datetime]:
         """
-        Ensures both start and stop times are timezone-aware (UTC).
+        Ensures both start and end times are timezone-aware (UTC).
 
         Args:
             start_time (datetime): The start time.
-            stop_time (datetime): The stop time.
+            end_time (datetime): The end time.
 
         Returns:
             Tuple[datetime, datetime]: Timezone-aware datetime objects.
         """
         if start_time.tzinfo is None:
             start_time = start_time.replace(tzinfo=timezone.utc)
-        if stop_time.tzinfo is None:
-            stop_time = stop_time.replace(tzinfo=timezone.utc)
-        return start_time, stop_time
+        if end_time.tzinfo is None:
+            end_time = end_time.replace(tzinfo=timezone.utc)
+        return start_time, end_time
 
     def _load_data_to_db(
         self,
@@ -204,9 +205,9 @@ class GenericHapiPipeline(MongoLoaderBase):
 
     def run(
         self,
-        datasets_to_process: List[str],
+        datasets: List[str],
         start_time: datetime,
-        stop_time: datetime,
+        end_time: datetime,
         chunk_delta: timedelta = timedelta(days=7),
     ) -> None:
         """
@@ -217,9 +218,9 @@ class GenericHapiPipeline(MongoLoaderBase):
         It checks if data for a chunk already exists before fetching.
 
         Args:
-            datasets_to_process (List[str]): A list of dataset IDs to fetch.
+            datasets (List[str]): A list of dataset IDs to fetch.
             start_time (datetime): The start time for the data query.
-            stop_time (datetime): The end time for the data query.
+            end_time (datetime): The end time for the data query.
             chunk_delta (timedelta): The duration of each processing chunk.
                                      Defaults to 7 days.
         """
@@ -228,9 +229,9 @@ class GenericHapiPipeline(MongoLoaderBase):
             logger.error("Client has no catalog map loaded from DB. Aborting pipeline.")
             return
 
-        logger.info(f"Processing {len(datasets_to_process)} datasets...")
+        logger.info(f"Processing {len(datasets)} datasets...")
 
-        config_start, config_stop = self._ensure_time_range_is_aware(start_time, stop_time)
+        config_start, config_stop = self._ensure_time_range_is_aware(start_time, end_time)
 
         # Use the passed chunk_delta instead of a hardcoded value
         time_chunks = generate_time_chunks(config_start, config_stop, chunk_delta)
@@ -240,7 +241,7 @@ class GenericHapiPipeline(MongoLoaderBase):
             f"Time range {config_start} to {config_stop} split into {len(time_chunks)} chunk(s) using delta {chunk_delta}."
         )
 
-        for dataset_id in datasets_to_process:
+        for dataset_id in datasets:
             logger.info(f"Processing dataset {dataset_id} for all {len(time_chunks)} chunks...")
 
             collection_name = sanitize_collection_name(dataset_id)

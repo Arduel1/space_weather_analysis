@@ -20,6 +20,7 @@ from sunpy.timeseries.timeseriesbase import GenericTimeSeries
 
 from space_weather_analysis.config import FIDO_CDAWEB_SOURCE_ID
 from space_weather_analysis.database.mongo_loader_base import MongoLoaderBase
+from space_weather_analysis.pipelines.base_pipeline import BasePipeline
 from space_weather_analysis.sunpy_pipeline.cdaweb_client import CdawebClient
 from space_weather_analysis.util.data_preprocessing import generate_time_chunks, sanitize_collection_name
 from space_weather_analysis.util.file_parser import parse_datafiles
@@ -29,7 +30,7 @@ from space_weather_analysis.util.metadata.variable_metadata import VariableMetad
 logger = logging.getLogger(__name__)
 
 
-class CdawebPipeline(MongoLoaderBase):
+class CdawebPipeline(MongoLoaderBase, BasePipeline):
     """
     Orchestrates the process of fetching, downloading, parsing,
     and documenting data from a file-based data service.
@@ -511,7 +512,7 @@ class CdawebPipeline(MongoLoaderBase):
 
     def run(
         self,
-        datasets_to_process: List[str],
+        datasets: List[str],
         start_time: datetime,
         end_time: datetime,
     ) -> None:
@@ -523,24 +524,24 @@ class CdawebPipeline(MongoLoaderBase):
         It checks if data for a chunk already exists before fetching.
 
         Args:
-            datasets_to_process (List[str]): A list of dataset IDs to fetch.
+            datasets (List[str]): A list of dataset IDs to fetch.
             start_time (datetime): The start time for the data query.
             end_time (datetime): The end time for the data query.
         """
         logger.info("=========================================")
-        logger.info(f"Starting CDAWeb Pipeline (FILTERED: {datasets_to_process})")
+        logger.info(f"Starting CDAWeb Pipeline (FILTERED: {datasets})")
         logger.info(f"Time Range: {start_time} to {end_time}")
         logger.info(f"Data Root: {self.base_data_dir}")
         logger.info("=========================================")
 
-        if not datasets_to_process:
-            logger.warning("No datasets specified in 'datasets_to_process'.")
+        if not datasets:
+            logger.warning("No datasets specified in 'datasets'.")
             logger.info("=========================================")
             logger.info("CDAWeb Pipeline finished (no work done).")
             logger.info("=========================================")
             return
 
-        logger.info(f"--- Will process {len(datasets_to_process)} FIDO datasets ---")
+        logger.info(f"--- Will process {len(datasets)} FIDO datasets ---")
 
         chunk_delta = timedelta(days=7)
         time_chunks = generate_time_chunks(start_time, end_time, chunk_delta)
@@ -548,7 +549,7 @@ class CdawebPipeline(MongoLoaderBase):
 
         logger.info(f"Time range {start_time} to {end_time} split into {len(time_chunks)} chunk(s).")
 
-        for dataset_id in datasets_to_process:
+        for dataset_id in datasets:
             group_name = self._get_fido_source_from_db(dataset_id)
 
             if not group_name:
