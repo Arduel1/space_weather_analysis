@@ -35,7 +35,9 @@ SILSO_FILE = DATA_ROOT / "SN_d_tot_V2.0.csv"
 """Path to the SILSO daily sunspot data CSV file."""
 
 
-# --- Catalog Fiel Configuration ---
+# --- Catalog Field Configuration ---
 FIDO_CDAWEB_SOURCE_ID = "FIDO_CDAWEB"
+"""Identifier used in the catalog to denote datasets sourced via SunPy/Fido (CDAWeb)."""
 
 HAPI_SOURCE_ID = "HAPI"
+"""Identifier used in the catalog to denote datasets sourced via HAPI servers."""

@@ -109,7 +109,7 @@ class CmeETL(BaseETLProcessor):
         try:
             # Create the primary 'timestamp' field
             raw_data["timestamp"] = pd.to_datetime(
-                raw_data["date"] + " " + raw_data["time"],
+                raw_data["date"].astype(str) + " " + raw_data["time"].astype(str),
                 format="%Y/%m/%d %H:%M:%S",
                 errors="coerce",
             )

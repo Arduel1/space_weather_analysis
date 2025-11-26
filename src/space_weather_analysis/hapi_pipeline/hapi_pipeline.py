@@ -207,18 +207,21 @@ class GenericHapiPipeline(MongoLoaderBase):
         datasets_to_process: List[str],
         start_time: datetime,
         stop_time: datetime,
+        chunk_delta: timedelta = timedelta(days=7),
     ) -> None:
         """
         Runs the full streaming pipeline for a list of datasets.
 
-        This method iterates through the specified time range in 7-day
-        chunks to avoid failures on large requests with data gaps.
+        This method iterates through the specified time range in chunks
+        (defined by chunk_delta) to avoid failures on large requests with data gaps.
         It checks if data for a chunk already exists before fetching.
 
         Args:
             datasets_to_process (List[str]): A list of dataset IDs to fetch.
             start_time (datetime): The start time for the data query.
             stop_time (datetime): The end time for the data query.
+            chunk_delta (timedelta): The duration of each processing chunk.
+                                     Defaults to 7 days.
         """
         logger.info(f"--- Starting Generic {HAPI_SOURCE_ID} Pipeline ---")
         if not self.client.catalog_map:
@@ -229,11 +232,13 @@ class GenericHapiPipeline(MongoLoaderBase):
 
         config_start, config_stop = self._ensure_time_range_is_aware(start_time, stop_time)
 
-        chunk_delta = timedelta(days=7)
+        # Use the passed chunk_delta instead of a hardcoded value
         time_chunks = generate_time_chunks(config_start, config_stop, chunk_delta)
         time_field = "timestamp"  # The field to check for existence
 
-        logger.info(f"Time range {config_start} to {config_stop} split into {len(time_chunks)} chunk(s).")
+        logger.info(
+            f"Time range {config_start} to {config_stop} split into {len(time_chunks)} chunk(s) using delta {chunk_delta}."
+        )
 
         for dataset_id in datasets_to_process:
             logger.info(f"Processing dataset {dataset_id} for all {len(time_chunks)} chunks...")

@@ -33,10 +33,10 @@ def main() -> None:
     # --- Run Configuration ---
     # Define which tasks to run.
     RUN_CONFIGURATION: Dict[str, bool] = {
-        "build_catalog": False,
-        "run_catalog_etl": True,
+        "build_catalog": True,
+        "run_catalog_etl": False,
         "run_local_etl": False,
-        "run_pipeline_test": True,
+        "run_pipeline_test": False,
     }
 
     # --- Test Configurations ---
