@@ -9,10 +9,10 @@ from space_weather_analysis.config import (
     HAPI_SOURCE_ID,
     SILSO_FILE,
 )
-from space_weather_analysis.hapi_pipeline.hapi_pipeline import GenericHapiPipeline
-from space_weather_analysis.pipelines.base_pipeline import BasePipeline
-from space_weather_analysis.pipelines.local_pipelines import LocalCmePipeline, LocalSunspotPipeline
-from space_weather_analysis.sunpy_pipeline.cdaweb_pipeline import CdawebPipeline
+from space_weather_analysis.pipelines.hapi import HapiPipeline
+from space_weather_analysis.pipelines.base import BasePipeline
+from space_weather_analysis.pipelines.local import LocalCmePipeline, LocalSunspotPipeline
+from space_weather_analysis.pipelines.cdaweb import CdawebPipeline
 
 
 class PipelineFactory:
@@ -47,7 +47,7 @@ class PipelineFactory:
             ValueError: If the source_type is unknown.
         """
         if source_type == HAPI_SOURCE_ID:
-            return GenericHapiPipeline(self.db)
+            return HapiPipeline(self.db)
 
         elif source_type == FIDO_CDAWEB_SOURCE_ID:
             return CdawebPipeline(self.db, self.base_data_path)

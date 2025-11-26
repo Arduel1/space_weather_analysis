@@ -3,12 +3,12 @@ import logging
 import pathlib
 from typing import Any, Dict, List
 
-from space_weather_analysis.util.catalog.abstract_discoverer import AbstractDiscoverer
+from space_weather_analysis.discovery.discoverers.base import AbstractDiscoverer
 
 logger = logging.getLogger(__name__)
 
 
-class UniversalCatalogManager:
+class CatalogBuilder:
     """
     Builds a master catalog by orchestrating multiple discovery strategies.
 

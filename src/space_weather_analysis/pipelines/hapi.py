@@ -8,9 +8,9 @@ from pymongo.database import Database
 from sunpy.timeseries.timeseriesbase import GenericTimeSeries
 
 from space_weather_analysis.config import HAPI_SOURCE_ID
-from space_weather_analysis.database.mongo_loader_base import MongoLoaderBase
-from space_weather_analysis.hapi_pipeline.hapi_client import GenericHapiClient
-from space_weather_analysis.pipelines.base_pipeline import BasePipeline
+from space_weather_analysis.database.mongo_loader import MongoLoader
+from space_weather_analysis.clients.hapi import HapiClient
+from space_weather_analysis.pipelines.base import BasePipeline
 from space_weather_analysis.util.converters.hapi_converter import convert_hapi_to_timeseries
 from space_weather_analysis.util.data_preprocessing import generate_time_chunks, sanitize_collection_name
 from space_weather_analysis.util.metadata.metadata_generator import MetadataWriter
@@ -19,7 +19,7 @@ from space_weather_analysis.util.metadata.variable_metadata import VariableMetad
 logger = logging.getLogger(__name__)
 
 
-class GenericHapiPipeline(MongoLoaderBase, BasePipeline):
+class HapiPipeline(MongoLoader, BasePipeline):
     """
     Orchestrates data streaming, metadata generation, and data loading
     using the generic client, which reads its catalog from MongoDB.
@@ -36,7 +36,7 @@ class GenericHapiPipeline(MongoLoaderBase, BasePipeline):
             db (Database): The MongoDB database instance.
         """
         super().__init__(db)
-        self.client = GenericHapiClient(db)
+        self.client = HapiClient(db)
         self.metadata_writer = MetadataWriter(db)
 
     def _normalize_hapi_meta_to_variables(self, hapi_meta: Dict[str, Any]) -> List[VariableMetadata]:

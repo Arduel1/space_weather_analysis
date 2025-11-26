@@ -19,9 +19,9 @@ from sunpy.net.fido_factory import UnifiedResponse
 from sunpy.timeseries.timeseriesbase import GenericTimeSeries
 
 from space_weather_analysis.config import FIDO_CDAWEB_SOURCE_ID
-from space_weather_analysis.database.mongo_loader_base import MongoLoaderBase
-from space_weather_analysis.pipelines.base_pipeline import BasePipeline
-from space_weather_analysis.sunpy_pipeline.cdaweb_client import CdawebClient
+from space_weather_analysis.database.mongo_loader import MongoLoader
+from space_weather_analysis.pipelines.base import BasePipeline
+from space_weather_analysis.clients.cdaweb import CdawebClient
 from space_weather_analysis.util.data_preprocessing import generate_time_chunks, sanitize_collection_name
 from space_weather_analysis.util.file_parser import parse_datafiles
 from space_weather_analysis.util.metadata.metadata_generator import MetadataWriter
@@ -30,7 +30,7 @@ from space_weather_analysis.util.metadata.variable_metadata import VariableMetad
 logger = logging.getLogger(__name__)
 
 
-class CdawebPipeline(MongoLoaderBase, BasePipeline):
+class CdawebPipeline(MongoLoader, BasePipeline):
     """
     Orchestrates the process of fetching, downloading, parsing,
     and documenting data from a file-based data service.

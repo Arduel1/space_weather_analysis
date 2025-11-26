@@ -12,10 +12,10 @@ from space_weather_analysis.config import (
     HAPI_SOURCE_ID,
     FIDO_CDAWEB_SOURCE_ID,
 )
-from space_weather_analysis.etl.master_catalog import CatalogETL
-from space_weather_analysis.hapi_pipeline.discoverer import HapiDiscoverer
-from space_weather_analysis.sunpy_pipeline.discoverer import FidoCdawebDiscoverer
-from space_weather_analysis.util.catalog.catalog_manager import UniversalCatalogManager
+from space_weather_analysis.discovery.loader import CatalogLoader
+from space_weather_analysis.discovery.discoverers.hapi import HapiDiscoverer
+from space_weather_analysis.discovery.discoverers.cdaweb import CdawebDiscoverer
+from space_weather_analysis.discovery.builder import CatalogBuilder
 from space_weather_analysis.pipelines.factory import PipelineFactory
 
 logger = logging.getLogger(__name__)
@@ -102,11 +102,11 @@ class Application:
                 server_list_path=HAPI_SERVER_LIST_FILE,
                 include_test_servers=True,
             )
-            fido_discoverer = FidoCdawebDiscoverer()
+            fido_discoverer = CdawebDiscoverer()
 
             discoverers = [hapi_discoverer, fido_discoverer]
 
-            manager = UniversalCatalogManager(discoverers=discoverers, catalog_output_path=CATALOG_FILE)
+            manager = CatalogBuilder(discoverers=discoverers, catalog_output_path=CATALOG_FILE)
             manager.build_catalog()
         except Exception as e:
             logger.error(f"Error during Universal Catalog Build: {e}", exc_info=True)
@@ -119,7 +119,7 @@ class Application:
         """
         logger.info("--- Running: Master Catalog ETL ---")
         try:
-            CatalogETL(self.db, file_path=CATALOG_FILE).run()
+            CatalogLoader(self.db, file_path=CATALOG_FILE).run()
         except Exception as e:
             logger.error(f"Error during catalog ETL: {e}", exc_info=True)
         finally:

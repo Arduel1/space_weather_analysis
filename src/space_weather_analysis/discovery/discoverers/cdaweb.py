@@ -2,13 +2,13 @@ import logging
 from typing import Any, Dict, Generator, Tuple
 
 from space_weather_analysis.config import FIDO_CDAWEB_SOURCE_ID
-from space_weather_analysis.sunpy_pipeline.cdaweb_client import CdawebClient
-from space_weather_analysis.util.catalog.abstract_discoverer import AbstractDiscoverer
+from space_weather_analysis.clients.cdaweb import CdawebClient
+from space_weather_analysis.discovery.discoverers.base import AbstractDiscoverer
 
 logger = logging.getLogger(__name__)
 
 
-class FidoCdawebDiscoverer(AbstractDiscoverer):
+class CdawebDiscoverer(AbstractDiscoverer):
     """
     Discovers datasets by querying the data source via the CdawebClient.
     """

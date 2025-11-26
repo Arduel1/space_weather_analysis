@@ -10,7 +10,7 @@ from space_weather_analysis.util.data_preprocessing import batch_generator
 logger = logging.getLogger(__name__)
 
 
-class MongoLoaderBase(ABC):
+class MongoLoader(ABC):
     """
     Abstract Base Class providing common MongoDB loading functionality.
 

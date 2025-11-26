@@ -75,7 +75,7 @@ def _calculate_time_intersection(
         return None
 
 
-class GenericHapiClient:
+class HapiClient:
     """
     A generic client that uses a master catalog from MongoDB to find and
     stream data from a data service. Implements server fallback logic.

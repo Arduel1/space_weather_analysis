@@ -7,12 +7,12 @@ from pymongo import ReplaceOne
 from pymongo import errors as pymongo_errors
 from pymongo.database import Database
 
-from .base_processor import BaseETLProcessor
+from ..etl.base_processor import BaseETLProcessor
 
 logger = logging.getLogger(__name__)
 
 
-class CatalogETL(BaseETLProcessor):
+class CatalogLoader(BaseETLProcessor):
     """
     ETL Processor for loading the master catalog file.
     This processor loads the catalog data into MongoDB, treating

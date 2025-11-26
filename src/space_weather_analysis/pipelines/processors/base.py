@@ -3,10 +3,10 @@ from typing import Any, Dict, List
 
 from pymongo.database import Database
 
-from space_weather_analysis.database.mongo_loader_base import MongoLoaderBase
+from space_weather_analysis.database.mongo_loader import MongoLoader
 
 
-class BaseETLProcessor(MongoLoaderBase):
+class BaseETLProcessor(MongoLoader):
     """
     Abstract Base Class for an ETL processor.
 
