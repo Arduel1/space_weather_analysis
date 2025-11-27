@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from pymongo.database import Database
 
-from .base import BaseETLProcessor
+from space_weather_analysis.pipelines.processors.base import BaseETLProcessor 
 
 logger = logging.getLogger(__name__)
 
