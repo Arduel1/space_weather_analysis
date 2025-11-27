@@ -7,7 +7,7 @@ from pymongo import ReplaceOne
 from pymongo import errors as pymongo_errors
 from pymongo.database import Database
 
-from ..etl.base_processor import BaseETLProcessor
+from space_weather_analysis.pipelines.processors.base import BaseETLProcessor
 
 logger = logging.getLogger(__name__)
 

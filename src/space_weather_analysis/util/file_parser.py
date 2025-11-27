@@ -3,16 +3,62 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Hashable, List, Optional, Tuple, Union, cast
 
+import numpy as np
 import pandas as pd
 import xarray as xr
 from astropy.table import Table
 from astropy.table import vstack as vstack_tables
+from astropy.time import Time
 from cdflib import CDF
 from sunpy.timeseries import GenericTimeSeries, TimeSeries
 from sunpy.util import expand_list
 from sunpy.util.datatype_factory_base import NoMatchError
 
 logger = logging.getLogger(__name__)
+
+
+def parse_xarray_timestamp(ts_slice: xr.Dataset, time_coord: str, index: int) -> Optional[datetime]:
+    """
+    Safely parses the timestamp from an xarray slice.
+
+    This function attempts to convert the timestamp from various formats (Unix timestamp,
+    scalar object, numpy datetime64) into a standard Python datetime object.
+
+    Args:
+        ts_slice (xr.Dataset): The single time-slice of the dataset.
+        time_coord (str): The name of the time coordinate.
+        index (int): The current loop index (used for logging context).
+
+    Returns:
+        Optional[datetime]: The parsed datetime object or None if parsing fails.
+    """
+    try:
+        time_val: Any = ts_slice[time_coord].values
+
+        # Try conversion via Astropy Time (handles Unix/Encoded formats robustly)
+        timestamp_obj: Any = Time(time_val, format="unix").to_datetime()
+
+        if isinstance(timestamp_obj, datetime):
+            return timestamp_obj
+
+        # Handle 0-d arrays/scalars (often returned by xarray slices)
+        if hasattr(timestamp_obj, "item"):
+            timestamp_item = timestamp_obj.item()
+            if isinstance(timestamp_item, datetime):
+                return timestamp_item
+
+        # Check for masked values (missing data)
+        if np.ma.is_masked(timestamp_obj):
+            logger.warning(f"Skipping timestep {index}: Time value is masked.")
+            return None
+
+        logger.warning(f"Timestamp at index {index} is not a scalar datetime ({type(timestamp_obj)}).")
+        return None
+
+    except Exception as e:
+        # If Astropy fails, fallback or just log error
+        logger.warning(f"Skipping timestep {index}, timestamp parse failed for coord '{time_coord}': {e}")
+        return None
 
 
 def _get_cdf_file_metadata(cdf_file: CDF, variables_to_parse: List[str]) -> Dict[str, Any]:
@@ -74,17 +120,16 @@ def _parse_1d_timeseries_file(
     file_path_str: str,
 ) -> List[GenericTimeSeries]:
     """
-    Attempts to parse a file using the native sunpy.timeseries.TimeSeries
-    factory.
+    Attempts to parse a file using the native sunpy.timeseries.TimeSeries factory.
 
-    This function handles files that can be loaded as 1D time series.
+    This function handles files that can be loaded as 1D time series (e.g., CSV, some CDFs).
 
     Args:
         file_path_str (str): The path to the file.
 
     Returns:
-        List[GenericTimeSeries]: A list of valid, non-empty
-        GenericTimeSeries objects parsed from the file.
+        List[GenericTimeSeries]: A list of valid, non-empty GenericTimeSeries objects
+        parsed from the file. Returns an empty list if parsing fails.
     """
     try:
         # TimeSeries factory can return a single instance or a list
@@ -117,7 +162,7 @@ def _find_time_dimension(
     Robustly finds the time dimension and coordinate in an xarray.Dataset.
 
     It checks both coordinates and data variables for time-like data,
-    first by checking dtype, then by falling back to common names.
+    first by checking dtype, then by falling back to common names like 'Epoch'.
 
     Args:
         ds (xr.Dataset): The xarray Dataset to search.
@@ -133,18 +178,17 @@ def _find_time_dimension(
     all_vars: Dict[Hashable, xr.DataArray] = {**ds.coords, **ds.data_vars}
     possible_coords: List[str] = []
 
-    # Check dtype
+    # Check dtype for datetime compatibility
     for var_name, var in all_vars.items():
         if pd.api.types.is_datetime64_any_dtype(var.dtype):
             possible_coords.append(str(var_name))
 
     if possible_coords:
-        time_coord_name = possible_coords[0]  # Take the first one
-        if "Epoch" in possible_coords:  # Prefer 'Epoch' if available
+        time_coord_name = possible_coords[0]  # Take the first valid one
+        if "Epoch" in possible_coords:  # Prefer 'Epoch' if available as it is standard in space physics
             time_coord_name = "Epoch"
         logger.info(f"Found time coordinate via dtype: {time_coord_name}")
 
-    # TODO: Remove
     # Fallback to names if dtype check fails
     if not time_coord_name:
         fallback_names = ["Epoch", "time", "Time"]
@@ -166,8 +210,7 @@ def _find_time_dimension(
         time_var: xr.DataArray = (
             ds.coords[time_coord_name] if time_coord_name in ds.coords else ds.data_vars[time_coord_name]
         )
-        # FIX: Dims are a tuple of Hashable
-        time_dims: Tuple[Hashable, ...] = time_var.dims
+        time_dims = time_var.dims
     except KeyError:
         logger.error(f"Identified time coord '{time_coord_name}' but could not access it.")
         return None, None
@@ -227,12 +270,13 @@ def _handle_nd_datafile(
     time_dim: Optional[str] = None
     time_coord: Optional[str] = None
 
+    # Only attempt to parse NetCDF via xarray if suffix matches
     if file_path_obj.suffix.lower() != ".nc":
         logger.warning(f"File {file_path_obj.name} is not .nc and failed native sunpy parsing. Skipping.")
         return None, None, None, None
 
     try:
-        # Open dataset WITHOUT automatic time decoding
+        # Open dataset WITHOUT automatic time decoding first
         try:
             ds = xr.open_dataset(file_path_obj, engine="h5netcdf", decode_times=False)
         except Exception:
@@ -260,6 +304,7 @@ def _handle_nd_datafile(
         except Exception as e_decode:
             logger.warning(f"CF time decoding failed: {e_decode}. Will proceed with raw time values.")
 
+        # Re-check dimensions after decoding
         time_dim, time_coord = _find_time_dimension(ds)
         if not time_dim or not time_coord:
             logger.error("Failed to find time dimension after CF-decoding attempt.")
@@ -308,8 +353,10 @@ def _concatenate_timeseries(
         combined_table: Table = vstack_tables(all_tables)
         combined_table.sort("date")
 
+        # Recreate TimeSeries object
         ts_combined: Union[GenericTimeSeries, List[GenericTimeSeries]] = TimeSeries(combined_table, ts_list[0].meta)
 
+        # Handle potential list return type from TimeSeries factory
         if isinstance(ts_combined, list):
             ts_combined_obj = ts_combined[0] if ts_combined else None
         else:
@@ -382,6 +429,7 @@ def parse_datafiles(
         file_path_obj = Path(file_path_str)
         logger.info(f"Processing file ({i + 1}/{len(file_paths)}): {file_path_obj.name}")
 
+        # Metadata extraction for CDF files
         if not has_extracted_metadata and file_path_obj.suffix.lower() == ".cdf":
             try:
                 with CDF(file_path_str) as cdf_file:
@@ -391,11 +439,13 @@ def parse_datafiles(
             except Exception as e:
                 logger.warning(f"File {file_path_obj.name} looks like CDF but failed to read attributes: {e}")
 
+        # 1D TimeSeries
         parsed_ts_list = _parse_1d_timeseries_file(file_path_str)
 
         if parsed_ts_list:
             all_1d_timeseries.extend(parsed_ts_list)
         else:
+            # N-D Datafile (NetCDF/xarray)
             (
                 nd_data,
                 nd_metadata,
@@ -409,7 +459,10 @@ def parse_datafiles(
                 file_metadata = nd_metadata
                 has_extracted_metadata = True
 
+    # --- Post-Processing ---
+
     if all_1d_timeseries:
+        # If we found any 1D data, we prioritize it and discard partial N-D results
         for ds, _, _ in all_nd_datasets:
             ds.close()
 

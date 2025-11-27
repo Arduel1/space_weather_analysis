@@ -6,7 +6,7 @@ from hapiclient import hapi
 from hapiclient.util import HAPIError
 
 from space_weather_analysis.config import HAPI_SOURCE_ID
-from space_weather_analysis.util.catalog.abstract_discoverer import AbstractDiscoverer
+from space_weather_analysis.discovery.discoverers.base import AbstractDiscoverer
 
 logger = logging.getLogger(__name__)
 

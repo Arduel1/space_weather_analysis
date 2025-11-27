@@ -4,9 +4,9 @@ from typing import List, Optional
 
 from pymongo.database import Database
 
-from space_weather_analysis.etl.cme_catalog import CmeETL
-from space_weather_analysis.etl.sunspots import SilsoETL
-from space_weather_analysis.pipelines.base_pipeline import BasePipeline
+from space_weather_analysis.pipelines.processors.cme import CmeETL
+from space_weather_analysis.pipelines.processors.sunspots import SilsoETL
+from space_weather_analysis.pipelines.base import BasePipeline
 
 
 class LocalSunspotPipeline(BasePipeline):

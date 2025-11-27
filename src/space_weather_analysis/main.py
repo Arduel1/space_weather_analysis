@@ -33,20 +33,20 @@ def main() -> None:
     # --- Run Configuration ---
     # Define which tasks to run.
     RUN_CONFIGURATION: Dict[str, bool] = {
-        "build_catalog": True,
-        "run_catalog_etl": False,
+        "build_catalog": False,
+        "run_catalog_etl": True,
         "run_local_etl": False,
-        "run_pipeline_test": False,
+        "run_pipeline_test": True,
     }
 
     # --- Test Configurations ---
     # Define specific configurations for pipeline tests.
     hapi_test_config = {
         "START_TIME": datetime(2008, 3, 1, 0, 0, 0),
-        "END_TIME": datetime(2017, 5, 30, 0, 0, 0),
+        "END_TIME": datetime(2008, 3, 1, 0, 10, 0),
         "DATASET_FILTER": ["a02/baseline_all/PT1M/NEZ"],
     }
-    fido_test_config = { 
+    fido_test_config = { # TODO: Daten Zeitpunkte werden falsch gespeichert : Sun Nov 17 2013 01:08:35 GMT+0000 (Coordinated Universal Time) 
         "START_TIME": datetime(2023, 11, 22, 0, 0, 0),
         "END_TIME": datetime(2023, 11, 24, 0, 0, 0),
         "DATASET_FILTER": ["AWE_L3A_TMP"],

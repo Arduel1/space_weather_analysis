@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from pymongo.database import Database
 
-from .base_processor import BaseETLProcessor
+from .base import BaseETLProcessor
 
 logger = logging.getLogger(__name__)
 
