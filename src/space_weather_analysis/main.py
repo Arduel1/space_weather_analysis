@@ -41,15 +41,20 @@ def main() -> None:
 
     # --- Test Configurations ---
     # Define specific configurations for pipeline tests.
+    # hapi_test_config = {
+    #     "START_TIME": datetime(2008, 3, 1, 0, 0, 0),
+    #     "END_TIME": datetime(2008, 3, 1, 0, 10, 0),
+    #     "DATASET_FILTER": ["a02/baseline_all/PT1M/NEZ"],
+    # }
     hapi_test_config = {
-        "START_TIME": datetime(2008, 3, 1, 0, 0, 0),
-        "END_TIME": datetime(2008, 3, 1, 0, 10, 0),
-        "DATASET_FILTER": ["a02/baseline_all/PT1M/NEZ"],
+        "START_TIME": datetime(2023, 11, 22, 0, 0, 0),
+        "END_TIME": datetime(2023, 11, 24, 0, 0, 0),
+        "DATASET_FILTER": ["aaa/baseline_all/PT1M/NEZ"],
     }
     fido_test_config = { # TODO: Daten Zeitpunkte werden falsch gespeichert : Sun Nov 17 2013 01:08:35 GMT+0000 (Coordinated Universal Time) 
         "START_TIME": datetime(2023, 11, 22, 0, 0, 0),
         "END_TIME": datetime(2023, 11, 24, 0, 0, 0),
-        "DATASET_FILTER": ["AWE_L3A_TMP"],
+        "DATASET_FILTER": ["aaa/baseline_all/PT1M/NEZ", "AWE_L3A_TMP", "AWE_L3C_Q20"],
     }
 
     TEST_CONFIGS: Dict[str, Any] = {"hapi_config": hapi_test_config, "fido_config": fido_test_config}

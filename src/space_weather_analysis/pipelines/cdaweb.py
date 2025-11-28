@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, Generator, List, Optional, Tuple, cast
 
 import gridfs
+import numpy as np
 import pandas as pd
 import xarray as xr
 from parfive.results import Results as ParfiveResults
@@ -364,23 +365,56 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         Iterates through the time dimension, serializes each time slice using pickle,
         stores it in GridFS, and yields a metadata document referencing the GridFS file.
 
-        Args:
-            ds (xr.Dataset): The dataset to process.
-            source_info (str): A string identifying the data source.
-            time_dim (str): The name of the time dimension.
-            time_coord (str): The name of the time coordinate.
-            collection_name (str): The name of the target MongoDB collection.
-
-        Yields:
-            Generator[Dict[str, Any], None, None]: Generator of MongoDB documents.
+        Extra logging added:
+        - logs whether the time_coord exists in each timeslice,
+        - logs a safe sample of the raw time coordinate value,
+        - logs the resolved timestamp (ISO) and the method used (via parse_xarray_timestamp logging).
         """
         for i in range(len(ds[time_dim])):
             ts_slice = ds.isel({time_dim: i})
 
-            # Use the external helper to parse timestamp
-            timestamp = parse_xarray_timestamp(ts_slice, time_coord, i)
+            # Log presence and a small safe sample of the time coordinate as found in the slice
+            try:
+                if time_coord in ts_slice:
+                    try:
+                        raw_vals = ts_slice[time_coord].values
+                        # reduce sample size for logging safety
+                        if np.isscalar(raw_vals):
+                            sample = raw_vals
+                        else:
+                            arr = np.asarray(raw_vals)
+                            sample = arr.flatten()[0] if arr.size > 0 else None
+                        logger.info(
+                            f"_transform_xarray_to_docs: time_coord '{time_coord}' present in slice idx={i}; raw_sample={repr(sample)}; dtype={getattr(getattr(ts_slice[time_coord], 'values', None), 'dtype', None)}"
+                        )
+                    except Exception as e_sample:
+                        logger.info(
+                            f"_transform_xarray_to_docs: unable to sample time_coord '{time_coord}' at idx={i}: {e_sample}"
+                        )
+                else:
+                    logger.info(
+                        f"_transform_xarray_to_docs: time_coord '{time_coord}' NOT present in slice idx={i}. Will consult underlying file metadata if available."
+                    )
+            except Exception as e_presence:
+                logger.info(f"_transform_xarray_to_docs: error checking time_coord presence: {e_presence}")
+
+            # Use the external helper to parse timestamp (this logs detailed decode steps)
+            timestamp = parse_xarray_timestamp(ts_slice, time_coord, i, allow_fallback=False)
+
             if timestamp is None:
+                # If parse failed, log extended diagnostics and skip this timeslice
+                logger.warning(
+                    f"_transform_xarray_to_docs: timestamp parse returned None for slice index={i}, time_coord='{time_coord}'. Skipping slice."
+                )
                 continue
+
+            # Log the resolved timestamp and a verification of its type
+            try:
+                logger.info(
+                    f"_transform_xarray_to_docs: resolved timestamp for slice index={i}: {timestamp.isoformat()} (tzinfo={getattr(timestamp, 'tzinfo', None)})"
+                )
+            except Exception:
+                logger.info(f"_transform_xarray_to_docs: resolved timestamp for slice index={i}: {repr(timestamp)}")
 
             data_payload: Dict[str, Any] = {}
             for var_name in ts_slice.data_vars:
