@@ -21,9 +21,10 @@ from space_weather_analysis.config import FIDO_CDAWEB_SOURCE_ID
 from space_weather_analysis.database.mongo_loader import MongoLoader
 from space_weather_analysis.pipelines.base import BasePipeline
 from space_weather_analysis.util.data_preprocessing import generate_time_chunks, sanitize_collection_name
-from space_weather_analysis.util.file_parser import parse_datafiles, parse_xarray_timestamp
+from space_weather_analysis.util.file_parser import parse_datafiles
 from space_weather_analysis.util.metadata.metadata_generator import MetadataWriter
 from space_weather_analysis.util.metadata.variable_metadata import VariableMetadata
+from space_weather_analysis.util.time_utils import parse_xarray_timestamp
 
 logger = logging.getLogger(__name__)
 
