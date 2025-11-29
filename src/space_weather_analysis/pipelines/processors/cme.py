@@ -1,13 +1,14 @@
 import logging
 import pathlib
 import re
-from typing import Any, Dict, List, Optional
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd
 from pymongo.database import Database
 
-from space_weather_analysis.pipelines.processors.base import BaseETLProcessor 
+from space_weather_analysis.pipelines.processors.base import BaseETLProcessor
+from space_weather_analysis.util.types import RawData, TransformedDocuments
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ class CmeETL(BaseETLProcessor):
         super().__init__(db)
         self.file_path = file_path
 
-    def _extract(self) -> Optional[pd.DataFrame]:
+    def _extract(self) -> RawData:
         """
         Extracts CME data from the local space-delimited text file.
 
@@ -61,7 +62,7 @@ class CmeETL(BaseETLProcessor):
             return None
 
         try:
-            parsed_data = []
+            parsed_data: List[Dict[str, str]] = []
             with open(self.file_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
                 # Skip the header rows
@@ -75,7 +76,7 @@ class CmeETL(BaseETLProcessor):
                         parts = line_normalized.split(" ", maxsplit=12)
                         if len(parts) == 12:
                             parts.append("")  # Ensure remarks column exists
-                        parsed_data.append(dict(zip(self._COLUMN_NAMES, parts)))
+                        parsed_data.append(dict(zip(self._COLUMN_NAMES, parts, strict=False)))
                     except Exception as e:
                         logger.warning(f"Could not parse line: {line.strip()} | Error: {e}")
 
@@ -86,7 +87,7 @@ class CmeETL(BaseETLProcessor):
             logger.error(f"Error reading CME file: {e}", exc_info=True)
             return None
 
-    def _transform(self, raw_data: Optional[pd.DataFrame]) -> List[Dict[str, Any]]:
+    def _transform(self, raw_data: RawData) -> TransformedDocuments:
         """
         Transforms the raw CME DataFrame into MongoDB documents.
 
@@ -173,8 +174,9 @@ class CmeETL(BaseETLProcessor):
         timestamps = raw_data["timestamp"].to_list()
         metadata = {"source": "SOHO/LASCO_CDAW_V2.0"}
 
-        documents = [
-            {"timestamp": ts, "metadata": metadata, "data": data} for ts, data in zip(timestamps, data_payloads)
+        documents: TransformedDocuments = [
+            {"timestamp": ts, "metadata": metadata, "data": data}
+            for ts, data in zip(timestamps, data_payloads, strict=False)
         ]
 
         logger.info(f"Transformed {len(documents)} CME documents.")

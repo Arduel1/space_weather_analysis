@@ -121,6 +121,7 @@ def find_time_dimension(ds: xr.Dataset) -> Tuple[Optional[str], Optional[str]]:
 
     logger.info("Scanning variables for time-candidate attributes.")
 
+    # Using explicit types for candidates list
     candidates: List[Tuple[str, int, Dict[str, Any]]] = []
 
     # Iterate over variables using string keys to ensure access to DataArray objects
@@ -138,6 +139,7 @@ def find_time_dimension(ds: xr.Dataset) -> Tuple[Optional[str], Optional[str]]:
         logger.error("No candidate time variables found in file metadata.")
         return None, None
 
+    # Sort candidates by score descending
     candidates.sort(key=lambda item: item[1], reverse=True)
 
     _log_top_candidates(candidates)
@@ -551,7 +553,8 @@ def _calculate_attribute_score(
         Tuple[int, List[str]]: Calculated score and list of matched reasons.
     """
     score = 0
-    reasons = []
+    # Explicitly typed as List[str] to support append/extend
+    reasons: List[str] = []
 
     if isinstance(units, str) and "since" in units.lower():
         score += 100
@@ -588,12 +591,13 @@ def _score_variable_attributes(name: str, da: xr.DataArray, source: str) -> Tupl
     Returns:
         Tuple[int, Dict]: Score and details dictionary.
     """
-    details = {"source": source, "reasons": []}
+    # Create the list first to ensure it's a mutable List[str]
+    reasons: List[str] = []
 
     dtype = getattr(getattr(da, "values", None), "dtype", None)
     if dtype is not None and getattr(dtype, "kind", None) == "M":
         score = 90
-        details["reasons"].append("xarray-decoded-datetime")
+        reasons.append("xarray-decoded-datetime")
     else:
         score = 0
 
@@ -604,13 +608,16 @@ def _score_variable_attributes(name: str, da: xr.DataArray, source: str) -> Tupl
     standard_name = attrs.get("standard_name", "")
     long_name = attrs.get("long_name", "")
 
-    attr_score, reasons = _calculate_attribute_score(units, calendar, axis, standard_name, long_name)
+    attr_score, attr_reasons = _calculate_attribute_score(units, calendar, axis, standard_name, long_name)
     score += attr_score
-    details["reasons"].extend(reasons)
+    reasons.extend(attr_reasons)
 
     if name in getattr(da, "coords", []):
         score += 10
-        details["reasons"].append("is_coordinate")
+        reasons.append("is_coordinate")
+
+    # Construct the details dictionary after list operations are done
+    details: Dict[str, Any] = {"source": source, "reasons": reasons}
 
     if score > 0:
         details.update({"units": units, "calendar": calendar, "dtype": str(dtype)})
@@ -642,8 +649,8 @@ def _scan_netcdf_variables(nc_obj: Any, candidates: List[Tuple[str, int, Dict[st
             score, reasons = _calculate_attribute_score(units, calendar, axis, standard_name, long_name)
 
             if score > 0:
-                details = {"source": "netcdf4", "reasons": reasons}
-                details["reasons"].append("found_via_netcdf_attrs")
+                reasons.append("found_via_netcdf_attrs")
+                details: Dict[str, Any] = {"source": "netcdf4", "reasons": reasons}
                 candidates.append((str(var_name), score, details))
     except Exception:
         pass

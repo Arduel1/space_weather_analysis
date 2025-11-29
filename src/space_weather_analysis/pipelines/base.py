@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import List, Optional
 
+
 class BasePipeline(ABC):
     """
     Abstract base class defining the common interface for all data pipelines.

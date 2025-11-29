@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Optional, Hashable
+from typing import Any, Hashable, List, Optional
 
 import numpy as np
 import xarray as xr
@@ -58,13 +58,13 @@ def _log_coordinate_details(ds: xr.Dataset, coord: Hashable, prefix: str) -> Non
     """
     try:
         da = ds.coords[coord]
-        # Access values safely to check dtype without full load if possible
-        dtype = getattr(getattr(da, "values", None), "dtype", None)
+        # Access dtype directly from DataArray to avoid loading data via .values
+        dtype = getattr(da, "dtype", None)
         kind = None
         if dtype is not None:
             kind = getattr(dtype, "kind", None)
 
-        length = None
+        length: Optional[int] = None
         if getattr(da, "sizes", None):
             length = int(np.prod(list(da.sizes.values())))
 
@@ -90,6 +90,7 @@ def _log_small_sample(da: xr.DataArray, prefix: str) -> None:
         prefix (str): A prefix string for log messages.
     """
     try:
+        # Accessing .values here is intentional as we established the array is small
         sample = da.values[:8]
         logger.info(f"{prefix}    sample: {sample}")
     except Exception as e:
@@ -110,7 +111,8 @@ def _log_variable_details(ds: xr.Dataset, var: Hashable, prefix: str) -> None:
         dims = getattr(da, "dims", ())
         shape = getattr(da, "shape", None)
 
-        dtype = getattr(getattr(da, "values", None), "dtype", None)
+        # Access dtype directly from DataArray/Variable to avoid loading data
+        dtype = getattr(da, "dtype", None)
         kind = None
         if dtype is not None:
             kind = getattr(dtype, "kind", None)
@@ -145,14 +147,15 @@ def _log_netcdf_backend_details(ds: xr.Dataset, prefix: str) -> None:
         ds (xr.Dataset): The xarray dataset.
         prefix (str): A prefix string for log messages.
     """
-    file_obj = getattr(ds, "_file_obj", None)
-    nc_obj = getattr(file_obj, "ds", None)
+    # Access private attributes to get to the backend; this is risky but useful for debugging
+    file_obj: Any = getattr(ds, "_file_obj", None)
+    nc_obj: Any = getattr(file_obj, "ds", None)
 
     if nc_obj is None:
         return
 
     try:
-        nc_vars = list(nc_obj.variables.keys())
+        nc_vars: List[str] = list(nc_obj.variables.keys())
         logger.info(f"{prefix}Underlying netCDF4 variables ({len(nc_vars)}): {nc_vars[:100]}")
 
         # Show a subset of variables with their raw attributes

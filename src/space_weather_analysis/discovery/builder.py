@@ -1,9 +1,10 @@
 import json
 import logging
 import pathlib
-from typing import Any, Dict, List
+from typing import Dict, List
 
 from space_weather_analysis.discovery.discoverers.base import AbstractDiscoverer
+from space_weather_analysis.util.types import CatalogEntryDict
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +60,8 @@ class CatalogBuilder:
     def _add_entry(
         self,
         dataset_id: str,
-        entry: Dict[str, Any],
-        master_catalog: Dict[str, List[Dict[str, Any]]],
+        entry: CatalogEntryDict,
+        master_catalog: Dict[str, List[CatalogEntryDict]],
     ) -> None:
         """
         Helper to add a new source entry to the master catalog.
@@ -69,8 +70,8 @@ class CatalogBuilder:
 
         Args:
             dataset_id (str): The canonical dataset ID.
-            entry (Dict[str, Any]): The new source entry to add.
-            master_catalog (Dict[str, List[Dict[str, Any]]]): The catalog
+            entry (CatalogEntryDict): The new source entry to add.
+            master_catalog (Dict[str, List[CatalogEntryDict]]): The catalog
                 being built.
         """
         if dataset_id not in master_catalog:
@@ -84,7 +85,7 @@ class CatalogBuilder:
 
         master_catalog[dataset_id].append(entry)
 
-    def _save_catalog_to_file(self, catalog_data: Dict[str, List[Dict[str, Any]]]) -> None:
+    def _save_catalog_to_file(self, catalog_data: Dict[str, List[CatalogEntryDict]]) -> None:
         """
         Saves the completed catalog dictionary to a JSON file.
 
@@ -92,7 +93,7 @@ class CatalogBuilder:
         and ensuring the output directory exists.
 
         Args:
-            catalog_data (Dict[str, List[Dict[str, Any]]]): The final
+            catalog_data (Dict[str, List[CatalogEntryDict]]): The final
                 master catalog to save.
         """
         try:
@@ -127,7 +128,7 @@ class CatalogBuilder:
         """
         logger.info("--- Starting Universal Catalog Build ---")
         # Initialize local state for this build run
-        master_catalog: Dict[str, List[Dict[str, Any]]] = {}
+        master_catalog: Dict[str, List[CatalogEntryDict]] = {}
         lowercase_id_map: Dict[str, str] = {}
 
         # Iterate over all registered discoverer strategies

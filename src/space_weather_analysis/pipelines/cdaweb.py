@@ -1,7 +1,7 @@
 import logging
 import pathlib
 import pickle
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Generator, List, Optional, Tuple, cast
 
 import gridfs
@@ -25,6 +25,7 @@ from space_weather_analysis.util.file_parser import parse_datafiles
 from space_weather_analysis.util.metadata.metadata_generator import MetadataWriter
 from space_weather_analysis.util.metadata.variable_metadata import VariableMetadata
 from space_weather_analysis.util.time_utils import parse_xarray_timestamp
+from space_weather_analysis.util.types import CatalogEntryDict
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +64,8 @@ class CdawebPipeline(MongoLoader, BasePipeline):
     def run(
         self,
         datasets: List[str],
-        start_time: datetime,
-        end_time: datetime,
+        start_time: Optional[datetime],
+        end_time: Optional[datetime],
     ) -> None:
         """
         Runs the complete data pipeline orchestration.
@@ -75,9 +76,19 @@ class CdawebPipeline(MongoLoader, BasePipeline):
 
         Args:
             datasets (List[str]): A list of dataset IDs to fetch.
-            start_time (datetime): The start time for the data query.
-            end_time (datetime): The end time for the data query.
+            start_time (Optional[datetime]): The start time for the data query.
+            end_time (Optional[datetime]): The end time for the data query.
         """
+        if not start_time or not end_time:
+            logger.error("Start time and end time are required for CDAWeb pipeline.")
+            return
+
+        # Ensure timezone awareness
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=timezone.utc)
+        if end_time.tzinfo is None:
+            end_time = end_time.replace(tzinfo=timezone.utc)
+
         logger.info("=========================================")
         logger.info(f"Starting CDAWeb Pipeline (FILTERED: {datasets})")
         logger.info(f"Time Range: {start_time} to {end_time}")
@@ -139,7 +150,10 @@ class CdawebPipeline(MongoLoader, BasePipeline):
                 logger.error(f"Dataset '{dataset_id}' not found in {self.CATALOG_COLLECTION}")
                 return None
 
-            for source in doc.get("sources", []):
+            # Type hint helps static analysis understand the structure
+            sources: List[CatalogEntryDict] = doc.get("sources", [])
+
+            for source in sources:
                 if source.get("type") == FIDO_CDAWEB_SOURCE_ID:
                     source_id = source.get("source_id")
                     if source_id:
@@ -304,7 +318,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
                 "metadata": metadata,
                 "data": {str(k): v for k, v in data.items() if not pd.isna(v)},
             }
-            for ts_py, data in zip(timestamps, data_payloads)
+            for ts_py, data in zip(timestamps, data_payloads, strict=False)
         ]
         return documents
 
@@ -335,7 +349,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
             try:
                 logger.info(f"  -> Found time dimension: '{time_dim}' (coord: '{time_coord}')")
 
-                documents_batch = []
+                documents_batch: List[Dict[str, Any]] = []
                 for doc in self._transform_xarray_to_docs(ds_file, source_id, time_dim, time_coord, collection_name):
                     documents_batch.append(doc)
                     if len(documents_batch) >= self.DEFAULT_BATCH_SIZE:
@@ -379,14 +393,19 @@ class CdawebPipeline(MongoLoader, BasePipeline):
                 if time_coord in ts_slice:
                     try:
                         raw_vals = ts_slice[time_coord].values
+                        # Explicitly type 'sample' as Any to avoid mypy errors when assigning None later
+                        sample: Any = None
+
                         # reduce sample size for logging safety
                         if np.isscalar(raw_vals):
                             sample = raw_vals
                         else:
                             arr = np.asarray(raw_vals)
                             sample = arr.flatten()[0] if arr.size > 0 else None
+
                         logger.info(
-                            f"_transform_xarray_to_docs: time_coord '{time_coord}' present in slice idx={i}; raw_sample={repr(sample)}; dtype={getattr(getattr(ts_slice[time_coord], 'values', None), 'dtype', None)}"
+                            f"_transform_xarray_to_docs: time_coord '{time_coord}' present in slice idx={i};"
+                            f"raw_sample={repr(sample)}; dtype={getattr(getattr(ts_slice[time_coord], 'values', None), 'dtype', None)}"
                         )
                     except Exception as e_sample:
                         logger.info(
@@ -394,7 +413,8 @@ class CdawebPipeline(MongoLoader, BasePipeline):
                         )
                 else:
                     logger.info(
-                        f"_transform_xarray_to_docs: time_coord '{time_coord}' NOT present in slice idx={i}. Will consult underlying file metadata if available."
+                        f"_transform_xarray_to_docs: time_coord '{time_coord}' NOT present in slice idx={i}."
+                        f"Will consult underlying file metadata if available."
                     )
             except Exception as e_presence:
                 logger.info(f"_transform_xarray_to_docs: error checking time_coord presence: {e_presence}")
@@ -409,13 +429,9 @@ class CdawebPipeline(MongoLoader, BasePipeline):
                 )
                 continue
 
-            # Log the resolved timestamp and a verification of its type
-            try:
-                logger.info(
-                    f"_transform_xarray_to_docs: resolved timestamp for slice index={i}: {timestamp.isoformat()} (tzinfo={getattr(timestamp, 'tzinfo', None)})"
-                )
-            except Exception:
-                logger.info(f"_transform_xarray_to_docs: resolved timestamp for slice index={i}: {repr(timestamp)}")
+            # Ensure timestamp is aware
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
 
             data_payload: Dict[str, Any] = {}
             for var_name in ts_slice.data_vars:

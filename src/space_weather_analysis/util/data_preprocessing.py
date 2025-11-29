@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta
-from typing import Any, Generator, List, Tuple
+from typing import Generator, List, Tuple, TypeVar
+
+T = TypeVar("T")
 
 
-def batch_generator(data_list: List[Any], batch_size: int = 5000) -> Generator[List[Any], None, None]:
+def batch_generator(data_list: List[T], batch_size: int = 5000) -> Generator[List[T], None, None]:
     """
     A generator function that yields data in batches.
 
@@ -10,12 +12,12 @@ def batch_generator(data_list: List[Any], batch_size: int = 5000) -> Generator[L
     database insertion to avoid timeouts or memory issues.
 
     Args:
-        data_list (List[Any]): The complete list of items to be batched.
+        data_list (List[T]): The complete list of items to be batched.
         batch_size (int): The maximum number of items to include in each
                           batch.
 
     Yields:
-        Generator[List[Any], None, None]: A generator that yields
+        Generator[List[T], None, None]: A generator that yields
                                           sub-lists (batches).
     """
     if not data_list:

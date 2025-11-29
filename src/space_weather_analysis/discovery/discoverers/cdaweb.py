@@ -1,9 +1,10 @@
 import logging
-from typing import Any, Dict, Generator, Tuple
+from typing import Any, Generator
 
-from space_weather_analysis.config import FIDO_CDAWEB_SOURCE_ID
 from space_weather_analysis.clients.cdaweb import CdawebClient
+from space_weather_analysis.config import FIDO_CDAWEB_SOURCE_ID
 from space_weather_analysis.discovery.discoverers.base import AbstractDiscoverer
+from space_weather_analysis.util.types import CatalogEntryDict, DiscoveryYield
 
 logger = logging.getLogger(__name__)
 
@@ -13,9 +14,7 @@ class CdawebDiscoverer(AbstractDiscoverer):
     Discovers datasets by querying the data source via the CdawebClient.
     """
 
-    def _get_entry_for_dataset(
-        self, group_name: str, dataset_row: Any
-    ) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
+    def _get_entry_for_dataset(self, group_name: str, dataset_row: Any) -> Generator[DiscoveryYield, None, None]:
         """
         Parses a single dataset row and yields a standardized catalog entry.
 
@@ -26,7 +25,7 @@ class CdawebDiscoverer(AbstractDiscoverer):
             dataset_row (Any): The raw dataset row object from the client.
 
         Yields:
-            Generator[Tuple[str, Dict[str, Any]], None, None]:
+            Generator[DiscoveryYield, None, None]:
             A generator yielding a single (dataset_id, entry) tuple.
         """
         try:
@@ -35,12 +34,14 @@ class CdawebDiscoverer(AbstractDiscoverer):
             stop_date = dataset_row["End"]
 
             if start_date and stop_date:
-                new_entry = {
+                # Use TypedDict to ensure structure matches CatalogEntryDict definition
+                new_entry: CatalogEntryDict = {
                     "type": FIDO_CDAWEB_SOURCE_ID,
                     "source_id": group_name,
                     "time_range": {
-                        "start_time": start_date,
-                        "end_time": stop_date,
+                        # Explicit string conversion ensures compatibility with TimeRangeDict
+                        "start_time": str(start_date),
+                        "end_time": str(stop_date),
                     },
                 }
                 yield dataset_id, new_entry
@@ -49,7 +50,8 @@ class CdawebDiscoverer(AbstractDiscoverer):
 
         except KeyError as e:
             logger.error(
-                f"{FIDO_CDAWEB_SOURCE_ID}: Row for group {group_name} is malformed. Missing key: {e}. Row: {dataset_row}",
+                f"{FIDO_CDAWEB_SOURCE_ID}: Row for group {group_name} is malformed."
+                f"Missing key: {e}. Row: {dataset_row}",
                 exc_info=True,
             )
         except Exception as e:
@@ -60,7 +62,7 @@ class CdawebDiscoverer(AbstractDiscoverer):
 
     def _discover_datasets_for_group(
         self, client: CdawebClient, group_name: str
-    ) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
+    ) -> Generator[DiscoveryYield, None, None]:
         """
         Retrieves and iterates over all datasets for a single group.
 
@@ -71,7 +73,7 @@ class CdawebDiscoverer(AbstractDiscoverer):
             group_name (str): The name of the group to query.
 
         Yields:
-            Generator[Tuple[str, Dict[str, Any]], None, None]:
+            Generator[DiscoveryYield, None, None]:
             A generator yielding catalog entries for the group.
         """
         logger.info(f"{FIDO_CDAWEB_SOURCE_ID}: Getting datasets for group: {group_name}")
@@ -91,7 +93,7 @@ class CdawebDiscoverer(AbstractDiscoverer):
                 exc_info=True,
             )
 
-    def discover(self) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
+    def discover(self) -> Generator[DiscoveryYield, None, None]:
         """
         Implements the discovery process for data sources.
 

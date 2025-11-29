@@ -4,9 +4,9 @@ from typing import List, Optional
 
 from pymongo.database import Database
 
+from space_weather_analysis.pipelines.base import BasePipeline
 from space_weather_analysis.pipelines.processors.cme import CmeETL
 from space_weather_analysis.pipelines.processors.sunspots import SilsoETL
-from space_weather_analysis.pipelines.base import BasePipeline
 
 
 class LocalSunspotPipeline(BasePipeline):
@@ -14,7 +14,7 @@ class LocalSunspotPipeline(BasePipeline):
     Wrapper for the SILSO Sunspot ETL process to conform to the BasePipeline interface.
     """
 
-    def __init__(self, db: Database, file_path: pathlib.Path):
+    def __init__(self, db: Database, file_path: pathlib.Path) -> None:
         self.db = db
         self.file_path = file_path
 
@@ -35,7 +35,7 @@ class LocalCmePipeline(BasePipeline):
     Wrapper for the CME Catalog ETL process to conform to the BasePipeline interface.
     """
 
-    def __init__(self, db: Database, file_path: pathlib.Path):
+    def __init__(self, db: Database, file_path: pathlib.Path) -> None:
         self.db = db
         self.file_path = file_path
 

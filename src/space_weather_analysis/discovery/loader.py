@@ -1,13 +1,18 @@
 import json
 import logging
 import pathlib
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 from pymongo import ReplaceOne
 from pymongo import errors as pymongo_errors
 from pymongo.database import Database
 
 from space_weather_analysis.pipelines.processors.base import BaseETLProcessor
+from space_weather_analysis.util.types import (
+    CatalogEntryDict,
+    MasterCatalogItem,
+    TransformedDocuments,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +38,7 @@ class CatalogLoader(BaseETLProcessor):
         super().__init__(db)
         self.file_path = file_path
 
-    def _extract(self) -> Optional[List[Dict[str, Any]]]:
+    def _extract(self) -> Optional[List[MasterCatalogItem]]:
         """
         Extracts master catalog data from the JSON file.
 
@@ -41,8 +46,8 @@ class CatalogLoader(BaseETLProcessor):
         list of documents.
 
         Returns:
-            Optional[List[Dict[str, Any]]]: A list of catalog documents,
-                                            or None if extraction fails.
+            Optional[List[MasterCatalogItem]]: A list of catalog documents,
+                                               or None if extraction fails.
         """
         logger.info(f"--- Starting Extract for Master Catalog: {self.file_path} ---")
         if not self.file_path.exists():
@@ -52,10 +57,11 @@ class CatalogLoader(BaseETLProcessor):
         try:
             with open(self.file_path, "r", encoding="utf-8") as f:
                 # Specify the exact structure loaded from JSON
-                raw_data: Dict[str, List[Dict[str, Any]]] = json.load(f)
+                # JSON structure: { "dataset_id": [ {source_entry}, ... ], ... }
+                raw_data: Dict[str, List[CatalogEntryDict]] = json.load(f)
 
             # Convert dict to the list format required for loading
-            catalog_list: List[Dict[str, Any]] = [
+            catalog_list: List[MasterCatalogItem] = [
                 {"dataset_id": dataset_id, "sources": sources} for dataset_id, sources in raw_data.items()
             ]
 
@@ -72,7 +78,7 @@ class CatalogLoader(BaseETLProcessor):
             logger.error(f"Error reading master catalog file: {e}", exc_info=True)
             return None
 
-    def _transform(self, raw_data: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    def _transform(self, raw_data: Optional[List[MasterCatalogItem]]) -> TransformedDocuments:
         """
         Transforms the catalog data into the final document structure.
 
@@ -80,10 +86,10 @@ class CatalogLoader(BaseETLProcessor):
         the correct format and is passed through directly.
 
         Args:
-            raw_data (Optional[List[Dict[str, Any]]]): The data from _extract().
+            raw_data (Optional[List[MasterCatalogItem]]): The data from _extract().
 
         Returns:
-            List[Dict[str, Any]]: A list of formatted dictionaries (documents)
+            TransformedDocuments: A list of formatted dictionaries (documents)
                                   for MongoDB.
         """
         if raw_data is None:
@@ -92,7 +98,8 @@ class CatalogLoader(BaseETLProcessor):
 
         # The data is already in the required format
         logger.info(f"Transformed {len(raw_data)} catalog documents.")
-        return raw_data
+        # Cast required to satisfy MyPy list invariance vs base class signature
+        return cast(TransformedDocuments, raw_data)
 
     def _ensure_catalog_index(self) -> None:
         """
@@ -109,22 +116,25 @@ class CatalogLoader(BaseETLProcessor):
                 exc_info=True,
             )
 
-    def _get_sortable_key_for_source(self, source: Dict[str, Any]) -> Tuple:
+    def _get_sortable_key_for_source(self, source: CatalogEntryDict) -> Tuple[Any, ...]:
         """
         Creates a stable, sortable tuple representation of a source entry.
         """
         try:
+            # Safe access mostly for runtime safety against malformed JSON
             time_range = source.get("time_range", {})
+            # We explicitly handle the potentially missing keys despite TypedDict
+            # to be robust against partial data.
             time_range_tuple = (
-                time_range.get("start_time"),
-                time_range.get("end_time"),
+                time_range.get("start_time") if time_range else None,
+                time_range.get("end_time") if time_range else None,
             )
             return (source.get("type"), source.get("source_id"), time_range_tuple)
         except Exception:
             # Fallback for malformed data
-            return (source.get("type"), source.get("source_id"))
+            return (source.get("type"), source.get("source_id"), (None, None))
 
-    def _load_catalog_data(self, documents: List[Dict[str, Any]]) -> None:
+    def _load_catalog_data(self, documents: TransformedDocuments) -> None:
         """
         Handles the "Load" step by upserting catalog documents in batches.
 
@@ -133,7 +143,7 @@ class CatalogLoader(BaseETLProcessor):
         Only new or modified documents are written to the database.
 
         Args:
-            documents (List[Dict[str, Any]]): A list of catalog documents to upsert.
+            documents (TransformedDocuments): A list of catalog documents to upsert.
         """
         if not documents:
             logger.info(f"No documents to load for collection '{self.COLLECTION_NAME}'.")
@@ -145,8 +155,9 @@ class CatalogLoader(BaseETLProcessor):
         logger.info(f"Fetching existing catalog from {self.COLLECTION_NAME} for comparison...")
         try:
             existing_docs_cursor = collection.find({}, {"_id": 0})
-            existing_docs_map: Dict[str, Dict[str, Any]] = {
-                doc["dataset_id"]: doc for doc in existing_docs_cursor if "dataset_id" in doc
+            # Cast retrieved docs to MasterCatalogItem for type checking in map
+            existing_docs_map: Dict[str, MasterCatalogItem] = {
+                doc["dataset_id"]: cast(MasterCatalogItem, doc) for doc in existing_docs_cursor if "dataset_id" in doc
             }
             logger.info(f"Found {len(existing_docs_map)} existing catalog entries.")
         except Exception as e:
@@ -178,12 +189,16 @@ class CatalogLoader(BaseETLProcessor):
                 # We normalize the 'sources' list by sorting it based on a stable key
                 # to compare them semantically, ignoring list order.
                 try:
+                    # 'doc' is Dict[str, Any] so .get returns Any, which we cast to List[CatalogEntryDict]
+                    # for the sort key helper.
+                    sources = cast(List[CatalogEntryDict], doc.get("sources", []))
+
                     sorted_existing_sources = sorted(
                         existing_doc.get("sources", []),
                         key=self._get_sortable_key_for_source,
                     )
                     sorted_new_sources = sorted(
-                        doc.get("sources", []),
+                        sources,
                         key=self._get_sortable_key_for_source,
                     )
                 except Exception as e:

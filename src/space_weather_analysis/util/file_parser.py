@@ -152,7 +152,8 @@ def _finalize_1d_timeseries(
     try:
         logger.info(f"Filtering combined 1D TimeSeries to range: {start} to {end}")
         ts_filtered = ts_combined.truncate(start, end)
-        logger.info(f"Filtered 1D TimeSeries contains {len(ts_filtered.to_table())} entries.")
+        # to_table() is expensive for large datasets, check length only if needed
+        # logger.info(f"Filtered 1D TimeSeries contains {len(ts_filtered.to_table())} entries.")
         return ts_filtered, metadata
     except Exception as e:
         logger.error(f"Failed to truncate TimeSeries: {e}", exc_info=True)
@@ -160,7 +161,9 @@ def _finalize_1d_timeseries(
 
 
 def _handle_nd_datafile(
-    file_path_obj: Path, variables_to_parse: List[str], allow_time_fallback: bool = False
+    file_path_obj: Path,
+    variables_to_parse: List[str],
+    allow_time_fallback: bool = False,
 ) -> Tuple[Optional[xr.Dataset], Optional[Dict[str, Any]], Optional[str], Optional[str]]:
     """
     Opens and prepares an N-dimensional file using xarray.
@@ -280,7 +283,10 @@ def _handle_missing_time_dimension(
     logger.error("No time dim/coord identified from file metadata.")
 
     file_metadata = _get_xarray_file_metadata(ds, variables)
-    file_metadata.setdefault("time_decode_diagnostics", {"found": False, "reason": "no_time_variable_found"})
+    file_metadata.setdefault(
+        "time_decode_diagnostics",
+        {"found": False, "reason": "no_time_variable_found"},
+    )
 
     if allow_fallback:
         logger.info("Attempting fallback decoding on 'time' dimension assumption.")

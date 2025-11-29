@@ -1,12 +1,12 @@
 import logging
 import pathlib
-from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 from pymongo.database import Database
 
 from space_weather_analysis.pipelines.processors.base import BaseETLProcessor
+from space_weather_analysis.util.types import RawData, TransformedDocuments
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ class SilsoETL(BaseETLProcessor):
         super().__init__(db)
         self.file_path = file_path
 
-    def _extract(self) -> Optional[pd.DataFrame]:
+    def _extract(self) -> RawData:
         """
         Extracts sunspot data from the local CSV file.
 
@@ -69,7 +69,7 @@ class SilsoETL(BaseETLProcessor):
             logger.error(f"Error reading SILSO file: {e}", exc_info=True)
             return None
 
-    def _transform(self, raw_data: Optional[pd.DataFrame]) -> List[Dict[str, Any]]:
+    def _transform(self, raw_data: RawData) -> TransformedDocuments:
         """
         Transforms the raw sunspot DataFrame into MongoDB documents.
 
@@ -106,14 +106,14 @@ class SilsoETL(BaseETLProcessor):
         timestamps = raw_data["timestamp"].to_list()
         metadata = {"source": "SILSO_V2.0"}
 
-        documents = [
+        documents: TransformedDocuments = [
             {
                 "timestamp": ts,
                 "metadata": metadata,
                 # Filter out NaN values to keep the documents clean.
                 "data": {k: v for k, v in data_dict.items() if not pd.isna(v)},
             }
-            for ts, data_dict in zip(timestamps, data_payloads)
+            for ts, data_dict in zip(timestamps, data_payloads, strict=False)
         ]
 
         logger.info(f"Transformed {len(documents)} documents.")

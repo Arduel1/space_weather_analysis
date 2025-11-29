@@ -12,11 +12,14 @@ logger = logging.getLogger(__name__)
 class MetadataWriter:
     """
     Creates and saves standardized metadata documents to MongoDB.
+
+    This class handles the normalization of Python/NumPy types into
+    BSON-compatible formats suitable for MongoDB storage.
     """
 
     COLLECTION_NAME = "dataset_metadata"
 
-    def __init__(self, db: Database):
+    def __init__(self, db: Database) -> None:
         """
         Initializes the writer with a database connection.
 
@@ -30,59 +33,64 @@ class MetadataWriter:
         """
         Recursively sanitizes a value to make it BSON-compatible.
 
-        - Converts numpy integers/floats to standard python int/float.
-        - Converts numpy bools to standard python bool.
-        - Converts np.nan and np.inf to None.
-        - Decodes bytes to utf-8 strings.
+        Handles conversion of:
+        - Dictionaries and Lists (recursive)
+        - NumPy arrays -> Lists
+        - NumPy scalars (floats/ints/bools) -> Python natives
+        - NaN/Inf -> None
+        - Bytes -> UTF-8 Strings
 
         Args:
             value (Any): The value to sanitize.
 
         Returns:
-            Any: A BSON-compatible value.
+            Any: A BSON-compatible value (dict, list, str, int, float, bool, or None).
         """
         if isinstance(value, dict):
-            # Recurse into dictionaries
             return {k: self._sanitize_value(v) for k, v in value.items()}
+
         if isinstance(value, list):
-            # Recurse into lists
             return [self._sanitize_value(v) for v in value]
+
+        if isinstance(value, np.ndarray):
+            # Convert numpy array to list and sanitize elements
+            return [self._sanitize_value(v) for v in value.tolist()]
 
         # --- Handle NumPy/Float Special Values (NaN/Inf) ---
         if isinstance(value, (np.floating, float)):
             if np.isnan(value) or np.isinf(value):
-                return None  # Convert NaN/Inf to None (BSON null)
-            return float(value)  # Convert np.float32 -> float
+                return None  # MongoDB uses null for missing values
+            return float(value)
 
         # --- Handle other NumPy types ---
         if isinstance(value, np.integer):
-            return int(value)  # Convert np.int32/64 -> int
+            return int(value)
         if isinstance(value, np.bool_):
-            return bool(value)  # Convert np.bool_ -> bool
+            return bool(value)
 
         # --- Handle Bytes ---
         if isinstance(value, bytes):
             return value.decode("utf-8", errors="ignore")
 
-        # Return the value if it's already a compatible type
+        # Return the value if it's already a compatible type (str, int, bool, None)
         return value
 
     def save_metadata_to_db(
         self,
         dataset_id: str,
         variables: List[VariableMetadata],
-        source_info: Optional[Dict[str, str]] = None,
+        source_info: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Combines metadata and upserts it into the MongoDB collection.
 
+        The dataset_id is used as the MongoDB `_id` field to ensure uniqueness
+        per dataset.
+
         Args:
-            dataset_id (str): The ID of the dataset. This will be used
-                              as the '_id' for the MongoDB document.
-            variables (List[VariableMetadata]): A list of standardized
-                                                variable metadata objects.
-            source_info (Optional[Dict[str, str]]): Optional header info,
-                                                   such as source server or citation.
+            dataset_id (str): The unique identifier of the dataset (used as _id).
+            variables (List[VariableMetadata]): A list of standardized variable metadata objects.
+            source_info (Optional[Dict[str, Any]]): Optional descriptive info about the source.
         """
         logger.info(f"Saving metadata document for {dataset_id} to MongoDB...")
 
@@ -91,30 +99,36 @@ class MetadataWriter:
             return
 
         try:
-            # Convert VariableMetadata objects to simple dicts for serialization
-            variable_docs = []
-            for var in sorted(variables, key=lambda v: v.name):
-                sanitized_attrs = self._sanitize_value(var.file_attributes)
-                variable_docs.append(
-                    {
-                        "name": var.name,
-                        "description": var.description,
-                        "units": var.units,
-                        "fill": var.fill,
-                        "type": var.type,
-                        "size": var.size,
-                        "file_attributes": sanitized_attrs,  # Use sanitized dict
-                    }
-                )
+            # Sanitize Source Info
+            clean_source_info = self._sanitize_value(source_info) if source_info else {}
 
-            # Create the complete document
+            # Serialize and Sanitize Variables
+            variable_docs: List[Dict[str, Any]] = []
+            # Sort by name for consistent document structure
+            for var in sorted(variables, key=lambda v: v.name):
+                # We construct the dict manually to ensure strict schema adherence
+                # and apply sanitization specifically to the file_attributes dict.
+                sanitized_attrs = self._sanitize_value(var.file_attributes)
+
+                var_doc = {
+                    "name": var.name,
+                    "description": var.description,
+                    "units": var.units,
+                    "fill": var.fill,
+                    "type": var.type,
+                    "size": var.size,
+                    "file_attributes": sanitized_attrs,
+                }
+                variable_docs.append(var_doc)
+
+            # Construct Final Document
             metadata_document = {
                 "_id": dataset_id,
-                "source_info": source_info or {},
+                "source_info": clean_source_info,
                 "variables": variable_docs,
             }
 
-            # Use update_one with upsert=True to create or replace
+            # Upsert (Insert or Update)
             self.collection.update_one({"_id": dataset_id}, {"$set": metadata_document}, upsert=True)
 
             logger.info(f"Successfully saved metadata for {dataset_id} to collection '{self.COLLECTION_NAME}'")

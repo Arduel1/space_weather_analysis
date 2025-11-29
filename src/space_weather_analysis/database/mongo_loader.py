@@ -1,16 +1,15 @@
 import logging
-from abc import ABC
 from typing import Any, Dict, List, Optional
 
 from pymongo.database import Database
-from pymongo.errors import BulkWriteError
+from pymongo.errors import BulkWriteError, OperationFailure
 
 from space_weather_analysis.util.data_preprocessing import batch_generator
 
 logger = logging.getLogger(__name__)
 
 
-class MongoLoader(ABC):
+class MongoLoader:
     """
     Abstract Base Class providing common MongoDB loading functionality.
 
@@ -20,7 +19,7 @@ class MongoLoader(ABC):
 
     DEFAULT_BATCH_SIZE = 5000
 
-    def __init__(self, db: Database):
+    def __init__(self, db: Database) -> None:
         """
         Initializes the loader with a database connection.
 
@@ -46,22 +45,35 @@ class MongoLoader(ABC):
             meta_field (str): The name of the field containing metadata.
             **timeseries_options: Additional options for the timeseries.
         """
-        if collection_name not in self.db.list_collection_names():
-            logger.info(f"Creating new time series collection: {collection_name}")
+        try:
+            # Check existing collections to avoid error on recreation attempt
+            if collection_name not in self.db.list_collection_names():
+                logger.info(f"Creating new time series collection: {collection_name}")
 
-            options: Dict[str, Any] = {"granularity": "seconds"}
-            options.update(timeseries_options)
+                options: Dict[str, Any] = {"granularity": "seconds"}
+                options.update(timeseries_options)
 
-            self.db.create_collection(
-                collection_name,
-                timeseries={
-                    "timeField": time_field,
-                    "metaField": meta_field,
-                    **options,
-                },
+                self.db.create_collection(
+                    collection_name,
+                    timeseries={
+                        "timeField": time_field,
+                        "metaField": meta_field,
+                        **options,
+                    },
+                )
+            else:
+                logger.info(f"Collection {collection_name} already exists.")
+
+        except OperationFailure as e:
+            logger.error(
+                f"MongoDB operation failed while creating collection '{collection_name}': {e}",
+                exc_info=True,
             )
-        else:
-            logger.info(f"Collection {collection_name} already exists.")
+        except Exception as e:
+            logger.error(
+                f"Unexpected error ensuring collection '{collection_name}': {e}",
+                exc_info=True,
+            )
 
     def _load_data(
         self,
@@ -98,10 +110,12 @@ class MongoLoader(ABC):
             )
 
             total_inserted = 0
+            # Use batch_generator from utilities
             for i, batch in enumerate(batch_generator(documents, effective_batch_size), start=1):
                 if not batch:
                     continue
 
+                # ordered=False allows continuing insertion even if one document fails
                 collection.insert_many(batch, ordered=False)
                 total_inserted += len(batch)
                 logger.info(f"  ... inserted batch {i} ({total_inserted}/{len(documents)} documents)")

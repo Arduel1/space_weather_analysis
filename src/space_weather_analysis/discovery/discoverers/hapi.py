@@ -1,12 +1,13 @@
 import logging
 import pathlib
-from typing import Any, Dict, Generator, List, Tuple
+from typing import Generator, List
 
 from hapiclient import hapi
 from hapiclient.util import HAPIError
 
 from space_weather_analysis.config import HAPI_SOURCE_ID
 from space_weather_analysis.discovery.discoverers.base import AbstractDiscoverer
+from space_weather_analysis.util.types import CatalogEntryDict, DiscoveryYield
 
 logger = logging.getLogger(__name__)
 
@@ -62,9 +63,7 @@ class HapiDiscoverer(AbstractDiscoverer):
             server_urls.append(url)
         return server_urls
 
-    def _get_entry_for_dataset(
-        self, server_url: str, dataset_id: str
-    ) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
+    def _get_entry_for_dataset(self, server_url: str, dataset_id: str) -> Generator[DiscoveryYield, None, None]:
         """
         Retrieves the metadata for a single dataset and yields it
         as a catalog entry tuple.
@@ -76,7 +75,7 @@ class HapiDiscoverer(AbstractDiscoverer):
             dataset_id (str): The specific dataset ID to get info for.
 
         Yields:
-            Generator[Tuple[str, Dict[str, Any]], None, None]:
+            Generator[DiscoveryYield, None, None]:
             A generator yielding a single (dataset_id, entry) tuple
             if successful.
         """
@@ -88,12 +87,12 @@ class HapiDiscoverer(AbstractDiscoverer):
             stop_date = info_meta.get("stopDate")
 
             if start_date and stop_date:
-                new_entry = {
+                new_entry: CatalogEntryDict = {
                     "type": HAPI_SOURCE_ID,
                     "source_id": server_url,
                     "time_range": {
-                        "start_time": start_date,
-                        "end_time": stop_date,
+                        "start_time": str(start_date),
+                        "end_time": str(stop_date),
                     },
                 }
                 yield dataset_id, new_entry
@@ -105,7 +104,7 @@ class HapiDiscoverer(AbstractDiscoverer):
                 exc_info=True,
             )
 
-    def _discover_datasets_for_server(self, server_url: str) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
+    def _discover_datasets_for_server(self, server_url: str) -> Generator[DiscoveryYield, None, None]:
         """
         Retrieves the full dataset catalog from a single server and
         yields entries for each valid dataset.
@@ -114,7 +113,7 @@ class HapiDiscoverer(AbstractDiscoverer):
             server_url (str): The URL of the server to query.
 
         Yields:
-            Generator[Tuple[str, Dict[str, Any]], None, None]:
+            Generator[DiscoveryYield, None, None]:
             A generator of catalog entries from this server.
         """
         meta_catalog = hapi(server_url, logging=True)
@@ -133,7 +132,7 @@ class HapiDiscoverer(AbstractDiscoverer):
             # Yield from the helper method that processes a single dataset
             yield from self._get_entry_for_dataset(server_url, dataset_id)
 
-    def discover(self) -> Generator[Tuple[str, Dict[str, Any]], None, None]:
+    def discover(self) -> Generator[DiscoveryYield, None, None]:
         """
         Implements the discovery process for HAPI sources.
 

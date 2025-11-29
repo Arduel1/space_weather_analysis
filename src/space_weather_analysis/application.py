@@ -1,21 +1,23 @@
 import logging
-import tempfile
 import pathlib
+import tempfile
 import time
-from typing import Any, Dict, List, Tuple
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 from pymongo.database import Database
 
 from space_weather_analysis.config import (
     CATALOG_FILE,
+    FIDO_CDAWEB_SOURCE_ID,
     HAPI_SERVER_LIST_FILE,
     HAPI_SOURCE_ID,
-    FIDO_CDAWEB_SOURCE_ID,
 )
-from space_weather_analysis.discovery.loader import CatalogLoader
-from space_weather_analysis.discovery.discoverers.hapi import HapiDiscoverer
-from space_weather_analysis.discovery.discoverers.cdaweb import CdawebDiscoverer
 from space_weather_analysis.discovery.builder import CatalogBuilder
+from space_weather_analysis.discovery.discoverers.base import AbstractDiscoverer
+from space_weather_analysis.discovery.discoverers.cdaweb import CdawebDiscoverer
+from space_weather_analysis.discovery.discoverers.hapi import HapiDiscoverer
+from space_weather_analysis.discovery.loader import CatalogLoader
 from space_weather_analysis.pipelines.factory import PipelineFactory
 
 logger = logging.getLogger(__name__)
@@ -30,7 +32,7 @@ class Application:
     ETL processes, and data ingestion pipelines.
     """
 
-    def __init__(self, db: Database, test_configs: Dict[str, Any]):
+    def __init__(self, db: Database, test_configs: Dict[str, Any]) -> None:
         """
         Initializes the application orchestrator.
 
@@ -83,7 +85,8 @@ class Application:
                 try:
                     logger.info(f"Starting pipeline for {job_type}...")
                     pipeline = factory.get_pipeline(job_type)
-                    # Local pipelines ignore arguments, so we pass empty/dummy values
+                    # Local pipelines ignore arguments, so we pass empty/dummy values.
+                    # BasePipeline.run expects Optional[datetime], so None is valid type-wise.
                     pipeline.run([], None, None)
                     logger.info(f"Finished pipeline for {job_type}.")
                 except Exception as e:
@@ -104,7 +107,7 @@ class Application:
             )
             fido_discoverer = CdawebDiscoverer()
 
-            discoverers = [hapi_discoverer, fido_discoverer]
+            discoverers: List[AbstractDiscoverer] = [hapi_discoverer, fido_discoverer]
 
             manager = CatalogBuilder(discoverers=discoverers, catalog_output_path=CATALOG_FILE)
             manager.build_catalog()
@@ -153,10 +156,13 @@ class Application:
             factory = PipelineFactory(self.db, temp_path)
 
             for config_key, source_type in jobs:
-                config = self.test_configs.get(config_key, {})
-                datasets = config.get("DATASET_FILTER")
-                start_time = config.get("START_TIME")
-                end_time = config.get("END_TIME")
+                config: Dict[str, Any] = self.test_configs.get(config_key, {})
+
+                # Retrieve and cast config values to satisfy type checker
+                # We assume main.py provides correct types (List[str] and datetime)
+                datasets = cast(List[str], config.get("DATASET_FILTER"))
+                start_time = cast(Optional[datetime], config.get("START_TIME"))
+                end_time = cast(Optional[datetime], config.get("END_TIME"))
 
                 if not datasets or not start_time or not end_time:
                     logger.warning(f"Skipping {source_type}: Incomplete configuration.")

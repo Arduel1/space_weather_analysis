@@ -5,14 +5,15 @@ from pymongo.database import Database
 
 from space_weather_analysis.config import (
     CME_CATALOG_FILE,
+    DATA_ROOT,
     FIDO_CDAWEB_SOURCE_ID,
     HAPI_SOURCE_ID,
     SILSO_FILE,
 )
-from space_weather_analysis.pipelines.hapi import HapiPipeline
 from space_weather_analysis.pipelines.base import BasePipeline
-from space_weather_analysis.pipelines.local import LocalCmePipeline, LocalSunspotPipeline
 from space_weather_analysis.pipelines.cdaweb import CdawebPipeline
+from space_weather_analysis.pipelines.hapi import HapiPipeline
+from space_weather_analysis.pipelines.local import LocalCmePipeline, LocalSunspotPipeline
 
 
 class PipelineFactory:
@@ -21,7 +22,7 @@ class PipelineFactory:
     based on the source type.
     """
 
-    def __init__(self, db: Database, temp_data_path: Optional[pathlib.Path] = None):
+    def __init__(self, db: Database, temp_data_path: Optional[pathlib.Path] = None) -> None:
         """
         Initializes the factory.
 
@@ -29,9 +30,12 @@ class PipelineFactory:
             db (Database): The MongoDB database instance.
             temp_data_path (Optional[pathlib.Path]): Path for temporary file storage
                                                      (required for CDAWeb pipeline).
+                                                     Defaults to 'data/cache' in project root.
         """
         self.db = db
-        self.temp_data_path = temp_data_path or pathlib.Path("/tmp/sw_data")
+        # Use a persistent cache directory within the project data root by default
+        # to prevent data loss on local restart and reduce API calls.
+        self.temp_data_path = temp_data_path or (DATA_ROOT / "cache")
 
     def get_pipeline(self, source_type: str) -> BasePipeline:
         """
@@ -50,6 +54,7 @@ class PipelineFactory:
             return HapiPipeline(self.db)
 
         elif source_type == FIDO_CDAWEB_SOURCE_ID:
+            # Passes the persistent data path to the CDAWeb pipeline
             return CdawebPipeline(self.db, self.base_data_path)
 
         elif source_type == "LOCAL_SILSO":

@@ -26,27 +26,36 @@ class DatabaseConnection:
         """
         Internal method to establish the connection if it doesn't exist.
 
-        This method is called automatically by get_database() if no
-        connection is active.
+        Validates necessary environment variables before attempting connection.
 
         Returns:
             Optional[MongoClient]: The active MongoClient instance, or None
-                                   if connection fails.
+                                   if connection fails or credentials are missing.
         """
         if cls._client:
             return cls._client
 
-        MONGODB_URI = f"mongodb://{os.getenv('MONGO_USER')}:{os.getenv('MONGO_PASS')}@mongo:{os.getenv('MONGO_PORT')}/"
+        # Fetch credentials safely
+        mongo_user = os.getenv("MONGO_USER")
+        mongo_pass = os.getenv("MONGO_PASS")
+        mongo_port = os.getenv("MONGO_PORT")
+
+        if not all([mongo_user, mongo_pass, mongo_port]):
+            logger.critical("Missing MongoDB credentials. Ensure MONGO_USER, MONGO_PASS, and MONGO_PORT are set.")
+            return None
+
+        # Construct URI
+        mongodb_uri = f"mongodb://{mongo_user}:{mongo_pass}@mongo:{mongo_port}/"
 
         try:
             logger.info("Attempting to connect to MongoDB...")
             cls._client = MongoClient(
-                MONGODB_URI,
-                serverSelectionTimeoutMS=10000,
+                mongodb_uri,
+                serverSelectionTimeoutMS=5000,  # Reduced timeout for faster failure feedback
                 socketTimeoutMS=60000,
-                connectTimeoutMS=60000,
+                connectTimeoutMS=10000,
             )
-            # Test the connection
+            # Test the connection immediately
             cls._client.admin.command("ping")
             logger.info("MongoDB connection successful.")
             return cls._client
@@ -81,7 +90,7 @@ class DatabaseConnection:
 
         db_name = os.getenv("MONGO_DB_NAME")
         if not db_name:
-            logger.error("MONGO_DB_NAME environment variable not set.", exc_info=True)
+            logger.critical("MONGO_DB_NAME environment variable not set.")
             return None
 
         cls._db = client[db_name]

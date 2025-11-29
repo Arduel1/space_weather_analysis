@@ -1,9 +1,10 @@
 from abc import abstractmethod
-from typing import Any, Dict, List
+from typing import Any
 
 from pymongo.database import Database
 
 from space_weather_analysis.database.mongo_loader import MongoLoader
+from space_weather_analysis.util.types import TransformedDocuments
 
 
 class BaseETLProcessor(MongoLoader):
@@ -40,7 +41,7 @@ class BaseETLProcessor(MongoLoader):
         pass
 
     @abstractmethod
-    def _transform(self, raw_data: Any) -> List[Dict[str, Any]]:
+    def _transform(self, raw_data: Any) -> TransformedDocuments:
         """
         Abstract method for the "Transform" step.
 
@@ -51,7 +52,7 @@ class BaseETLProcessor(MongoLoader):
             raw_data (Any): The raw data from _extract().
 
         Returns:
-            List[Dict[str, Any]]: A list of formatted dictionaries.
+            TransformedDocuments: A list of formatted dictionaries.
         """
         pass
 
