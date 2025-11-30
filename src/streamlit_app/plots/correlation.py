@@ -18,7 +18,7 @@ def plot_solar_cycle_correlation(cme_df: pd.DataFrame, sunspot_df: pd.DataFrame)
         cme_df: Dataframe containing CME data.
         sunspot_df: Dataframe containing sunspot data.
     """
-    st.subheader("☀️ Solar Cycle vs. CME Events")
+    st.subheader("Solar Cycle vs. CME Events")
     st.caption("This visualization overlays individual CME events (bubbles) on the solar cycle (sunspot number).")
 
     # Prepare CME data
@@ -126,7 +126,7 @@ def plot_solar_cycle_correlation(cme_df: pd.DataFrame, sunspot_df: pd.DataFrame)
                 line_width=2,
                 line_dash="dash",
                 line_color="rgba(128, 128, 128, 0.5)",
-                annotation_text="Cycle Min",
+                annotation_text="Cycle",
                 annotation_position="bottom right",
             )
 
@@ -148,11 +148,8 @@ def plot_solar_cycle_correlation(cme_df: pd.DataFrame, sunspot_df: pd.DataFrame)
 
     st.plotly_chart(fig, use_container_width=True)
 
-    st.info("""
-    **Chart Explanation:**
-    * **Background (Orange Area/Red Line):** The **Solar Cycle** (Smoothed Sunspot Number). The dashed lines mark the approximate cycle minima.
-    * **Foreground (Bubbles):** **CME Events**. The height represents energy, the size represents width.
-    
-    **Correlation Insight:** Notice how the density of blue/red bubbles (CMEs) drastically increases as the red curve (Sunspots) rises.
-    However, massive (high-up) CMEs can still occur during the declining phase of the cycle.
-    """)  # noqa: W293
+    with st.expander("**Chart Explanation:**", expanded=False):
+        st.markdown("""
+        * **Background (Orange Area/Red Line):** The **Solar Cycle** (Smoothed Sunspot Number). The dashed lines mark the approximate cycle minima.
+        * **Foreground (Bubbles):** **CME Events**. The height represents energy, the size represents width.
+        """)  # noqa: W293

@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+import pandas as pd
 import streamlit as st
 
 from streamlit_app.data_loader import DataLoader
@@ -7,6 +8,7 @@ from streamlit_app.plots.cme import plot_cmes
 from streamlit_app.plots.correlation import plot_solar_cycle_correlation
 from streamlit_app.plots.generic import plot_generic
 from streamlit_app.plots.sunspots import plot_sunspots
+from streamlit_app.plots.xray import plot_xray_flux
 
 # Page Configuration
 st.set_page_config(
@@ -79,6 +81,8 @@ if app_mode == "Dataset Explorer":
             plot_sunspots(df, selected_collection)
         elif "cme" in coll_lower:
             plot_cmes(df, selected_collection)
+        elif "xray" in coll_lower:
+            plot_xray_flux(df, selected_collection, key_suffix="explorer")
         else:
             plot_generic(df, selected_collection)
 
@@ -95,21 +99,36 @@ elif app_mode == "Cycle Correlation Analysis":
 
     target_sunspot = "silso_sunspot_daily"
     target_cme = "cme_catalog"
+    target_xray = "goesp_xray_flux_P1M"
 
     available = loader.get_available_collections()
 
     if target_sunspot in available and target_cme in available:
-        with st.spinner("Loading and merging datasets..."):
+        with st.spinner("Loading datasets..."):
             df_sunspot = loader.get_timeseries_data(target_sunspot, start_time=start_dt, end_time=end_dt)
             df_cme = loader.get_timeseries_data(target_cme, start_time=start_dt, end_time=end_dt)
 
+            df_xray = pd.DataFrame()
+            if target_xray in available:
+                df_xray = loader.get_timeseries_data(target_xray, start_time=start_dt, end_time=end_dt)
+
         if not df_sunspot.empty and not df_cme.empty:
             plot_solar_cycle_correlation(df_cme, df_sunspot)
+            if not df_xray.empty:
+                st.markdown("---")
+                # Reuse the specialized X-ray plot logic
+                # We pass a unique key_suffix so the sliders don't conflict with the Explorer view
+                plot_xray_flux(df_xray, target_xray, key_suffix="corr")
+            elif target_xray in available:
+                st.warning("X-Ray data available but no data found in selected range.")
+            else:
+                st.info(f"X-Ray dataset ({target_xray}) not found in database. Run pipeline to enable flare analysis.")
 
             with st.expander("View Merged Data Statistics"):
-                col1, col2 = st.columns(2)
-                col1.metric("Total CME Events", len(df_cme))
-                col2.metric("Days of Sunspot Data", len(df_sunspot))
+                cols = st.columns(3)
+                cols[0].metric("Total CME Events", len(df_cme))
+                cols[1].metric("Days of Sunspot Data", len(df_sunspot))
+                cols[2].metric("X-Ray Data Points", len(df_xray) if not df_xray.empty else 0)
         else:
             st.error(f"Data missing for the selected timeframe. Sunspots: {len(df_sunspot)} rows, CMEs: {len(df_cme)} rows.")
     else:

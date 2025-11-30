@@ -7,7 +7,7 @@ def plot_generic(df: pd.DataFrame, collection_name: str) -> None:
     """
     Provides a generic time-series visualization for any dataset with numeric columns.
     """
-    st.subheader(f"📈 Generic Time Series: {collection_name}")
+    st.subheader(f"Generic Time Series: {collection_name}")
 
     numeric_cols = df.select_dtypes(include=["float", "int"]).columns.tolist()
 
