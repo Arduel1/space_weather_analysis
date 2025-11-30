@@ -24,7 +24,7 @@ from space_weather_analysis.util.data_preprocessing import generate_time_chunks,
 from space_weather_analysis.util.file_parser import parse_datafiles
 from space_weather_analysis.util.metadata.metadata_generator import MetadataWriter
 from space_weather_analysis.util.metadata.variable_metadata import VariableMetadata
-from space_weather_analysis.util.time_utils import parse_xarray_timestamp
+from space_weather_analysis.util.netcdf_utils import parse_xarray_timestamp
 from space_weather_analysis.util.types import CatalogEntryDict
 
 logger = logging.getLogger(__name__)
@@ -254,9 +254,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
                 elif isinstance(data_object, list):
                     self._load_nd_data_to_gridfs(data_object, collection_name, source_id, opened_datasets)
                 else:
-                    logger.warning(
-                        f"Data object for {dataset_id} was not a recognized type ({type(data_object)}). Cannot load."
-                    )
+                    logger.warning(f"Data object for {dataset_id} was not a recognized type ({type(data_object)}). Cannot load.")
             else:
                 logger.info(f"No 1D or N-D data could be parsed for {dataset_id} in this chunk.")
 
@@ -408,9 +406,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
                             f"raw_sample={repr(sample)}; dtype={getattr(getattr(ts_slice[time_coord], 'values', None), 'dtype', None)}"
                         )
                     except Exception as e_sample:
-                        logger.info(
-                            f"_transform_xarray_to_docs: unable to sample time_coord '{time_coord}' at idx={i}: {e_sample}"
-                        )
+                        logger.info(f"_transform_xarray_to_docs: unable to sample time_coord '{time_coord}' at idx={i}: {e_sample}")
                 else:
                     logger.info(
                         f"_transform_xarray_to_docs: time_coord '{time_coord}' NOT present in slice idx={i}."
@@ -488,9 +484,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
             source_info=source_info,
         )
 
-    def _normalize_cdaweb_meta_to_variables(
-        self, api_meta: List[Dict[str, Any]], file_meta: Dict[str, Any]
-    ) -> List[VariableMetadata]:
+    def _normalize_cdaweb_meta_to_variables(self, api_meta: List[Dict[str, Any]], file_meta: Dict[str, Any]) -> List[VariableMetadata]:
         """
         Merges file and API metadata into VariableMetadata objects.
 

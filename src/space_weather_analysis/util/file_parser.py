@@ -13,11 +13,7 @@ from sunpy.util import expand_list
 from sunpy.util.datatype_factory_base import NoMatchError
 
 from space_weather_analysis.util.logging_utils import log_xarray_dataset_summary
-from space_weather_analysis.util.time_utils import (
-    decode_time_variable_from_file,
-    fallback_decode_time,
-    find_time_dimension,
-)
+from space_weather_analysis.util.netcdf_utils import decode_time_variable_from_file, fallback_decode_time, find_time_dimension
 
 logger = logging.getLogger(__name__)
 

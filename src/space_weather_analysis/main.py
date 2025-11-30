@@ -35,7 +35,7 @@ def main() -> None:
     RUN_CONFIGURATION: Dict[str, bool] = {
         "build_catalog": False,
         "run_catalog_etl": True,
-        "run_local_etl": False,
+        "run_local_etl": True,
         "run_pipeline_test": False,
     }
 
