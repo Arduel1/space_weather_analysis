@@ -163,7 +163,7 @@ def plot_xray_flux(df: pd.DataFrame, collection_name: str, key_suffix: str = "")
         yaxis=dict(range=[-9, -2]),
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     with st.expander("Definition of Wavelengths & Flare Classes", expanded=False):
         col1, col2 = st.columns(2)

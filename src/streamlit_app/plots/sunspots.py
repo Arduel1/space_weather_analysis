@@ -92,7 +92,7 @@ def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
         height=500,
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Metrics Section
     col1, col2, col3 = st.columns(3)
@@ -142,6 +142,6 @@ def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
                 fig_fft.add_vline(x=11.0, line_width=2, line_dash="dash", line_color="green", annotation_text="Schwabe Cycle (11y)")
 
                 fig_fft.add_annotation(x=top_period, y=top_cycle["Power"], text=f"Peak: {top_period:.2f}y", showarrow=True, arrowhead=1)
-                st.plotly_chart(fig_fft, use_container_width=True)
+                st.plotly_chart(fig_fft, width="stretch")
         else:
             st.warning("Not enough data to perform a reliable periodicity analysis.")

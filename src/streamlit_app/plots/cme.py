@@ -97,7 +97,7 @@ def plot_cmes(df: pd.DataFrame, collection_name: str) -> None:
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                 )
 
-                st.plotly_chart(fig_time, use_container_width=True)
+                st.plotly_chart(fig_time, width="stretch")
 
                 st.info("""
                 **Interpretation:**
@@ -136,7 +136,7 @@ def plot_cmes(df: pd.DataFrame, collection_name: str) -> None:
 
                 fig_hist.update_layout(xaxis=dict(tickvals=tick_vals, ticktext=tick_text), bargap=0.1)
 
-                st.plotly_chart(fig_hist, use_container_width=True)
+                st.plotly_chart(fig_hist, width="stretch")
 
     # Morphology Plot
     with tab3:
@@ -154,4 +154,4 @@ def plot_cmes(df: pd.DataFrame, collection_name: str) -> None:
                         color_discrete_map={"Halo": "red", "Non-Halo": "blue"},
                         labels={"value": "Count", "timestamp": "Year", "variable": "Type"},
                     )
-                    st.plotly_chart(fig_bar, use_container_width=True)
+                    st.plotly_chart(fig_bar, width="stretch")

@@ -46,8 +46,8 @@ def main() -> None:
     # We use None for START_TIME and END_TIME to let the pipeline auto-detect
     # the full range from the catalog.
     hapi_test_config: Dict[str, Any] = {
-        "START_TIME": None,
-        "END_TIME": None,
+        "START_TIME": datetime(2023, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+        "END_TIME": datetime(2025, 11, 26, 0, 0, 0, tzinfo=timezone.utc),
         "DATASET_FILTER": [
             "goesp_xray_flux_P1M",  # 1-minute X-Ray Flux
             "goesp_part_flux_P5M",  # 5-minute Particle Flux (Protons/Electrons)

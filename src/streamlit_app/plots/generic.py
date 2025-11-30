@@ -30,6 +30,6 @@ def plot_generic(df: pd.DataFrame, collection_name: str) -> None:
             df_plot = df
 
         fig = px.line(df_plot, x=df_plot.index, y=selected_vars, title=f"{collection_name} - Time Series")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     else:
         st.info("Please select at least one variable to plot.")

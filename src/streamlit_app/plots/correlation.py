@@ -146,7 +146,7 @@ def plot_solar_cycle_correlation(cme_df: pd.DataFrame, sunspot_df: pd.DataFrame)
     max_sunspots = sunspot_plot["rolling_mean"].max()
     fig.update_yaxes(title_text="Sunspot Number (Smoothed)", secondary_y=True, showgrid=False, range=[0, max_sunspots], color="#FF4B4B")
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     with st.expander("**Chart Explanation:**", expanded=False):
         st.markdown("""
