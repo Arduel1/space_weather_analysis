@@ -36,7 +36,7 @@ def main() -> None:
         "build_catalog": False,
         "run_catalog_etl": True,
         "run_local_etl": False,
-        "run_pipeline_test": True,
+        "run_pipeline_test": False,
     }
 
     # --- Test Configurations ---

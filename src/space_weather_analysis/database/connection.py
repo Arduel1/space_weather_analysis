@@ -39,19 +39,21 @@ class DatabaseConnection:
         mongo_user = os.getenv("MONGO_USER")
         mongo_pass = os.getenv("MONGO_PASS")
         mongo_port = os.getenv("MONGO_PORT")
+        # Allow configuring the host, defaulting to 'mongo' for Docker compatibility
+        mongo_host = os.getenv("MONGO_HOST", "mongo")
 
         if not all([mongo_user, mongo_pass, mongo_port]):
             logger.critical("Missing MongoDB credentials. Ensure MONGO_USER, MONGO_PASS, and MONGO_PORT are set.")
             return None
 
-        # Construct URI
-        mongodb_uri = f"mongodb://{mongo_user}:{mongo_pass}@mongo:{mongo_port}/"
+        # Construct URI using the configurable host
+        mongodb_uri = f"mongodb://{mongo_user}:{mongo_pass}@{mongo_host}:{mongo_port}/"
 
         try:
-            logger.info("Attempting to connect to MongoDB...")
+            logger.info(f"Attempting to connect to MongoDB at {mongo_host}:{mongo_port}...")
             cls._client = MongoClient(
                 mongodb_uri,
-                serverSelectionTimeoutMS=5000,  # Reduced timeout for faster failure feedback
+                serverSelectionTimeoutMS=5000,
                 socketTimeoutMS=60000,
                 connectTimeoutMS=10000,
             )
@@ -100,6 +102,7 @@ class DatabaseConnection:
     def close(cls) -> None:
         """
         Closes the global MongoDB client connection, if it exists.
+        And resets the internal state to allow reconnection if needed.
         """
         if cls._client:
             cls._client.close()

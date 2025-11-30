@@ -11,7 +11,6 @@ from typing import (
     runtime_checkable,
 )
 
-import numpy as np
 import pandas as pd
 import xarray as xr
 from pymongo.database import Database
@@ -21,21 +20,35 @@ from sunpy.timeseries import GenericTimeSeries
 
 
 class TimeRangeDict(TypedDict):
-    """Represents a start and end time pair in the catalog."""
+    """
+    Represents a start and end time pair in the catalog.
 
-    start_time: str  # ISO formatted string
-    end_time: str  # ISO formatted string
+    Attributes:
+        start_time: The start timestamp in ISO 8601 format (e.g., '2023-01-01T00:00:00Z').
+        end_time: The end timestamp in ISO 8601 format.
+    """
+
+    start_time: str
+    end_time: str
 
 
 class CatalogEntryDict(TypedDict):
     """
     A dictionary representing a single source entry in the catalog.
 
+    This structure maps a specific data source (like a HAPI server URL)
+    to a dataset type and the time range available at that source.
+
+    Attributes:
+        type: The type identifier of the source (e.g., 'HAPI', 'FIDO_CDAWEB').
+        source_id: The specific identifier for the source (e.g., URL for HAPI, Group Name for CDAWeb).
+        time_range: The temporal coverage of this dataset at this source.
+
     Example:
         {
             "type": "HAPI",
             "source_id": "http://hapi-server.org/data",
-            "time_range": {"start_time": "...", "end_time": "..."}
+            "time_range": {"start_time": "2020-01-01T00:00:00Z", "end_time": "2020-01-02T00:00:00Z"}
         }
     """
 
@@ -45,7 +58,15 @@ class CatalogEntryDict(TypedDict):
 
 
 class MasterCatalogItem(TypedDict):
-    """Represents a top-level item in the master catalog JSON."""
+    """
+    Represents a top-level item in the master catalog JSON structure.
+
+    The master catalog groups multiple sources under a single unique dataset_id.
+
+    Attributes:
+        dataset_id: The unique identifier for the dataset (canonical ID).
+        sources: A list of available sources providing this dataset.
+    """
 
     dataset_id: str
     sources: List[CatalogEntryDict]
@@ -54,39 +75,62 @@ class MasterCatalogItem(TypedDict):
 # --- Core Type Aliases ---
 
 DocumentDict: TypeAlias = Dict[str, Any]
-"""A dictionary representing a MongoDB document."""
+"""
+A dictionary representing a MongoDB document.
+Keys are strings (field names), values can be any BSON-compatible type.
+"""
 
 MetadataDict: TypeAlias = Dict[str, Any]
-"""A dictionary containing metadata about a dataset or variable."""
+"""
+A dictionary containing metadata about a dataset or variable.
+Typically contains keys like 'units', 'description', etc.
+"""
 
 TimeRange: TypeAlias = Tuple[datetime, datetime]
-"""A tuple representing a time range with (start_time, end_time)."""
+"""
+A tuple representing a time range: (start_time, end_time).
+Both datetimes should be timezone-aware (UTC).
+"""
 
 
 # --- ETL-specific Type Aliases ---
 
-RawData: TypeAlias = Optional[pd.DataFrame]
+RawData: TypeAlias = Optional[pd.DataFrame | List[Dict[str, Any]]]
 """
-Raw data extracted from a source, typically as a DataFrame or None on failure.
-Note: Some extractors might return lists of dicts, so Any is sometimes used in protocols,
-but this alias covers the common tabular case.
+Raw data extracted from a source.
+- Typically a `pd.DataFrame` for tabular data (Sunspots, CME).
+- Can be a `List[Dict]` for document-oriented sources (Catalog).
+- Returns `None` if extraction fails.
 """
 
 TransformedDocuments: TypeAlias = List[DocumentDict]
-"""A list of documents ready for MongoDB insertion."""
+"""A list of formatted dictionaries ready for MongoDB insertion."""
 
 ParsedFileData: TypeAlias = Optional[GenericTimeSeries | List[Tuple[xr.Dataset, str, str]]]
-"""Parsed file data, either 1D TimeSeries or list of N-D Dataset tuples (dataset, time_dim, time_coord)."""
+"""
+Parsed file data structure.
+Returns:
+    - `GenericTimeSeries`: For 1D data (CSV, simple CDF).
+    - `List[Tuple[xr.Dataset, str, str]]`: For N-D data (NetCDF, complex CDF).
+      Tuple structure: (dataset_object, time_dimension_name, time_coordinate_name).
+    - `None`: If parsing fails.
+"""
 
 
 # --- Catalog-specific Type Aliases ---
 
 CatalogMap: TypeAlias = Dict[str, List[CatalogEntryDict]]
-"""A mapping from dataset_id to list of source entries."""
+"""
+A mapping for fast catalog lookups.
+Key: dataset_id
+Value: List of available sources (CatalogEntryDict).
+"""
 
 DiscoveryYield: TypeAlias = Tuple[str, CatalogEntryDict]
-"""A tuple of (dataset_id, catalog_entry) yielded by discovery processes."""
-
+"""
+The output unit of discovery processes.
+Structure: (dataset_id, catalog_entry_dictionary).
+"""
 
 # --- Protocols ---
 
@@ -110,16 +154,16 @@ class ETLProcessor(Protocol):
         """
         ...
 
-    def _extract(self) -> Any:
+    def _extract(self) -> RawData:
         """
         Extracts raw data from the source.
 
         Returns:
-            Raw extracted data in a processor-specific format, or None on failure.
+            RawData: The extracted data (DataFrame or List of Dicts), or None on failure.
         """
         ...
 
-    def _transform(self, raw_data: Any) -> TransformedDocuments:
+    def _transform(self, raw_data: RawData) -> TransformedDocuments:
         """
         Transforms raw data into MongoDB documents.
 
@@ -163,7 +207,7 @@ class DataClient(Protocol):
 
     def get_data_and_meta(
         self, dataset_id: str, start_time: datetime, end_time: datetime, **kwargs: Any
-    ) -> Tuple[Optional[np.ndarray], Optional[MetadataDict]]:
+    ) -> Tuple[Optional[Any], Optional[MetadataDict]]:
         """
         Retrieves both data and metadata for a dataset within a time range.
 
