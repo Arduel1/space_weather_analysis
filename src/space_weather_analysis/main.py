@@ -36,25 +36,30 @@ def main() -> None:
         "build_catalog": False,
         "run_catalog_etl": True,
         "run_local_etl": True,
-        "run_pipeline_test": False,
+        "run_pipeline_test": True,
     }
 
     # --- Test Configurations ---
     # Define specific configurations for pipeline tests.
-    # Note: We explicitly attach timezone.utc to all datetimes to ensure
-    # consistent storage and avoid "naive datetime" warnings or conversion errors.
 
+    # Updated Configuration for GOES Data
+    # We use None for START_TIME and END_TIME to let the pipeline auto-detect
+    # the full range from the catalog.
     hapi_test_config: Dict[str, Any] = {
-        "START_TIME": datetime(2023, 11, 22, 0, 0, 0, tzinfo=timezone.utc),
-        "END_TIME": datetime(2023, 11, 24, 0, 0, 0, tzinfo=timezone.utc),
-        "DATASET_FILTER": ["aaa/baseline_all/PT1M/NEZ"],
+        "START_TIME": None,
+        "END_TIME": None,
+        "DATASET_FILTER": [
+            "goesp_xray_flux_P1M",  # 1-minute X-Ray Flux
+            "goesp_part_flux_P5M",  # 5-minute Particle Flux (Protons/Electrons)
+        ],
     }
 
-    fido_test_config: Dict[str, Any] = {
-        "START_TIME": datetime(2023, 11, 22, 0, 0, 0, tzinfo=timezone.utc),
-        "END_TIME": datetime(2023, 11, 24, 0, 0, 0, tzinfo=timezone.utc),
-        "DATASET_FILTER": ["aaa/baseline_all/PT1M/NEZ", "AWE_L3A_TMP", "AWE_L3C_Q20"],
-    }
+    # fido_test_config: Dict[str, Any] = {
+    #     "START_TIME": datetime(2023, 11, 22, 0, 0, 0, tzinfo=timezone.utc),
+    #     "END_TIME": datetime(2023, 11, 24, 0, 0, 0, tzinfo=timezone.utc),
+    #     "DATASET_FILTER": ["aaa/baseline_all/PT1M/NEZ", "AWE_L3A_TMP", "AWE_L3C_Q20"],
+    # }
+    fido_test_config: Dict[str, Any] = {}
 
     TEST_CONFIGS: Dict[str, Any] = {
         "hapi_config": hapi_test_config,

@@ -164,8 +164,9 @@ class Application:
                 start_time = cast(Optional[datetime], config.get("START_TIME"))
                 end_time = cast(Optional[datetime], config.get("END_TIME"))
 
-                if not datasets or not start_time or not end_time:
-                    logger.warning(f"Skipping {source_type}: Incomplete configuration.")
+                # start_time and end_time can be None for auto-detection in supported pipelines.
+                if not datasets:
+                    logger.warning(f"Skipping {source_type}: Incomplete configuration (missing datasets).")
                     continue
 
                 logger.info(f"--- Running Pipeline for {source_type} ---")
