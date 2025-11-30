@@ -9,6 +9,21 @@ services:
     volumes:
       - ./src:/app/src
       - ./data:/app/data
+
+  frontend:
+    build: .
+    restart: always
+    depends_on:
+      - mongo
+    env_file:
+      - .env
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+    # Override the default command to run streamlit
+    command: ["poetry", "run", "streamlit", "run", "src/streamlit_app/main.py", "--server.address=0.0.0.0"]
   mongo:
     image: mongo
     restart: always
