@@ -1,29 +1,10 @@
-from datetime import datetime
-from typing import List
-
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
 from streamlit_app.util.fast_fourier_transformation import calculate_periodicity
-
-
-def _calculate_cycle_peaks(num_cycles: int = 25) -> List[datetime]:
-    """
-    Calculates theoretical sunspot cycle peaks based on the formula:
-    timepoint = 1810.6 + 11.1 * i
-    """
-    peaks = []
-    for i in range(num_cycles):
-        timepoint = 1810.6 + 11.1 * i
-        year = int(timepoint)
-        # Calculate month from the decimal part of the year
-        month = int((timepoint - year) * 12) + 1
-        # Create a datetime object (using 1st of the month)
-        dt = datetime(year, month, 1)
-        peaks.append(dt)
-    return peaks
+from streamlit_app.util.solar_cycles import calculate_cycle_boundaries
 
 
 def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
@@ -36,7 +17,7 @@ def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
         df: Dataframe containing sunspot data.
         collection_name: Name of the collection for display.
     """
-    st.subheader(f"☀️ Sunspot Analysis: {collection_name}")
+    st.subheader(f"Sunspot Analysis: {collection_name}")
 
     if "sunspot_number" not in df.columns:
         st.warning("Column 'sunspot_number' not found. Cannot create specialized plot.")
@@ -44,25 +25,24 @@ def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
 
     col_controls1, col_controls2 = st.columns(2)
     with col_controls1:
-        # Default to 365 days to visualize the yearly trend/11-year cycle clearly
         window = st.slider("Smoothing Window (Days)", min_value=1, max_value=5000, value=365)
 
     with col_controls2:
         remove_zeros = st.checkbox("Hide Zero Values (0)", value=False)
 
-    # Calculate Rolling Average on the full dataframe to preserve time index continuity
+    # Calculate Rolling Average preserving index
     df["rolling_mean"] = df["sunspot_number"].rolling(window=window, min_periods=1).mean()
 
-    # Create a cleaner subset for raw data plotting (removing NaNs)
+    # Create subset for raw data plotting
     df_raw = df.dropna(subset=["sunspot_number"])
 
     if remove_zeros:
         df_raw = df_raw[df_raw["sunspot_number"] > 0]
 
-    # --- Plotting Main Time Series ---
+    # Time Series Plot
     fig = go.Figure()
 
-    # Raw Data (Background)
+    # Background: Daily Observations
     fig.add_trace(
         go.Scatter(
             x=df_raw.index,
@@ -76,7 +56,7 @@ def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
         )
     )
 
-    # Smoothed Trend (Foreground)
+    # Foreground: Smoothed Trend
     fig.add_trace(
         go.Scatter(
             x=df.index,
@@ -84,19 +64,23 @@ def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
             mode="lines",
             name=f"{window}-Day Moving Average",
             line=dict(
-                color="#FF4B4B",  # Streamlit Red
+                color="#FF4B4B",
                 width=3,
             ),
         )
     )
 
-    # Cycle Markers (Theoretical)
-    cycle_peaks = _calculate_cycle_peaks(30)
+    # Cycle Markers (Theoretical Minima)
+    cycle_boundaries = calculate_cycle_boundaries(num_cycles=30)
     shapes = []
-    for peak in cycle_peaks:
-        # Only add lines that are within the current data view
-        if df.index.min() <= peak <= df.index.max():
-            shapes.append(dict(type="line", x0=peak, y0=0, x1=peak, y1=1, xref="x", yref="paper", line=dict(color="blue", width=1, dash="dash")))
+    data_min_date = df.index.min()
+    data_max_date = df.index.max()
+
+    for boundary in cycle_boundaries:
+        if data_min_date <= boundary <= data_max_date:
+            shapes.append(
+                dict(type="line", x0=boundary, y0=0, x1=boundary, y1=1, xref="x", yref="paper", line=dict(color="blue", width=1, dash="dash"))
+            )
 
     fig.update_layout(
         title=f"Sunspot Cycles (Smoothed vs. Daily) - {collection_name}",
@@ -110,14 +94,14 @@ def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
 
     st.plotly_chart(fig, use_container_width=True)
 
-    # Statistics section (Metrics)
+    # Metrics Section
     col1, col2, col3 = st.columns(3)
     if not df_raw.empty:
         col1.metric("Max Sunspot Number", int(df_raw["sunspot_number"].max()))
         col2.metric("Average Sunspot Number", f"{df_raw['sunspot_number'].mean():.2f}")
         col3.metric("Total Records", len(df_raw))
 
-    # --- Scientific Analysis Section ---
+    # Periodicity Analysis
     st.markdown("---")
     st.subheader("Periodicity")
 
@@ -128,16 +112,15 @@ def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
         For sunspots, we expect a strong peak around 11 years.
         """)
 
-        # Perform calculation using the utility
+        # FFT Calculation
         spectrum_df = calculate_periodicity(
             df["sunspot_number"],
             sample_rate_days=1,
-            min_period_years=2.0,  # Ignore short-term noise < 2 years
-            max_period_years=25.0,  # Ignore very long trends > 25 years
+            min_period_years=2.0,
+            max_period_years=25.0,
         )
 
         if not spectrum_df.empty:
-            # Find the strongest cycle
             top_cycle = spectrum_df.iloc[0]
             top_period = top_cycle["Period_Years"]
 
@@ -148,7 +131,6 @@ def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
                 st.info("The calculation uses a Fast Fourier Transform (FFT) on the daily data.")
 
             with col_res_2:
-                # Plot the Power Spectrum
                 fig_fft = px.line(
                     spectrum_df,
                     x="Period_Years",
@@ -156,10 +138,9 @@ def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
                     title="Periodogram: Strength of Cycles",
                     labels={"Period_Years": "Cycle Length (Years)", "Power": "Relative Strength (Power)"},
                 )
-                # Highlight the 11-year mark
+
                 fig_fft.add_vline(x=11.0, line_width=2, line_dash="dash", line_color="green", annotation_text="Schwabe Cycle (11y)")
 
-                # Make the dominant peak stand out
                 fig_fft.add_annotation(x=top_period, y=top_cycle["Power"], text=f"Peak: {top_period:.2f}y", showarrow=True, arrowhead=1)
                 st.plotly_chart(fig_fft, use_container_width=True)
         else:

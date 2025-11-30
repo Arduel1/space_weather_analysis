@@ -17,20 +17,20 @@ def calculate_periodicity(
     spectral power (intensity).
 
     Args:
-        series (pd.Series): The time series data. Index must be DatetimeIndex.
-        sample_rate_days (int): The interval between data points in days (default: 1).
-        min_period_years (float): Minimum cycle length to keep in results (filter noise).
-        max_period_years (float): Maximum cycle length to keep (filter trends).
+        series: The time series data. Index must be DatetimeIndex.
+        sample_rate_days: The interval between data points in days (default: 1).
+        min_period_years: Minimum cycle length to keep in results (filter noise).
+        max_period_years: Maximum cycle length to keep (filter trends).
 
     Returns:
-        pd.DataFrame: A DataFrame sorted by Power (strength of the cycle) descending.
-                      Columns: ['Frequency', 'Period_Days', 'Period_Years', 'Power']
+        A DataFrame sorted by Power (strength of the cycle) descending.
+        Columns: ['Frequency', 'Period_Days', 'Period_Years', 'Power']
     """
     if series.empty:
         return pd.DataFrame()
 
     try:
-        # FFT requires equidistant data points without NaNs.
+        # Preprocessing: FFT requires equidistant data without NaNs
         clean_series = series.resample(f"{sample_rate_days}D").mean().interpolate(method="linear")
         clean_series = clean_series.dropna()
 
@@ -41,25 +41,25 @@ def calculate_periodicity(
         values = clean_series.values - clean_series.mean() # type: ignore
         n_samples = len(values)
 
-        # Compute one-dimensional discrete Fourier Transform for real input
+        # FFT Calculation using NumPy
         fft_values = np.fft.rfft(values)
 
-        # Calculate the Power Spectrum (Amplitude squared) normalized by sample count
+        # Power Spectrum: Normalized amplitude squared
         power_spectrum = np.abs(fft_values) ** 2 / n_samples
 
-        # Calculate frequency bins (cycles per sampling interval)
+        # Frequency Bins: Cycles per sampling interval
         freqs = np.fft.rfftfreq(n_samples, d=sample_rate_days)
 
         results = pd.DataFrame({"Frequency": freqs, "Power": power_spectrum})
 
-        # Filter out the 0-frequency component (static mean)
+        # Remove static offset (0-frequency)
         results = results[results["Frequency"] > 0].copy()
 
         # Convert Frequency to Human-Readable Periods
         results["Period_Days"] = 1 / results["Frequency"]
         results["Period_Years"] = results["Period_Days"] / 365.25
 
-        # Filter for relevant cycle ranges
+        # Filter relevant cycle ranges
         mask = (results["Period_Years"] >= min_period_years) & (results["Period_Years"] <= max_period_years)
         filtered_results = results[mask].copy()
 

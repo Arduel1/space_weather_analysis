@@ -4,6 +4,7 @@ import streamlit as st
 
 from streamlit_app.data_loader import DataLoader
 from streamlit_app.plots.cme import plot_cmes
+from streamlit_app.plots.correlation import plot_solar_cycle_correlation
 from streamlit_app.plots.generic import plot_generic
 from streamlit_app.plots.sunspots import plot_sunspots
 
@@ -16,7 +17,6 @@ st.set_page_config(
 )
 
 
-# Main App Logic - Singleton Loader
 @st.cache_resource
 def get_loader() -> DataLoader:
     """Returns a singleton instance of the DataLoader."""
@@ -25,62 +25,95 @@ def get_loader() -> DataLoader:
 
 loader = get_loader()
 
-# Sidebar Data Control
-st.sidebar.title("Data Control")
+# Sidebar Navigation
+st.sidebar.title("Navigation")
+app_mode = st.sidebar.radio("Choose Mode", ["Dataset Explorer", "Cycle Correlation Analysis"])
 
-available_collections = loader.get_available_collections()
-if not available_collections:
-    st.sidebar.error("No collections found!")
-    st.warning("Database appears empty. Please run the pipeline service first.")
-    st.stop()
+st.sidebar.markdown("---")
 
-selected_collection = st.sidebar.selectbox("Select Dataset", available_collections)
-
-# Time Range Filter Settings
+# Global Time Range Filter
 st.sidebar.subheader("Time Range Filter")
 
-# Define the absolute limits for the date picker
 min_allowed_date = datetime(1800, 1, 1)
 max_allowed_date = datetime.now() + timedelta(days=365)
 
-# Defaults set to show the last year of data
 default_end = datetime.now()
 default_start = default_end - timedelta(days=365)
 
 start_date = st.sidebar.date_input("Start Date", value=default_start, min_value=min_allowed_date, max_value=max_allowed_date)
 end_date = st.sidebar.date_input("End Date", value=default_end, min_value=min_allowed_date, max_value=max_allowed_date)
 
-# Convert to timezone-aware datetime for the DataLoader/MongoDB
+# Convert to timezone-aware datetime
 start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
 end_dt = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
 
-# Main Content Area
-st.title(f"Analysis: {selected_collection}")
 
-with st.spinner("Loading data from MongoDB..."):
-    # limit=0 ensures we get ALL data for the period
-    df = loader.get_timeseries_data(selected_collection, start_time=start_dt, end_time=end_dt, limit=0)
+if app_mode == "Dataset Explorer":
+    # Single Dataset Analysis Mode
+    st.sidebar.title("Data Selection")
 
-meta = loader.get_metadata(selected_collection)
-if meta:
-    with st.expander("ℹ️ Dataset Metadata"):
-        st.json(meta)
+    available_collections = loader.get_available_collections()
+    if not available_collections:
+        st.sidebar.error("No collections found!")
+        st.warning("Database appears empty. Please run the pipeline service first.")
+        st.stop()
 
-if df.empty:
-    st.info("No data found for the selected collection and time range.")
-else:
-    # Router logic to select the appropriate visualization
-    coll_lower = selected_collection.lower()
+    selected_collection = st.sidebar.selectbox("Select Dataset", available_collections)
 
-    if "silso" in coll_lower or "sunspot" in coll_lower:
-        plot_sunspots(df, selected_collection)
-    elif "cme" in coll_lower:
-        plot_cmes(df, selected_collection)
+    st.title(f"Analysis: {selected_collection}")
+
+    with st.spinner("Loading data from MongoDB..."):
+        df = loader.get_timeseries_data(selected_collection, start_time=start_dt, end_time=end_dt, limit=0)
+
+    meta = loader.get_metadata(selected_collection)
+    if meta:
+        with st.expander("ℹDataset Metadata"):
+            st.json(meta)
+
+    if df.empty:
+        st.info("No data found for the selected collection and time range.")
     else:
-        plot_generic(df, selected_collection)
+        coll_lower = selected_collection.lower()
 
-    with st.expander("Raw Data Table"):
-        st.dataframe(df)
+        if "silso" in coll_lower or "sunspot" in coll_lower:
+            plot_sunspots(df, selected_collection)
+        elif "cme" in coll_lower:
+            plot_cmes(df, selected_collection)
+        else:
+            plot_generic(df, selected_collection)
+
+        with st.expander("Raw Data Table"):
+            st.dataframe(df)
+
+elif app_mode == "Cycle Correlation Analysis":
+    # Multi-Dataset Correlation Mode
+    st.title("Solar Cycle & Event Correlation")
+    st.markdown("""
+    This view combines the **SILSO Sunspot Number** (representing the solar magnetic cycle) 
+    and the **SOHO/LASCO CME Catalog** (representing impulsive solar events) to visualize relationships.
+    """)  # noqa: W291
+
+    target_sunspot = "silso_sunspot_daily"
+    target_cme = "cme_catalog"
+
+    available = loader.get_available_collections()
+
+    if target_sunspot in available and target_cme in available:
+        with st.spinner("Loading and merging datasets..."):
+            df_sunspot = loader.get_timeseries_data(target_sunspot, start_time=start_dt, end_time=end_dt)
+            df_cme = loader.get_timeseries_data(target_cme, start_time=start_dt, end_time=end_dt)
+
+        if not df_sunspot.empty and not df_cme.empty:
+            plot_solar_cycle_correlation(df_cme, df_sunspot)
+
+            with st.expander("View Merged Data Statistics"):
+                col1, col2 = st.columns(2)
+                col1.metric("Total CME Events", len(df_cme))
+                col2.metric("Days of Sunspot Data", len(df_sunspot))
+        else:
+            st.error(f"Data missing for the selected timeframe. Sunspots: {len(df_sunspot)} rows, CMEs: {len(df_cme)} rows.")
+    else:
+        st.error(f"Required datasets not found. Needed: '{target_sunspot}' and '{target_cme}'. Available: {available}")
 
 # Footer
 st.markdown("---")

@@ -19,7 +19,7 @@ def plot_cmes(df: pd.DataFrame, collection_name: str) -> None:
 
     df_plot = df.copy()
 
-    # Convert numeric columns and handle invalid values
+    # Clean numeric columns and coerce errors
     cols_to_clean = ["linear_speed", "width", "kinetic_energy"]
     for col in cols_to_clean:
         if col in df_plot.columns:
@@ -31,24 +31,21 @@ def plot_cmes(df: pd.DataFrame, collection_name: str) -> None:
 
     tab1, tab2, tab3 = st.tabs(["Timeline & Impact", "Energy Distribution", "Morphology"])
 
-    # Calculate dynamic log-range once for consistent axis across tabs
+    # Calculate dynamic log-range for consistent axis scaling across tabs
     tick_vals = []
     tick_text = []
 
     if has_energy:
         valid_energy = df_plot["kinetic_energy"].dropna()
         if not valid_energy.empty:
-            # Calculate log10 min and max to determine the range of exponents
             min_log = np.floor(np.log10(valid_energy.min()))
             max_log = np.ceil(np.log10(valid_energy.max()))
 
-            # Create a range of integers for the axis ticks (e.g., 26, 27, ..., 33)
-            # Expanding range slightly (+1 on max) to ensure the highest bubble isn't cut off
+            # Generate integer ticks for log axis (e.g., 10^28)
             tick_vals = list(range(int(min_log), int(max_log) + 2))
-            # Format text as powers of 10 (e.g., "10^28")
             tick_text = [f"10^{i}" for i in tick_vals]
 
-    # --- Tab 1: Impact Timeline ---
+    # Timeline Plot
     with tab1:
         st.caption("Temporal view of CME events by Energy and Type. High-Energy Halo CMEs (Top Red) are the most critical.")
 
@@ -56,7 +53,6 @@ def plot_cmes(df: pd.DataFrame, collection_name: str) -> None:
             df_timeline = df_plot.dropna(subset=["kinetic_energy"]).copy()
 
             if not df_timeline.empty:
-                # Log-transformation for visualization of power laws
                 df_timeline["log_energy"] = np.log10(df_timeline["kinetic_energy"])
                 df_timeline["energy_readable"] = df_timeline["kinetic_energy"].apply(lambda x: f"{x:.1e}")
 
@@ -105,7 +101,7 @@ def plot_cmes(df: pd.DataFrame, collection_name: str) -> None:
 
                 st.info("""
                 **Interpretation:**
-                * **Clusters:** Notice how high-energy events (higher up) cluster around solar maximum years (2000-2002, 2012-2014).
+                * **Clusters:** Notice how high-energy events (higher up) cluster around solar maximum years.
                 * **The Danger Zone:** Red bubbles near the top of the chart represent the most dangerous events: Massive energy AND directed towards Earth (Halo).
                 """)  # noqa: E501
 
@@ -114,18 +110,16 @@ def plot_cmes(df: pd.DataFrame, collection_name: str) -> None:
         else:
             st.warning("Kinetic Energy missing.")
 
-    # --- Tab 2: Energy Distribution ---
+    # Distribution Plot
     with tab2:
         st.caption("Statistical distribution of energy levels (How rare are extreme events?).")
         if has_energy:
             df_energy = df_plot.dropna(subset=["kinetic_energy"]).copy()
             if not df_energy.empty:
                 df_energy["log_energy"] = np.log10(df_energy["kinetic_energy"])
-                df_energy["energy_str"] = df_energy["kinetic_energy"].apply(lambda x: f"{x:.2e}")
 
-                # Dynamic binning based on square root rule
+                # Dynamic bin count using square-root rule
                 n_bins = int(np.sqrt(len(df_energy)))
-                # Ensure a reasonable minimum and maximum for visualization
                 n_bins = max(10, min(n_bins, 100))
 
                 fig_hist = px.histogram(
@@ -144,7 +138,7 @@ def plot_cmes(df: pd.DataFrame, collection_name: str) -> None:
 
                 st.plotly_chart(fig_hist, use_container_width=True)
 
-    # --- Tab 3: Morphology ---
+    # Morphology Plot
     with tab3:
         if has_halo:
             yearly = aggregate_categorical_time_distribution(df_plot, "is_halo")
