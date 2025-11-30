@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import List
 
 import pandas as pd
 import plotly.express as px
@@ -8,7 +9,7 @@ import streamlit as st
 from streamlit_app.util.fast_fourier_transformation import calculate_periodicity
 
 
-def _calculate_cycle_peaks(num_cycles: int = 25) -> list[datetime]:
+def _calculate_cycle_peaks(num_cycles: int = 25) -> List[datetime]:
     """
     Calculates theoretical sunspot cycle peaks based on the formula:
     timepoint = 1810.6 + 11.1 * i
@@ -30,6 +31,10 @@ def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
     Visualizes sunspot data with specialized 11-year cycle markers.
     Includes raw data points (orange) and a prominent smoothing line (red).
     Includes a frequency analysis to statistically prove the cycle length.
+
+    Args:
+        df: Dataframe containing sunspot data.
+        collection_name: Name of the collection for display.
     """
     st.subheader(f"☀️ Sunspot Analysis: {collection_name}")
 
@@ -37,14 +42,12 @@ def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
         st.warning("Column 'sunspot_number' not found. Cannot create specialized plot.")
         return
 
-    # Controls for smoothing and filtering
     col_controls1, col_controls2 = st.columns(2)
     with col_controls1:
         # Default to 365 days to visualize the yearly trend/11-year cycle clearly
         window = st.slider("Smoothing Window (Days)", min_value=1, max_value=5000, value=365)
 
     with col_controls2:
-        # Checkbox to optionally filter out zero values which might indicate missing observations or quiet sun
         remove_zeros = st.checkbox("Hide Zero Values (0)", value=False)
 
     # Calculate Rolling Average on the full dataframe to preserve time index continuity
@@ -53,7 +56,6 @@ def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
     # Create a cleaner subset for raw data plotting (removing NaNs)
     df_raw = df.dropna(subset=["sunspot_number"])
 
-    # Filter out zero values if the checkbox is selected
     if remove_zeros:
         df_raw = df_raw[df_raw["sunspot_number"] > 0]
 
@@ -127,8 +129,6 @@ def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
         """)
 
         # Perform calculation using the utility
-        # We use the raw data (df_raw) but we need the full time index for FFT,
-        # so we pass the original df['sunspot_number'] which might have gaps that the util handles.
         spectrum_df = calculate_periodicity(
             df["sunspot_number"],
             sample_rate_days=1,

@@ -18,7 +18,7 @@ st.set_page_config(
 
 # Main App Logic - Singleton Loader
 @st.cache_resource
-def get_loader():
+def get_loader() -> DataLoader:
     """Returns a singleton instance of the DataLoader."""
     return DataLoader()
 
@@ -39,15 +39,14 @@ selected_collection = st.sidebar.selectbox("Select Dataset", available_collectio
 # Time Range Filter Settings
 st.sidebar.subheader("Time Range Filter")
 
-# Define the absolute limits for the date picker to allow selection back to 1800
+# Define the absolute limits for the date picker
 min_allowed_date = datetime(1800, 1, 1)
-max_allowed_date = datetime.now() + timedelta(days=365)  # Allow slightly into future
+max_allowed_date = datetime.now() + timedelta(days=365)
 
 # Defaults set to show the last year of data
 default_end = datetime.now()
 default_start = default_end - timedelta(days=365)
 
-# Streamlit date_input with explicit min/max to fix the 10-year limit issue
 start_date = st.sidebar.date_input("Start Date", value=default_start, min_value=min_allowed_date, max_value=max_allowed_date)
 end_date = st.sidebar.date_input("End Date", value=default_end, min_value=min_allowed_date, max_value=max_allowed_date)
 
