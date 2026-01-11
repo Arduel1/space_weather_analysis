@@ -25,16 +25,23 @@ class CatalogLoader:
     METADATA_COLLECTION_NAME = "dataset_metadata"
     DEFAULT_BATCH_SIZE = 1000
 
-    def __init__(self, db: Database, file_path: pathlib.Path):
+    def __init__(
+        self,
+        db: Database,
+        file_path: pathlib.Path,
+        metadata_path: Optional[pathlib.Path] = None,
+    ):
         """
         Initializes the Catalog Loader.
 
         Args:
             db (Database): The MongoDB database instance.
             file_path (pathlib.Path): Path to the catalog JSON file.
+            metadata_path (Optional[pathlib.Path]): Path to the metadata JSON file.
         """
         self.db = db
         self.file_path = file_path
+        self.metadata_path = metadata_path
 
     def _load_json(self) -> Optional[List[MasterCatalogItem]]:
         """
@@ -108,6 +115,61 @@ class CatalogLoader:
             logger.error(f"DB Load failed: {e}", exc_info=True)
 
         logger.info("--- Catalog Load Finished ---")
+
+    def load_metadata_to_db(self) -> None:
+        """
+        Loads the metadata catalog from file to MongoDB.
+        """
+        if not self.metadata_path or not self.metadata_path.exists():
+            logger.warning(f"Metadata file not found or not set: {self.metadata_path}")
+            return
+
+        logger.info(f"--- Loading Metadata Cache from {self.metadata_path} to MongoDB ---")
+        try:
+            with open(self.metadata_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            if not data:
+                logger.warning("Metadata file is empty.")
+                return
+
+            collection = self.db[self.METADATA_COLLECTION_NAME]
+            try:
+                collection.create_index("dataset_id", unique=True, background=True)
+            except Exception as e:
+                logger.warning(f"Could not create index on metadata: {e}")
+
+            ops = []
+            if isinstance(data, list):
+                for item in data:
+                    dataset_id = item.get("dataset_id") or item.get("id")
+                    if not dataset_id:
+                        continue
+
+                    # Check if the structure is already {dataset_id: ..., metadata: ...}
+                    if "metadata" in item:
+                        meta_content = item["metadata"]
+                    else:
+                        # Treat the entire item as metadata
+                        meta_content = item
+
+                    doc = {"dataset_id": dataset_id, "metadata": meta_content}
+                    ops.append(ReplaceOne({"dataset_id": dataset_id}, doc, upsert=True))
+
+            elif isinstance(data, dict):
+                for dataset_id, meta_content in data.items():
+                    doc = {"dataset_id": dataset_id, "metadata": meta_content}
+                    ops.append(ReplaceOne({"dataset_id": dataset_id}, doc, upsert=True))
+
+            for i in range(0, len(ops), self.DEFAULT_BATCH_SIZE):
+                batch = ops[i : i + self.DEFAULT_BATCH_SIZE]
+                res = collection.bulk_write(batch)
+                logger.info(f"Metadata Batch {i}: Matched {res.matched_count}, Upserted {res.upserted_count}")
+
+        except Exception as e:
+            logger.error(f"Failed to load metadata file: {e}", exc_info=True)
+
+        logger.info("--- Metadata Load Finished ---")
 
     def upsert_dataset(self, dataset_id: str, sources: List[CatalogEntryDict]) -> None:
         """

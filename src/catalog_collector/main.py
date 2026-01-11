@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
 CATALOG_FILE = DATA_DIR / "config" / "master_catalog.json"
+METADATA_FILE = DATA_DIR / "config" / "dataset_metadata.json"
 HAPI_SERVER_LIST_FILE = DATA_DIR / "hapi_config" / "all.txt"
 
 
@@ -52,8 +53,9 @@ def main() -> None:
         # discoverers: List[AbstractDiscoverer] = [hapi_discoverer, fido_discoverer, gfz_discoverer]
 
         # Initialize Loader first
-        loader = CatalogLoader(db=db, file_path=CATALOG_FILE)
+        loader = CatalogLoader(db=db, file_path=CATALOG_FILE, metadata_path=METADATA_FILE)
         loader.load_to_db()
+        loader.load_metadata_to_db()
 
         # Aggregate findings from all discoverers into a master JSON file
         # logger.info(f"Targeting output file: {CATALOG_FILE}")
