@@ -1,9 +1,10 @@
 import logging
 from typing import Any, Dict, List, Optional
 
-from pipeline_service.util.batching import batch_generator
 from pymongo.database import Database
 from pymongo.errors import BulkWriteError, OperationFailure
+
+from pipeline_service.util.batching import batch_generator
 
 logger = logging.getLogger(__name__)
 

@@ -19,6 +19,9 @@ def plot_kp_index(df: pd.DataFrame) -> None:
         st.info("No Kp index data available for this range.")
         return
 
+    # Deduplicate data to prevent stacking of bars which can lead to incorrect visual values
+    df = df[~df.index.duplicated(keep="first")]
+
     # Define color scale based on Kp value (G-Scale approximate mapping)
     # 0-4: Quiet/Unsettled (Green)
     # 5: G1 Minor (Yellow)
@@ -57,7 +60,6 @@ def plot_kp_index(df: pd.DataFrame) -> None:
         yaxis_title="Kp Index (0-9)",
         xaxis_title="UTC Time",
         yaxis=dict(range=[0, 9.5], tickmode="linear", tick0=0, dtick=1),
-        height=300,  # Compact height to fit alongside or below X-ray
         showlegend=False,
         hovermode="x unified",
     )

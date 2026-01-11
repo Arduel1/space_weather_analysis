@@ -3,7 +3,9 @@ import pathlib
 from datetime import datetime
 from typing import List, Optional
 
+from pymongo import ReplaceOne
 from pymongo.database import Database
+from pymongo.errors import BulkWriteError
 
 from src.common.clients.gfz import GfzClient
 from src.pipeline_service.database.mongo_loader import MongoLoader
@@ -64,14 +66,20 @@ class GfzPipeline(MongoLoader, BasePipeline):
                     continue
 
                 collection_name = sanitize_collection_name(dataset_id)
-                self._ensure_timeseries_collection(
-                    collection_name, time_field="timestamp", meta_field="metadata"
-                )
+                self._ensure_timeseries_collection(collection_name, time_field="timestamp", meta_field="metadata")
 
                 documents = dataframe_to_documents(df, f"GFZ_POTSDAM/{dataset_id}")
-                self._load_data(collection_name, documents)
 
-                logger.info(f"Saved {len(df)} documents to {collection_name}")
+                if documents:
+                    ops = [ReplaceOne({"timestamp": doc["timestamp"]}, doc, upsert=True) for doc in documents]
+                    try:
+                        result = self.db[collection_name].bulk_write(ops)
+                        logger.info(
+                            f"Processed {len(documents)} documents for {collection_name}. "
+                            f"Upserted: {result.upserted_count}, Modified: {result.modified_count}, Matched: {result.matched_count}"
+                        )
+                    except BulkWriteError as bwe:
+                        logger.error(f"Bulk write error in GFZ pipeline: {bwe.details}")
 
             except Exception as e:
                 logger.error(f"Failed to process {dataset_id}: {e}", exc_info=True)

@@ -58,7 +58,7 @@ def main() -> None:
 
     # Configuration for GFZ Data Ingestion
     gfz_manual_config: Dict[str, Any] = {
-        "start_time": datetime(2025, 10, 1, 0, 0, 0, tzinfo=timezone.utc),
+        "start_time": datetime(2020, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
         "end_time": datetime(2025, 11, 26, 0, 0, 0, tzinfo=timezone.utc),
         "datasets": ["Kp"],
     }
