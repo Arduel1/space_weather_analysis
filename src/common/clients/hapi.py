@@ -39,7 +39,7 @@ class HapiClient(BaseClient):
         self.db = db
         self.catalog_map: Dict[str, List[CatalogEntryDict]] = {}
 
-        if self.db:
+        if self.db is not None:
             try:
                 loaded_map = self._load_catalog_from_db()
                 if loaded_map:
@@ -57,7 +57,7 @@ class HapiClient(BaseClient):
         Returns:
             A dictionary mapping dataset_id to a list of source entries.
         """
-        if not self.db:
+        if self.db is None:
             return {}
 
         try:

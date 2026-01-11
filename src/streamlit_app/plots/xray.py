@@ -2,19 +2,27 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from plotly.subplots import make_subplots
 
 
-def plot_xray_flux(df: pd.DataFrame, collection_name: str, key_suffix: str = "") -> None:
+def plot_xray_flux(
+    df: pd.DataFrame,
+    collection_name: str,
+    key_suffix: str = "",
+    kp_df: pd.DataFrame = None,
+) -> None:
     """
     Visualizes GOES X-Ray flux data with classification backgrounds.
 
     The plot displays both Long and Short wave channels and includes background
-    zones corresponding to the C, M, and X flare classifications.
+    zones corresponding to the C, M, and X flare classifications. If Kp index
+    data is provided, it is overlaid on a secondary axis.
 
     Args:
         df: The dataframe containing X-ray flux data.
         collection_name: Name of the collection for display.
         key_suffix: Unique suffix for Streamlit widgets to avoid collisions.
+        kp_df: Optional dataframe containing Kp index data.
     """
     st.subheader(f"Solar X-Ray Flux Analysis: {collection_name}")
 
@@ -27,7 +35,7 @@ def plot_xray_flux(df: pd.DataFrame, collection_name: str, key_suffix: str = "")
 
     df_plot = df.copy()
 
-    # Mask values <= 0 since log scale does not support them
+    # Mask values equal to or less than zero since log scale does not support them
     if long_col in df_plot.columns:
         df_plot[long_col] = df_plot[long_col].mask(df_plot[long_col] <= 0)
     if short_col in df_plot.columns:
@@ -73,9 +81,37 @@ def plot_xray_flux(df: pd.DataFrame, collection_name: str, key_suffix: str = "")
         st.warning("No valid numeric data found in the selected range.")
         return
 
-    fig = go.Figure()
+    # Create subplots with secondary y-axis spec for Kp index
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
 
-    # Add Long Wave (Primary)
+    # Add Kp Index Trace as background bars if data is available
+    if kp_df is not None and not kp_df.empty:
+        # Align Kp data to the plot range
+        kp_subset = kp_df.loc[df_plot.index.min() : df_plot.index.max()]
+
+        if not kp_subset.empty:
+            # Color coding for Kp strength
+            # Green for low activity, Yellow for moderate, Red for strong
+            colors = np.where(
+                kp_subset["Kp"] >= 7,
+                "rgba(255, 0, 0, 0.5)",
+                np.where(kp_subset["Kp"] >= 5, "rgba(255, 255, 0, 0.5)", "rgba(128, 128, 128, 0.3)"),
+            )
+
+            fig.add_trace(
+                go.Bar(
+                    x=kp_subset.index,
+                    y=kp_subset["Kp"],
+                    name="Kp Index",
+                    marker_color=colors,
+                    opacity=0.4,
+                    # Approximate width for three hour bars in milliseconds
+                    width=10800000 * 0.9,
+                ),
+                secondary_y=True,
+            )
+
+    # Add Long Wave as Primary Trace
     primary_opacity = 0.3 if ma_window > 1 else 1.0
     fig.add_trace(
         go.Scatter(
@@ -86,7 +122,8 @@ def plot_xray_flux(df: pd.DataFrame, collection_name: str, key_suffix: str = "")
             line=dict(color="green"),
             opacity=primary_opacity,
             hovertemplate="%{y:.2e} W/m²",
-        )
+        ),
+        secondary_y=False,
     )
 
     # Add Moving Average Trace
@@ -99,10 +136,11 @@ def plot_xray_flux(df: pd.DataFrame, collection_name: str, key_suffix: str = "")
                 name=f"Moving Avg ({ma_window})",
                 line=dict(color="#FF4B4B", width=2),
                 hovertemplate="%{y:.2e} W/m²",
-            )
+            ),
+            secondary_y=False,
         )
 
-    # Add Short Wave (Secondary)
+    # Add Short Wave as Secondary Trace
     fig.add_trace(
         go.Scatter(
             x=df_plot.index,
@@ -112,10 +150,11 @@ def plot_xray_flux(df: pd.DataFrame, collection_name: str, key_suffix: str = "")
             line=dict(color="#0068C9", width=1),
             visible="legendonly",
             hovertemplate="%{y:.2e} W/m²",
-        )
+        ),
+        secondary_y=False,
     )
 
-    # Add Flare Class Background Zones (Shapes)
+    # Add Flare Class Background Zones via shapes
     fig.add_hrect(
         y0=1e-4,
         y1=1e-2,
@@ -125,6 +164,7 @@ def plot_xray_flux(df: pd.DataFrame, collection_name: str, key_suffix: str = "")
         annotation_text="X-Class",
         annotation_position="top left",
         annotation_font_color="red",
+        secondary_y=False,
     )
     fig.add_hrect(
         y0=1e-5,
@@ -135,6 +175,7 @@ def plot_xray_flux(df: pd.DataFrame, collection_name: str, key_suffix: str = "")
         annotation_text="M-Class",
         annotation_position="top left",
         annotation_font_color="orange",
+        secondary_y=False,
     )
     fig.add_hrect(
         y0=1e-6,
@@ -145,17 +186,29 @@ def plot_xray_flux(df: pd.DataFrame, collection_name: str, key_suffix: str = "")
         annotation_text="C-Class",
         annotation_position="top left",
         annotation_font_color="green",
+        secondary_y=False,
     )
 
     fig.update_layout(
         title=f"GOES X-Ray Flux ({selected_resample})",
-        yaxis_title="Flux (Watts/m²)",
-        yaxis_type="log",
         xaxis_title="UTC Time",
         hovermode="x unified",
         height=500,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        yaxis=dict(range=[-9, -2]),
+    )
+
+    # Configure Axes
+    fig.update_yaxes(
+        title_text="Flux (Watts/m²)",
+        type="log",
+        range=[-9, -2],
+        secondary_y=False,
+    )
+    fig.update_yaxes(
+        title_text="Kp Index (0-9)",
+        range=[0, 9.5],
+        showgrid=False,
+        secondary_y=True,
     )
 
     st.plotly_chart(fig, width="stretch")

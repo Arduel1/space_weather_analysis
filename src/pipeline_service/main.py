@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 HAPI_SOURCE_ID = "HAPI"
 FIDO_CDAWEB_SOURCE_ID = "FIDO_CDAWEB"
+GFZ_SOURCE_ID = "GFZ_POTSDAM"
 LOCAL_SOURCE_ID = "LOCAL"
 
 
@@ -29,7 +30,7 @@ def main() -> None:
 
     # Establish connection to the database
     db = DatabaseConnection.get_database()
-    if not db:
+    if db is None:
         logger.critical("Failed to connect to the database. Exiting.")
         sys.exit(1)
 
@@ -40,7 +41,7 @@ def main() -> None:
 
     # Configuration for HAPI Data Ingestion
     hapi_manual_config: Dict[str, Any] = {
-        "start_time": datetime(2023, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+        "start_time": datetime(2025, 10, 1, 0, 0, 0, tzinfo=timezone.utc),
         "end_time": datetime(2025, 11, 26, 0, 0, 0, tzinfo=timezone.utc),
         "datasets": [
             "goesp_xray_flux_P1M",  # 1-minute X-Ray Flux
@@ -50,9 +51,16 @@ def main() -> None:
 
     # Configuration for FIDO/CDAWeb Data Ingestion
     fido_manual_config: Dict[str, Any] = {
-        "start_time": datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
-        "end_time": datetime(2024, 1, 31, 0, 0, 0, tzinfo=timezone.utc),
+        "start_time": datetime(2025, 10, 1, 0, 0, 0, tzinfo=timezone.utc),
+        "end_time": datetime(2025, 11, 26, 0, 0, 0, tzinfo=timezone.utc),
         "datasets": [],  # Add dataset IDs here to enable FIDO download
+    }
+
+    # Configuration for GFZ Data Ingestion
+    gfz_manual_config: Dict[str, Any] = {
+        "start_time": datetime(2025, 10, 1, 0, 0, 0, tzinfo=timezone.utc),
+        "end_time": datetime(2025, 11, 26, 0, 0, 0, tzinfo=timezone.utc),
+        "datasets": ["Kp"],
     }
 
     local_manual_config: Dict[str, Any] = {"datasets": ["silso_sunspot_daily", "cme_catalog"]}
@@ -61,6 +69,7 @@ def main() -> None:
     manual_jobs: Dict[str, Dict[str, Any]] = {
         HAPI_SOURCE_ID: hapi_manual_config,
         FIDO_CDAWEB_SOURCE_ID: fido_manual_config,
+        GFZ_SOURCE_ID: gfz_manual_config,
         LOCAL_SOURCE_ID: local_manual_config,
     }
 

@@ -7,6 +7,8 @@ services:
         condition: service_started
     env_file:
       - .env
+    volumes:
+      - ./data:/app/data
     command: ["python", "-m", "src.catalog_collector.main"]
     networks:
       - space-weather-net

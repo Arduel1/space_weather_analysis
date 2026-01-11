@@ -24,7 +24,7 @@ class PipelineOrchestrator:
     JOBS_COLLECTION = "jobs"
     POLLING_INTERVAL_SECONDS = 10
     # Define a default directory for data storage relative to the project root
-    DATA_BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent / "data" / "downloads"
+    DATA_BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent / "data"
 
     def __init__(self, db: Database) -> None:
         """

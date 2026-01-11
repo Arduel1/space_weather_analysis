@@ -6,6 +6,7 @@ from pymongo.database import Database
 from pipeline_service.pipelines.local import LocalPipeline
 from src.pipeline_service.pipelines.base import BasePipeline
 from src.pipeline_service.pipelines.cdaweb import CdawebPipeline
+from src.pipeline_service.pipelines.gfz import GfzPipeline
 from src.pipeline_service.pipelines.hapi import HapiPipeline
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ class PipelineFactory:
     # Source identifiers used to map jobs to pipeline implementations
     SOURCE_HAPI = "HAPI"
     SOURCE_CDAWEB = "FIDO_CDAWEB"
+    SOURCE_GFZ = "GFZ_POTSDAM"
     SOURCE_LOCAL = "LOCAL"
 
     def __init__(self, db: Database, base_data_path: pathlib.Path) -> None:
@@ -65,6 +67,10 @@ class PipelineFactory:
         if source_type == self.SOURCE_CDAWEB:
             logger.info(f"Creating CDAWeb pipeline for storage at {self.base_data_path}")
             return CdawebPipeline(self.db, self.base_data_path)
+
+        if source_type == self.SOURCE_GFZ:
+            logger.info(f"Creating GFZ pipeline for storage at {self.base_data_path}")
+            return GfzPipeline(self.db, self.base_data_path)
 
         if source_type == self.SOURCE_LOCAL:
             return LocalPipeline(self.db, self.base_data_path)

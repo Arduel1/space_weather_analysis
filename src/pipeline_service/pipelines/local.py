@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 class LocalPipeline(BasePipeline):
     """
-    Pipeline for processing local seed datasets (Sunspots, CMEs).
+    Pipeline for processing local datasets.
 
     Unlike remote pipelines, this pipeline ignores start/end times as it
     processes complete static files provided in the data directory.
@@ -26,10 +26,10 @@ class LocalPipeline(BasePipeline):
 
         Args:
             db: MongoDB database instance.
-            base_data_path: Root directory for data (expects 'seeds' subdirectory).
+            base_data_path: Root directory for data .
         """
         self.db = db
-        self.base_data_path = base_data_path / "seeds"
+        self.base_data_path = base_data_path
 
     def run(
         self,

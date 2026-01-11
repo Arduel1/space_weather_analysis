@@ -52,6 +52,7 @@ class DataLoader:
                 not in [
                     "system.views",
                     "system.profile",
+                    "system.buckets"
                     "dataset_metadata",
                     "master_catalog",
                 ]

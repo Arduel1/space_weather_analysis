@@ -6,6 +6,7 @@ from typing import List
 from src.catalog_collector.builder import CatalogBuilder
 from src.catalog_collector.discoverers.base import AbstractDiscoverer
 from src.catalog_collector.discoverers.cdaweb import CdawebDiscoverer
+from src.catalog_collector.discoverers.gfz import GfzDiscoverer
 from src.catalog_collector.discoverers.hapi import HapiDiscoverer
 from src.catalog_collector.loader import CatalogLoader
 from src.common.database.connection import DatabaseConnection
@@ -41,22 +42,23 @@ def main() -> None:
 
     try:
         # Initialize discovery strategies for different data providers
-        # The HAPI discoverer requires a text file containing server URLs
-        hapi_discoverer = HapiDiscoverer(
-            server_list_path=HAPI_SERVER_LIST_FILE,
-            include_test_servers=True,
-        )
-        fido_discoverer = CdawebDiscoverer()
+        # hapi_discoverer = HapiDiscoverer(
+        #     server_list_path=HAPI_SERVER_LIST_FILE,
+        #     include_test_servers=True,
+        # )
+        # fido_discoverer = CdawebDiscoverer()
+        # gfz_discoverer = GfzDiscoverer()
 
-        discoverers: List[AbstractDiscoverer] = [hapi_discoverer, fido_discoverer]
+        # discoverers: List[AbstractDiscoverer] = [hapi_discoverer, fido_discoverer, gfz_discoverer]
 
         # Initialize Loader first
         loader = CatalogLoader(db=db, file_path=CATALOG_FILE)
+        loader.load_to_db()
 
         # Aggregate findings from all discoverers into a master JSON file
-        logger.info(f"Targeting output file: {CATALOG_FILE}")
-        builder = CatalogBuilder(discoverers=discoverers, catalog_output_path=CATALOG_FILE, loader=loader)
-        builder.build_catalog()
+        # logger.info(f"Targeting output file: {CATALOG_FILE}")
+        # builder = CatalogBuilder(discoverers=discoverers, catalog_output_path=CATALOG_FILE, loader=loader)
+        # builder.build_catalog()
 
     except Exception as e:
         logger.critical(f"Catalog Collector execution failed: {e}", exc_info=True)
