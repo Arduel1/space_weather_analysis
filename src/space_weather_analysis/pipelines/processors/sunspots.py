@@ -5,8 +5,8 @@ import numpy as np
 import pandas as pd
 from pymongo.database import Database
 
+from common.util.types import RawData, TransformedDocuments
 from space_weather_analysis.pipelines.processors.base import BaseETLProcessor
-from space_weather_analysis.util.types import RawData, TransformedDocuments
 
 logger = logging.getLogger(__name__)
 

@@ -7,8 +7,8 @@ import numpy as np
 import pandas as pd
 from pymongo.database import Database
 
+from common.util.types import RawData, TransformedDocuments
 from space_weather_analysis.pipelines.processors.base import BaseETLProcessor
-from space_weather_analysis.util.types import RawData, TransformedDocuments
 
 logger = logging.getLogger(__name__)
 
@@ -175,8 +175,7 @@ class CmeETL(BaseETLProcessor):
         metadata = {"source": "SOHO/LASCO_CDAW_V2.0"}
 
         documents: TransformedDocuments = [
-            {"timestamp": ts, "metadata": metadata, "data": data}
-            for ts, data in zip(timestamps, data_payloads, strict=False)
+            {"timestamp": ts, "metadata": metadata, "data": data} for ts, data in zip(timestamps, data_payloads, strict=False)
         ]
 
         logger.info(f"Transformed {len(documents)} CME documents.")

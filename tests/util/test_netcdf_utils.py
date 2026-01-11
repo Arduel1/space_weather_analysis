@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from space_weather_analysis.util.netcdf_utils import (
+from common.util.netcdf_utils import (
     TimeConfidence,
     _evaluate_variable_confidence,
     _is_datetime_type,

@@ -3,8 +3,8 @@ from typing import Any
 
 from pymongo.database import Database
 
+from common.util.types import TransformedDocuments
 from space_weather_analysis.database.mongo_loader import MongoLoader
-from space_weather_analysis.util.types import TransformedDocuments
 
 
 class BaseETLProcessor(MongoLoader):

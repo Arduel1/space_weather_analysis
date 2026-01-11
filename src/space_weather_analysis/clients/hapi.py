@@ -7,13 +7,13 @@ from hapiclient import hapi
 from hapiclient.util import HAPIError
 from pymongo.database import Database
 
+from common.util.time_utils import calculate_time_intersection, parse_iso_time
+from common.util.types import CatalogEntryDict
 from space_weather_analysis.config import HAPI_SOURCE_ID
 from space_weather_analysis.util.error_handling import (
     log_and_handle_expected_failure,
     log_and_handle_unexpected_failure,
 )
-from space_weather_analysis.util.time_utils import calculate_time_intersection, parse_iso_time
-from space_weather_analysis.util.types import CatalogEntryDict
 
 logger = logging.getLogger(__name__)
 
@@ -194,9 +194,7 @@ class HapiClient:
 
         if meta_info and "parameters" in meta_info:
             # Filter out 'Time' as it is always returned by HAPI
-            params_to_use = [
-                p["name"] for p in meta_info["parameters"] if isinstance(p, dict) and p.get("name") != "Time"
-            ]
+            params_to_use = [p["name"] for p in meta_info["parameters"] if isinstance(p, dict) and p.get("name") != "Time"]
             if params_to_use:
                 logger.info(f"Auto-discovered parameters: {params_to_use}")
                 return ",".join(params_to_use)
@@ -289,10 +287,7 @@ class HapiClient:
         valid_range = calculate_time_intersection(config_start, config_end, server_start, server_end)
 
         if not valid_range:
-            logger.debug(
-                f"Skipping {server_url}: No overlap."
-                f"Req: {config_start}-{config_end}, Avail: {server_start}-{server_end}"
-            )
+            logger.debug(f"Skipping {server_url}: No overlap.Req: {config_start}-{config_end}, Avail: {server_start}-{server_end}")
             return None, None
 
         valid_start, valid_stop = valid_range

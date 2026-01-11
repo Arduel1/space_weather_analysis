@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from space_weather_analysis.util.time_utils import (
+from common.util.time_utils import (
     attempt_numeric_time_conversions,
     convert_cftime_object,
     ensure_datetime_type,

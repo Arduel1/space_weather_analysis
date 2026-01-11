@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from space_weather_analysis.util.time_utils import (
+from common.util.time_utils import (
     _select_best_transform,
     attempt_numeric_time_conversions,
     calculate_time_intersection,

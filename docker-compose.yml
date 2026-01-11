@@ -1,29 +1,63 @@
 services:
-  app:
+  catalog-collector:
+    build: .
+    restart: "no"
+    depends_on:
+      mongo:
+        condition: service_started
+    env_file:
+      - .env
+    command: ["python", "-m", "src.catalog_collector.main"]
+    networks:
+      - space-weather-net
+
+  pipeline-service:
     build: .
     restart: on-failure
     depends_on:
-      - mongo
+      mongo:
+        condition: service_started
+      catalog-collector:
+        condition: service_completed_successfully
     env_file:
       - .env
     volumes:
-      - ./src:/app/src
-      - ./data:/app/data
+      - ./data:/app/data # Persist downloads
+    command: ["python", "-m", "src.pipeline_service.main"]
+    networks:
+      - space-weather-net
+
+  # app:
+  #   build: .
+  #   restart: on-failure
+  #   depends_on:
+  #     - mongo
+  #   env_file:
+  #     - .env
+  #   volumes:
+  #     - ./src:/app/src
+  #     - ./data:/app/data
 
   frontend:
     build: .
     restart: always
     depends_on:
-      - mongo
+      pipeline-service:
+        condition: service_started
     env_file:
       - .env
     ports:
       - "8501:8501"
-    volumes:
-      - ./src:/app/src
-      - ./data:/app/data
-    # Override the default command to run streamlit
-    command: ["poetry", "run", "streamlit", "run", "src/streamlit_app/main.py", "--server.address=0.0.0.0"]
+    command:
+      [
+        "streamlit",
+        "run",
+        "src/streamlit_app/main.py",
+        "--server.address=0.0.0.0",
+      ]
+    networks:
+      - space-weather-net
+
   mongo:
     image: mongo
     restart: always
@@ -34,14 +68,14 @@ services:
       - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASS}
     volumes:
       - mongo-data:/data/db
+    networks:
+      - space-weather-net
 
   mongo-express:
     image: mongo-express
     restart: always
     ports:
       - 8081:8081
-    depends_on:
-      - mongo
     environment:
       - ME_CONFIG_BASICAUTH_USERNAME=${MONGO_EXPRESS_USER}
       - ME_CONFIG_BASICAUTH_PASSWORD=${MONGO_EXPRESS_PASS}
@@ -51,6 +85,14 @@ services:
       - ME_CONFIG_MONGODB_PORT=27017
       - ME_CONFIG_MONGODB_AUTH_DATABASE=admin
       - ME_CONFIG_MONGODB_ENABLE_ADMIN=true
+    depends_on:
+      - mongo
+    networks:
+      - space-weather-net
 
 volumes:
   mongo-data:
+
+networks:
+  space-weather-net:
+    driver: bridge

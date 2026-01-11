@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from pymongo.database import Database
 from sunpy.timeseries.timeseriesbase import GenericTimeSeries
 
+from common.util.time_utils import parse_iso_time
+from common.util.types import TransformedDocuments
 from space_weather_analysis.clients.hapi import HapiClient
 from space_weather_analysis.config import HAPI_SOURCE_ID
 from space_weather_analysis.database.mongo_loader import MongoLoader
@@ -16,8 +18,6 @@ from space_weather_analysis.util.document_builder import dataframe_to_documents
 from space_weather_analysis.util.error_handling import log_and_handle_unexpected_failure
 from space_weather_analysis.util.metadata.metadata_generator import MetadataWriter
 from space_weather_analysis.util.metadata.variable_metadata import VariableMetadata
-from space_weather_analysis.util.time_utils import parse_iso_time  # <--- Added Import
-from space_weather_analysis.util.types import TransformedDocuments
 
 logger = logging.getLogger(__name__)
 

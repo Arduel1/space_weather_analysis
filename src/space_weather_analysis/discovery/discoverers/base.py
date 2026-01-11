@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Generator
 
-from space_weather_analysis.util.types import DiscoveryYield
+from common.util.types import DiscoveryYield
 
 
 class AbstractDiscoverer(ABC):

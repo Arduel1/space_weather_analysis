@@ -8,26 +8,29 @@ logger = logging.getLogger(__name__)
 def aggregate_categorical_time_distribution(df: pd.DataFrame, categorical_col: str, freq: str = "YE") -> pd.DataFrame:
     """
     Aggregates a categorical column over time to show the distribution of classes per period.
-    Useful for visualizing trends, e.g., "How did the ratio of Halo CMEs change per year?".
+
+    This transformation moves categorical values from rows to columns and counts their
+    occurrences per time period, which is useful for stacked bar charts or trend analysis
+    (e.g., counting types of solar flares per year).
 
     Args:
-        df (pd.DataFrame): DataFrame with a DatetimeIndex.
-        categorical_col (str): The column containing categories (boolean or string).
-        freq (str): Pandas frequency string (default 'YE' for Year End).
+        df: Input DataFrame with a DatetimeIndex.
+        categorical_col: The name of the column containing categories (string or boolean).
+        freq: Pandas frequency string (defaults to 'YE' for Year End).
 
     Returns:
-        pd.DataFrame: A DataFrame where the index is time, columns are categories,
-                      and values are counts.
+        A DataFrame where the index represents time, columns represent categories,
+        and values represent counts. Returns empty DataFrame on error.
     """
     if df.empty or categorical_col not in df.columns:
         return pd.DataFrame()
 
     try:
-        # Group by Time Period AND Category, then count sizes
-        # unstack moves the categories from rows to columns
+        # Group by Time Period AND Category to get raw counts
+        # Unstack pivots the category level to columns
         counts = df.groupby([pd.Grouper(freq=freq), categorical_col]).size().unstack(fill_value=0)
 
-        # Determine the total count per period to calculate percentages if needed later
+        # Calculate total to facilitate percentage calculations downstream if needed
         counts["Total"] = counts.sum(axis=1)
 
         return counts

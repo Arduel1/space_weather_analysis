@@ -7,16 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple, cast
 
 from pymongo.database import Database
 
-from space_weather_analysis.config import (
-    CATALOG_FILE,
-    FIDO_CDAWEB_SOURCE_ID,
-    HAPI_SERVER_LIST_FILE,
-    HAPI_SOURCE_ID,
-)
-from space_weather_analysis.discovery.builder import CatalogBuilder
-from space_weather_analysis.discovery.discoverers.base import AbstractDiscoverer
-from space_weather_analysis.discovery.discoverers.cdaweb import CdawebDiscoverer
-from space_weather_analysis.discovery.discoverers.hapi import HapiDiscoverer
+from space_weather_analysis.config import CATALOG_FILE, FIDO_CDAWEB_SOURCE_ID, HAPI_SOURCE_ID
 from space_weather_analysis.discovery.loader import CatalogLoader
 from space_weather_analysis.pipelines.factory import PipelineFactory
 
@@ -25,11 +16,12 @@ logger = logging.getLogger(__name__)
 
 class Application:
     """
-    Orchestrates all data processing tasks based on a run configuration.
+    Orchestrates data processing and ingestion tasks.
 
-    This class centralizes the execution logic, pulling configuration
-    from the main entrypoint. It manages the execution of catalog builds,
-    ETL processes, and data ingestion pipelines.
+    This class serves as the control center for the application, interpreting
+    configuration directives to trigger specific workflows. It manages
+    dependencies such as database connections and ensures that ETL processes
+    and pipelines are executed in the correct order.
     """
 
     def __init__(self, db: Database, test_configs: Dict[str, Any]) -> None:
@@ -37,26 +29,28 @@ class Application:
         Initializes the application orchestrator.
 
         Args:
-            db (Database): The active MongoDB database instance.
-            test_configs (Dict[str, Any]): A dictionary containing specific
-                                           configurations for test runs.
+            db (Database): The active MongoDB database instance used for
+                data persistence.
+            test_configs (Dict[str, Any]): Configuration overrides and parameters
+                for pipeline test runs, allowing specific time ranges and
+                datasets to be targeted.
         """
         self.db = db
         self.test_configs = test_configs
 
     def run(self, run_config: Dict[str, bool]) -> None:
         """
-        Runs the application tasks based on the provided configuration.
+        Executes the application workflows based on the enabled flags.
+
+        This method checks the configuration dictionary to determine which
+        sub-tasks (Catalog ETL, Local ETL, Pipeline Tests) should be executed.
+        Each task is run sequentially.
 
         Args:
-            run_config (Dict[str, bool]): A dictionary where keys represent
-                                          tasks and values (True/False)
-                                          determine if they should run.
+            run_config (Dict[str, bool]): A dictionary acting as a feature toggle
+                for the various application tasks.
         """
-        logger.info("Application run started.")
-
-        if run_config.get("build_catalog"):
-            self._run_catalog_build_task()
+        logger.info("Application run sequence started.")
 
         if run_config.get("run_catalog_etl"):
             self._run_catalog_etl_task()
@@ -67,15 +61,19 @@ class Application:
         if run_config.get("run_pipeline_test"):
             self._run_unified_pipeline_test()
 
-        logger.info("Application run finished.")
+        logger.info("Application run sequence finished.")
 
     def _run_local_file_etl(self) -> None:
         """
-        Runs the local file ETLs using the factory mechanism.
+        Executes ETL processes for local static files.
+
+        This method instantiates the pipeline factory and triggers processing
+        for predefined local datasets, such as SILSO sunspot data and CME catalogs.
+        A temporary directory is used to initialize the factory context, although
+        local file processing primarily relies on static paths defined in the config.
         """
-        logger.info("--- Local ETL Application started ---")
-        # We use a temporary context just to initialize the factory,
-        # though local files don't strictly need a temp dir.
+        logger.info("Starting Local File ETL process.")
+
         with tempfile.TemporaryDirectory() as temp_dir:
             factory = PipelineFactory(self.db, pathlib.Path(temp_dir))
 
@@ -83,106 +81,91 @@ class Application:
 
             for job_type in local_jobs:
                 try:
-                    logger.info(f"Starting pipeline for {job_type}...")
+                    logger.info(f"Initiating pipeline execution for job: {job_type}")
                     pipeline = factory.get_pipeline(job_type)
-                    # Local pipelines ignore arguments, so we pass empty/dummy values.
-                    # BasePipeline.run expects Optional[datetime], so None is valid type-wise.
+                    # Local pipelines are designed to run without specific time filters,
+                    # processing the entire available file content.
                     pipeline.run([], None, None)
-                    logger.info(f"Finished pipeline for {job_type}.")
+                    logger.info(f"Pipeline execution completed for job: {job_type}")
                 except Exception as e:
-                    logger.error(f"Error running local pipeline {job_type}: {e}", exc_info=True)
+                    logger.error(f"Pipeline execution failed for {job_type}: {e}", exc_info=True)
 
-        logger.info("--- Local ETL Application finished ---")
-
-    def _run_catalog_build_task(self) -> None:
-        """
-        Initializes and runs the universal catalog build process.
-        """
-        logger.info("--- Running: Universal Catalog Build ---")
-
-        try:
-            hapi_discoverer = HapiDiscoverer(
-                server_list_path=HAPI_SERVER_LIST_FILE,
-                include_test_servers=True,
-            )
-            fido_discoverer = CdawebDiscoverer()
-
-            discoverers: List[AbstractDiscoverer] = [hapi_discoverer, fido_discoverer]
-
-            manager = CatalogBuilder(discoverers=discoverers, catalog_output_path=CATALOG_FILE)
-            manager.build_catalog()
-        except Exception as e:
-            logger.error(f"Error during Universal Catalog Build: {e}", exc_info=True)
-        finally:
-            logger.info("--- Finished: Universal Catalog Build ---")
+        logger.info("Local File ETL process finished.")
 
     def _run_catalog_etl_task(self) -> None:
         """
-        Runs the ETL process for the master catalog.
+        Loads the Master Catalog into the database.
+
+        This task reads the generated JSON catalog file and synchronizes it with
+        the MongoDB collection. It ensures that the database has an up-to-date
+        index of all available datasets before any pipelines attempt to process them.
         """
-        logger.info("--- Running: Master Catalog ETL ---")
+        logger.info("Starting Master Catalog ETL task.")
         try:
+            # The loader handles the reading of the JSON file and the upsert logic
+            # to avoid duplicate entries in the database.
             CatalogLoader(self.db, file_path=CATALOG_FILE).run()
         except Exception as e:
-            logger.error(f"Error during catalog ETL: {e}", exc_info=True)
+            logger.error(f"Critical error during catalog ETL: {e}", exc_info=True)
         finally:
-            logger.info("--- Finished: Master Catalog ETL ---")
+            logger.info("Master Catalog ETL task finished.")
 
     def _run_unified_pipeline_test(self) -> None:
         """
-        Runs a test query for one or more pipelines using the unified Factory approach.
-        """
-        logger.info("===== Starting Unified Pipeline Test =====")
+        Executes test runs for unified data pipelines.
 
-        # Define jobs based on config availability
+        This method iterates through configured test scenarios and executes
+        the corresponding pipelines using the factory pattern.
+        It is useful for validating pipeline functionality and ingesting
+        specific subsets of data defined in the test configuration.
+        """
+        logger.info("Starting Unified Pipeline Test sequence.")
+
         jobs: List[Tuple[str, str]] = []
 
+        # Determine which pipeline tests are configured to run
         if self.test_configs.get("hapi_config"):
             jobs.append(("hapi_config", HAPI_SOURCE_ID))
         else:
-            logger.warning("No HAPI test configuration found. Skipping.")
+            logger.warning("HAPI configuration missing; skipping HAPI pipeline test.")
 
         if self.test_configs.get("fido_config"):
             jobs.append(("fido_config", FIDO_CDAWEB_SOURCE_ID))
         else:
-            logger.warning("No FIDO test configuration found. Skipping.")
+            logger.warning("FIDO configuration missing; skipping FIDO pipeline test.")
 
-        # Use a temporary directory context for file-based pipelines
+        # Establish a temporary context for any file-based operations required
+        # by the pipelines during execution.
         with tempfile.TemporaryDirectory() as temp_dir_str:
             temp_path = pathlib.Path(temp_dir_str)
-            logger.info(f"Using temporary path for file pipelines: {temp_path}")
+            logger.info(f"Initialized temporary working directory: {temp_path}")
 
-            # Initialize the Factory once
             factory = PipelineFactory(self.db, temp_path)
 
             for config_key, source_type in jobs:
                 config: Dict[str, Any] = self.test_configs.get(config_key, {})
 
-                # Retrieve and cast config values to satisfy type checker
-                # We assume main.py provides correct types (List[str] and datetime)
+                # Type casting is used here to ensure strict typing compliance,
+                # assuming the configuration dictionary matches the expected structure.
                 datasets = cast(List[str], config.get("DATASET_FILTER"))
                 start_time = cast(Optional[datetime], config.get("START_TIME"))
                 end_time = cast(Optional[datetime], config.get("END_TIME"))
 
-                # start_time and end_time can be None for auto-detection in supported pipelines.
                 if not datasets:
-                    logger.warning(f"Skipping {source_type}: Incomplete configuration (missing datasets).")
+                    logger.warning(f"Skipping {source_type}: Configuration incomplete (missing dataset filter).")
                     continue
 
-                logger.info(f"--- Running Pipeline for {source_type} ---")
+                logger.info(f"Executing pipeline for source: {source_type}")
                 start_run_time = time.time()
 
                 try:
-                    # Get the correct pipeline strategy
                     pipeline = factory.get_pipeline(source_type)
-
-                    # Execute securely via interface
                     pipeline.run(datasets, start_time, end_time)
 
                 except Exception as e:
-                    logger.critical(f"Pipeline execution failed for {source_type}: {e}", exc_info=True)
+                    logger.critical(f"Pipeline execution failed critically for {source_type}: {e}", exc_info=True)
                 finally:
                     duration = time.time() - start_run_time
-                    logger.info(f"--- Finished {source_type} in {duration:.2f}s ---")
+                    logger.info(f"Finished {source_type} execution in {duration:.2f} seconds.")
 
-        logger.info("===== Unified Pipeline Test Finished =====")
+        logger.info("Unified Pipeline Test sequence finished.")

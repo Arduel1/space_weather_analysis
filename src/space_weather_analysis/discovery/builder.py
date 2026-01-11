@@ -3,8 +3,8 @@ import logging
 import pathlib
 from typing import Dict, List
 
+from common.util.types import CatalogEntryDict
 from space_weather_analysis.discovery.discoverers.base import AbstractDiscoverer
-from space_weather_analysis.util.types import CatalogEntryDict
 
 logger = logging.getLogger(__name__)
 

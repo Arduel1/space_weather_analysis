@@ -1,20 +1,20 @@
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from streamlit_app.util.fast_fourier_transformation import calculate_periodicity
 from streamlit_app.util.solar_cycles import calculate_cycle_boundaries
 
 
 def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
     """
     Visualizes sunspot data with specialized 11-year cycle markers.
-    Includes raw data points (orange) and a prominent smoothing line (red).
-    Includes a frequency analysis to statistically prove the cycle length.
+
+    This function creates a dual-layer visualization showing raw daily observations
+    alongside a smoothed trend line to highlight the solar cycle. It also overlaps
+    theoretical cycle boundaries to provide context on the current cycle phase.
 
     Args:
-        df: Dataframe containing sunspot data.
+        df: Dataframe containing sunspot data with a 'sunspot_number' column.
         collection_name: Name of the collection for display.
     """
     st.subheader(f"Sunspot Analysis: {collection_name}")
@@ -30,19 +30,18 @@ def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
     with col_controls2:
         remove_zeros = st.checkbox("Hide Zero Values (0)", value=False)
 
-    # Calculate Rolling Average preserving index
+    # Calculate Rolling Average to visualize the trend
     df["rolling_mean"] = df["sunspot_number"].rolling(window=window, min_periods=1).mean()
 
-    # Create subset for raw data plotting
+    # Filter data for the raw scatter plot
     df_raw = df.dropna(subset=["sunspot_number"])
 
     if remove_zeros:
         df_raw = df_raw[df_raw["sunspot_number"] > 0]
 
-    # Time Series Plot
     fig = go.Figure()
 
-    # Background: Daily Observations
+    # Add Daily Observations as background markers
     fig.add_trace(
         go.Scatter(
             x=df_raw.index,
@@ -50,13 +49,13 @@ def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
             mode="markers",
             name="Daily Observations",
             marker=dict(
-                color="rgba(255, 165, 0, 0.6)",  # Orange with 60% opacity
+                color="rgba(255, 165, 0, 0.6)",
                 size=3,
             ),
         )
     )
 
-    # Foreground: Smoothed Trend
+    # Add Smoothed Trend as the primary line
     fig.add_trace(
         go.Scatter(
             x=df.index,
@@ -70,7 +69,7 @@ def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
         )
     )
 
-    # Cycle Markers (Theoretical Minima)
+    # Add Cycle Markers based on theoretical minima
     cycle_boundaries = calculate_cycle_boundaries(num_cycles=30)
     shapes = []
     data_min_date = df.index.min()
@@ -79,7 +78,16 @@ def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
     for boundary in cycle_boundaries:
         if data_min_date <= boundary <= data_max_date:
             shapes.append(
-                dict(type="line", x0=boundary, y0=0, x1=boundary, y1=1, xref="x", yref="paper", line=dict(color="blue", width=1, dash="dash"))
+                dict(
+                    type="line",
+                    x0=boundary,
+                    y0=0,
+                    x1=boundary,
+                    y1=1,
+                    xref="x",
+                    yref="paper",
+                    line=dict(color="blue", width=1, dash="dash"),
+                )
             )
 
     fig.update_layout(
@@ -94,54 +102,8 @@ def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
 
     st.plotly_chart(fig, width="stretch")
 
-    # Metrics Section
     col1, col2, col3 = st.columns(3)
     if not df_raw.empty:
         col1.metric("Max Sunspot Number", int(df_raw["sunspot_number"].max()))
         col2.metric("Average Sunspot Number", f"{df_raw['sunspot_number'].mean():.2f}")
         col3.metric("Total Records", len(df_raw))
-
-    # Periodicity Analysis
-    st.markdown("---")
-    st.subheader("Periodicity")
-
-    with st.expander("Cycle Analysis (Fourier Transform)", expanded=True):
-        st.caption("""
-        This analysis breaks down the sunspot time series into repeating cycles.
-        Peaks in the graph below indicate the most dominant repeating patterns (cycles) in the data.
-        For sunspots, we expect a strong peak around 11 years.
-        """)
-
-        # FFT Calculation
-        spectrum_df = calculate_periodicity(
-            df["sunspot_number"],
-            sample_rate_days=1,
-            min_period_years=2.0,
-            max_period_years=25.0,
-        )
-
-        if not spectrum_df.empty:
-            top_cycle = spectrum_df.iloc[0]
-            top_period = top_cycle["Period_Years"]
-
-            col_res_1, col_res_2 = st.columns([1, 3])
-
-            with col_res_1:
-                st.metric(label="Dominant Cycle Detected", value=f"{top_period:.2f} Years", delta="Target: ~11.0 Years", delta_color="normal")
-                st.info("The calculation uses a Fast Fourier Transform (FFT) on the daily data.")
-
-            with col_res_2:
-                fig_fft = px.line(
-                    spectrum_df,
-                    x="Period_Years",
-                    y="Power",
-                    title="Periodogram: Strength of Cycles",
-                    labels={"Period_Years": "Cycle Length (Years)", "Power": "Relative Strength (Power)"},
-                )
-
-                fig_fft.add_vline(x=11.0, line_width=2, line_dash="dash", line_color="green", annotation_text="Schwabe Cycle (11y)")
-
-                fig_fft.add_annotation(x=top_period, y=top_cycle["Power"], text=f"Peak: {top_period:.2f}y", showarrow=True, arrowhead=1)
-                st.plotly_chart(fig_fft, width="stretch")
-        else:
-            st.warning("Not enough data to perform a reliable periodicity analysis.")

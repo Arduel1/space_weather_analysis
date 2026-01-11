@@ -22,4 +22,5 @@ COPY data ./data
 # Expose the port on which the app will run
 EXPOSE 8080
 
-CMD ["poetry", "run", "python", "-m", "space_weather_analysis.main"]
+# CMD ["poetry", "run", "python", "-m", "space_weather_analysis.main"]
+CMD ["python", "--version"]

@@ -5,9 +5,9 @@ from typing import Generator, List
 from hapiclient import hapi
 from hapiclient.util import HAPIError
 
+from common.util.types import CatalogEntryDict, DiscoveryYield
 from space_weather_analysis.config import HAPI_SOURCE_ID
 from space_weather_analysis.discovery.discoverers.base import AbstractDiscoverer
-from space_weather_analysis.util.types import CatalogEntryDict, DiscoveryYield
 
 logger = logging.getLogger(__name__)
 

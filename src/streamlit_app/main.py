@@ -11,7 +11,7 @@ from streamlit_app.plots.particles import plot_particle_flux
 from streamlit_app.plots.sunspots import plot_sunspots
 from streamlit_app.plots.xray import plot_xray_flux
 
-# Page Configuration
+# Configure the page layout and appearance
 st.set_page_config(
     page_title="Space Weather Analytics",
     page_icon="🌌",
@@ -22,19 +22,25 @@ st.set_page_config(
 
 @st.cache_resource
 def get_loader() -> DataLoader:
-    """Returns a singleton instance of the DataLoader."""
+    """
+    Returns a cached singleton instance of the DataLoader.
+
+    Streamlit's caching mechanism ensures that we don't reconnect to the database
+    on every script rerun.
+    """
     return DataLoader()
 
 
 loader = get_loader()
 
-# Sidebar Navigation
+# --- Sidebar Configuration ---
 st.sidebar.title("Navigation")
 app_mode = st.sidebar.radio("Choose Mode", ["Dataset Explorer", "Cycle Correlation Analysis"])
 
 st.sidebar.markdown("---")
 
 # Global Time Range Filter
+# This allows users to narrow down the analysis scope for all subsequent queries.
 st.sidebar.subheader("Time Range Filter")
 
 min_allowed_date = datetime(1800, 1, 1)
@@ -43,16 +49,26 @@ max_allowed_date = datetime.now() + timedelta(days=365)
 default_end = datetime.now()
 default_start = default_end - timedelta(days=365)
 
-start_date = st.sidebar.date_input("Start Date", value=default_start, min_value=min_allowed_date, max_value=max_allowed_date)
-end_date = st.sidebar.date_input("End Date", value=default_end, min_value=min_allowed_date, max_value=max_allowed_date)
+start_date = st.sidebar.date_input(
+    "Start Date",
+    value=default_start,
+    min_value=min_allowed_date,
+    max_value=max_allowed_date,
+)
+end_date = st.sidebar.date_input(
+    "End Date",
+    value=default_end,
+    min_value=min_allowed_date,
+    max_value=max_allowed_date,
+)
 
-# Convert to timezone-aware datetime
+# Enforce timezone awareness (UTC) to match database storage format
 start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
 end_dt = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
 
 
 if app_mode == "Dataset Explorer":
-    # Single Dataset Analysis Mode
+    # --- Single Dataset Analysis Mode ---
     st.sidebar.title("Data Selection")
 
     available_collections = loader.get_available_collections()
@@ -66,16 +82,18 @@ if app_mode == "Dataset Explorer":
     st.title(f"Analysis: {selected_collection}")
 
     with st.spinner("Loading data from MongoDB..."):
+        # Fetching with limit=0 retrieves all data in the range
         df = loader.get_timeseries_data(selected_collection, start_time=start_dt, end_time=end_dt, limit=0)
 
     meta = loader.get_metadata(selected_collection)
     if meta:
-        with st.expander("ℹDataset Metadata"):
+        with st.expander("ℹ Dataset Metadata"):
             st.json(meta)
 
     if df.empty:
         st.info("No data found for the selected collection and time range.")
     else:
+        # Determine the appropriate visualization based on collection name patterns
         coll_lower = selected_collection.lower()
 
         if "silso" in coll_lower or "sunspot" in coll_lower:
@@ -93,13 +111,16 @@ if app_mode == "Dataset Explorer":
             st.dataframe(df)
 
 elif app_mode == "Cycle Correlation Analysis":
-    # Multi-Dataset Correlation Mode
+    # --- Multi-Dataset Correlation Mode ---
     st.title("Solar Cycle & Event Correlation")
-    st.markdown("""
-    This view combines the **SILSO Sunspot Number** (representing the solar magnetic cycle) 
+    st.markdown(
+        """
+    This view combines the **SILSO Sunspot Number** (representing the solar magnetic cycle)
     and the **SOHO/LASCO CME Catalog** (representing impulsive solar events) to visualize relationships.
-    """)  # noqa: W291
+    """
+    )
 
+    # Define standard target collections for this analysis view
     target_sunspot = "silso_sunspot_daily"
     target_cme = "cme_catalog"
     target_xray = "goesp_xray_flux_P1M"
@@ -112,23 +133,25 @@ elif app_mode == "Cycle Correlation Analysis":
             df_sunspot = loader.get_timeseries_data(target_sunspot, start_time=start_dt, end_time=end_dt)
             df_cme = loader.get_timeseries_data(target_cme, start_time=start_dt, end_time=end_dt)
 
-            # Load X-Ray if available
+            # Load X-Ray data if available to overlay flare context
             df_xray = pd.DataFrame()
             if target_xray in available:
                 df_xray = loader.get_timeseries_data(target_xray, start_time=start_dt, end_time=end_dt)
 
-            # Load Particles if available
+            # Load Particle data if available to overlay SEP context
             df_part = pd.DataFrame()
             if target_part in available:
                 df_part = loader.get_timeseries_data(target_part, start_time=start_dt, end_time=end_dt)
 
         if not df_sunspot.empty and not df_cme.empty:
             plot_solar_cycle_correlation(df_cme, df_sunspot)
+
             if not df_xray.empty:
                 st.markdown("---")
                 plot_xray_flux(df_xray, target_xray, key_suffix="corr")
             elif target_xray in available:
                 st.warning("X-Ray data available but no data found in selected range.")
+
             if not df_part.empty:
                 st.markdown("---")
                 plot_particle_flux(df_part, target_part, key_suffix="corr")

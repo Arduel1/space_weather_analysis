@@ -1,10 +1,10 @@
 import logging
 from typing import Any, Generator
 
+from common.util.types import CatalogEntryDict, DiscoveryYield
 from space_weather_analysis.clients.cdaweb import CdawebClient
 from space_weather_analysis.config import FIDO_CDAWEB_SOURCE_ID
 from space_weather_analysis.discovery.discoverers.base import AbstractDiscoverer
-from space_weather_analysis.util.types import CatalogEntryDict, DiscoveryYield
 
 logger = logging.getLogger(__name__)
 

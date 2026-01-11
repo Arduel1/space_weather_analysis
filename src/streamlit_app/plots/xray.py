@@ -6,18 +6,18 @@ import streamlit as st
 
 def plot_xray_flux(df: pd.DataFrame, collection_name: str, key_suffix: str = "") -> None:
     """
-    Visualizes GOES X-Ray flux data with dynamic resampling, moving average,
-    and solar flare classification zones.
+    Visualizes GOES X-Ray flux data with classification backgrounds.
+
+    The plot displays both Long and Short wave channels and includes background
+    zones corresponding to the C, M, and X flare classifications.
 
     Args:
         df: The dataframe containing X-ray flux data.
         collection_name: Name of the collection for display.
-        key_suffix: Unique suffix for Streamlit widgets to avoid collisions when
-                    reusing this plot in multiple views.
+        key_suffix: Unique suffix for Streamlit widgets to avoid collisions.
     """
     st.subheader(f"Solar X-Ray Flux Analysis: {collection_name}")
 
-    # --- 1. Data Preparation & Cleaning ---
     long_col = "Long_Wave"
     short_col = "Short_Wave"
 
@@ -25,35 +25,36 @@ def plot_xray_flux(df: pd.DataFrame, collection_name: str, key_suffix: str = "")
         st.warning(f"Expected column '{long_col}' not found. Cannot create specialized X-ray plot.")
         return
 
-    # Create a working copy
     df_plot = df.copy()
 
-    # Clean data: Replace <= 0 with NaN (log scale doesn't allow 0)
+    # Mask values <= 0 since log scale does not support them
     if long_col in df_plot.columns:
         df_plot[long_col] = df_plot[long_col].mask(df_plot[long_col] <= 0)
     if short_col in df_plot.columns:
         df_plot[short_col] = df_plot[short_col].mask(df_plot[short_col] <= 0)
 
-    # --- 2. User Controls (Resampling & Moving Average) ---
     col_controls, col_ma = st.columns([1, 1])
 
     with col_controls:
-        resample_map = {"Original (1-min)": None, "Hourly Average": "h", "Daily Average": "D", "Weekly Average": "W"}
-        # Unique key for widget
+        resample_map = {
+            "Original (1-min)": None,
+            "Hourly Average": "h",
+            "Daily Average": "D",
+            "Weekly Average": "W",
+        }
         selected_resample = st.selectbox(
             "Time Resolution (Aggregation)",
             options=list(resample_map.keys()),
-            index=2,  # Default to Hourly
+            index=2,
             key=f"xray_resample_{key_suffix}",
         )
 
-    # Apply Resampling
+    # Apply resampling
     freq = resample_map[selected_resample]
     if freq:
         with st.spinner(f"Resampling data to {selected_resample}..."):
             df_plot = df_plot.select_dtypes(include=[np.number]).resample(freq).mean()
 
-    # Moving Average Control
     with col_ma:
         ma_window = st.slider(
             "Smoothing Window (Samples)",
@@ -64,20 +65,17 @@ def plot_xray_flux(df: pd.DataFrame, collection_name: str, key_suffix: str = "")
             key=f"xray_ma_{key_suffix}",
         )
 
-    # Apply Moving Average if window > 1
+    # Calculate Moving Average if requested
     if ma_window > 1:
         df_plot[f"{long_col}_MA"] = df_plot[long_col].rolling(window=ma_window, min_periods=1).mean()
 
-    # Check if data is empty after cleaning
     if df_plot[[long_col, short_col]].dropna(how="all").empty:
         st.warning("No valid numeric data found in the selected range.")
         return
 
-    # --- 3. Visualization ---
-
     fig = go.Figure()
 
-    # Add Long Wave (Primary) - Red (dimmed if MA is active)
+    # Add Long Wave (Primary)
     primary_opacity = 0.3 if ma_window > 1 else 1.0
     fig.add_trace(
         go.Scatter(
@@ -91,7 +89,7 @@ def plot_xray_flux(df: pd.DataFrame, collection_name: str, key_suffix: str = "")
         )
     )
 
-    # Add Moving Average Trace (if active)
+    # Add Moving Average Trace
     if ma_window > 1:
         fig.add_trace(
             go.Scatter(
@@ -99,12 +97,12 @@ def plot_xray_flux(df: pd.DataFrame, collection_name: str, key_suffix: str = "")
                 y=df_plot[f"{long_col}_MA"],
                 mode="lines",
                 name=f"Moving Avg ({ma_window})",
-                line=dict(color="#FF4B4B", width=2),  # Dark Red
+                line=dict(color="#FF4B4B", width=2),
                 hovertemplate="%{y:.2e} W/m²",
             )
         )
 
-    # Add Short Wave (Secondary) - Blue
+    # Add Short Wave (Secondary)
     fig.add_trace(
         go.Scatter(
             x=df_plot.index,
@@ -118,7 +116,6 @@ def plot_xray_flux(df: pd.DataFrame, collection_name: str, key_suffix: str = "")
     )
 
     # Add Flare Class Background Zones (Shapes)
-    # X-Class
     fig.add_hrect(
         y0=1e-4,
         y1=1e-2,
@@ -129,7 +126,6 @@ def plot_xray_flux(df: pd.DataFrame, collection_name: str, key_suffix: str = "")
         annotation_position="top left",
         annotation_font_color="red",
     )
-    # M-Class
     fig.add_hrect(
         y0=1e-5,
         y1=1e-4,
@@ -140,7 +136,6 @@ def plot_xray_flux(df: pd.DataFrame, collection_name: str, key_suffix: str = "")
         annotation_position="top left",
         annotation_font_color="orange",
     )
-    # C-Class
     fig.add_hrect(
         y0=1e-6,
         y1=1e-5,
@@ -168,15 +163,19 @@ def plot_xray_flux(df: pd.DataFrame, collection_name: str, key_suffix: str = "")
     with st.expander("Definition of Wavelengths & Flare Classes", expanded=False):
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("""
+            st.markdown(
+                """
             **Wavelengths**
-            * **Long Wave (1.0–8.0 Å):** The standard channel used by NOAA to classify solar flares.
+            * **Long Wave (1.0–8.0 Å):** Standard classification channel.
             * **Short Wave (0.5–4.0 Å):** Higher-energy X-rays.
-            """)
+            """
+            )
         with col2:
-            st.markdown("""
+            st.markdown(
+                """
             **Solar Flare Classification**
-            * **X-Class (> $10^{-4}$):** Major events (Radio Blackouts).
+            * **X-Class (> $10^{-4}$):** Major events.
             * **M-Class ($10^{-5}$ – $10^{-4}$):** Medium-sized events.
             * **C-Class ($10^{-6}$ – $10^{-5}$):** Small events.
-            """)
+            """
+            )

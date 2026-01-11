@@ -33,11 +33,3 @@ CME_CATALOG_FILE: pathlib.Path = DATA_ROOT / "cme_catalog.txt"
 
 SILSO_FILE: pathlib.Path = DATA_ROOT / "SN_d_tot_V2.0.csv"
 """Path to the SILSO daily sunspot data CSV file."""
-
-
-# --- Catalog Field Configuration ---
-FIDO_CDAWEB_SOURCE_ID: str = "FIDO_CDAWEB"
-"""Identifier used in the catalog to denote datasets sourced via SunPy/Fido (CDAWeb)."""
-
-HAPI_SOURCE_ID: str = "HAPI"
-"""Identifier used in the catalog to denote datasets sourced via HAPI servers."""

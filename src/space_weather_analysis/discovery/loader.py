@@ -7,12 +7,12 @@ from pymongo import ReplaceOne
 from pymongo import errors as pymongo_errors
 from pymongo.database import Database
 
-from space_weather_analysis.pipelines.processors.base import BaseETLProcessor
-from space_weather_analysis.util.types import (
+from common.util.types import (
     CatalogEntryDict,
     MasterCatalogItem,
     TransformedDocuments,
 )
+from space_weather_analysis.pipelines.processors.base import BaseETLProcessor
 
 logger = logging.getLogger(__name__)
 
