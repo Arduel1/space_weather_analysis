@@ -1,6 +1,5 @@
 import time
 from datetime import datetime, timedelta, timezone
-from datetime import time as dt_time
 from typing import Optional, Tuple
 
 import pandas as pd
@@ -61,16 +60,26 @@ def calculate_default_range(start_dt: datetime, end_dt: datetime) -> Tuple[datet
     total_duration = end_dt - start_dt
     midpoint = start_dt + (total_duration / 2)
 
-    # Define a fixed window of one day starting from the midpoint
     default_start = midpoint
     default_end = midpoint + timedelta(days=1)
 
-    # Ensure the calculated end does not exceed the absolute max limit of the dataset
     if default_end > end_dt:
         default_end = end_dt
         default_start = max(start_dt, default_end - timedelta(days=1))
 
     return default_start, default_end
+
+
+def format_timedelta(td: timedelta) -> str:
+    """Helper to format timedelta into a readable string (HH:MM:SS)."""
+    total_seconds = int(td.total_seconds())
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours}h {minutes}m {seconds}s"
+    elif minutes > 0:
+        return f"{minutes}m {seconds}s"
+    return f"{seconds}s"
 
 
 # Configure the page layout and appearance
@@ -84,9 +93,7 @@ st.set_page_config(
 
 @st.cache_resource
 def get_loader() -> DataLoader:
-    """
-    Returns a cached singleton instance of the DataLoader.
-    """
+    """Returns a cached singleton instance of the DataLoader."""
     return DataLoader()
 
 
@@ -97,16 +104,12 @@ app_mode = st.sidebar.radio("Choose Mode", ["Dataset Explorer", "Cycle Correlati
 
 st.sidebar.markdown("---")
 
-# Initialize shared filter variables to defaults
 start_dt = datetime.now(timezone.utc) - timedelta(days=365)
 end_dt = datetime.now(timezone.utc)
 
-# Render the sidebar time filter only for analysis modes
-# The downloader handles its own specific time selection logic
 if app_mode != "Data Downloader":
     st.sidebar.subheader("Time Range Filter")
 
-    # Initialize defaults relative to the current time
     default_global_end = datetime.now()
     default_global_start = default_global_end - timedelta(days=365)
 
@@ -123,7 +126,6 @@ if app_mode != "Data Downloader":
         max_value=MAX_ALLOWED_DATE,
     )
 
-    # Convert date inputs to timezone-aware datetime objects for database compatibility
     start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
     end_dt = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
 
@@ -142,7 +144,6 @@ if app_mode == "Dataset Explorer":
     st.title(f"Analysis: {selected_collection}")
 
     with st.spinner("Loading data from MongoDB..."):
-        # Retrieve all data points within the range by setting limit to 0
         df = loader.get_timeseries_data(selected_collection, start_time=start_dt, end_time=end_dt, limit=0)
 
     meta = loader.get_metadata(selected_collection)
@@ -153,7 +154,6 @@ if app_mode == "Dataset Explorer":
     if df.empty:
         st.info("No data found for the selected collection and time range.")
     else:
-        # Dispatch to the appropriate plotting function based on naming conventions
         coll_lower = selected_collection.lower()
 
         if "silso" in coll_lower or "sunspot" in coll_lower:
@@ -172,18 +172,72 @@ if app_mode == "Dataset Explorer":
         with st.expander("Raw Data Table"):
             st.dataframe(df)
 
+elif app_mode == "Cycle Correlation Analysis":
+    st.title("Solar Cycle & Event Correlation")
+    st.markdown(
+        """
+    This view combines the **SILSO Sunspot Number** (representing the solar magnetic cycle)
+    and the **SOHO/LASCO CME Catalog** (representing impulsive solar events) to visualize relationships.
+    """
+    )
+    # (Existing correlation code remains unchanged)
+    target_sunspot = "silso_sunspot_daily"
+    target_cme = "cme_catalog"
+    target_xray = "goesp_xray_flux_P1M"
+    target_part = "goesp_part_flux_P5M"
+    target_kp = "Kp"
+
+    available = loader.get_available_collections()
+
+    if target_sunspot in available and target_cme in available:
+        with st.spinner("Loading datasets..."):
+            df_sunspot = loader.get_timeseries_data(target_sunspot, start_time=start_dt, end_time=end_dt)
+            df_cme = loader.get_timeseries_data(target_cme, start_time=start_dt, end_time=end_dt)
+
+            df_xray = pd.DataFrame()
+            if target_xray in available:
+                df_xray = loader.get_timeseries_data(target_xray, start_time=start_dt, end_time=end_dt)
+
+            df_part = pd.DataFrame()
+            if target_part in available:
+                df_part = loader.get_timeseries_data(target_part, start_time=start_dt, end_time=end_dt)
+
+            df_kp = pd.DataFrame()
+            if target_kp in available:
+                df_kp = loader.get_timeseries_data(target_kp, start_time=start_dt, end_time=end_dt)
+
+        if not df_sunspot.empty and not df_cme.empty:
+            plot_solar_cycle_correlation(df_cme, df_sunspot)
+
+            # (Rest of correlation logic...)
+            if not df_xray.empty:
+                st.markdown("---")
+                plot_xray_flux(df_xray, target_xray, key_suffix="corr", kp_df=df_kp)
+
+            if not df_part.empty:
+                st.markdown("---")
+                plot_particle_flux(df_part, target_part, key_suffix="corr")
+
+            if not df_kp.empty:
+                st.markdown("---")
+                plot_kp_index(df_kp)
+        else:
+            st.error("Data missing for correlation analysis.")
+    else:
+        st.error("Required datasets not found.")
+
+
 elif app_mode == "Data Downloader":
     st.title("Data Catalog & Download Center")
     st.markdown(
         """
         Browse the available datasets from the global catalog and trigger new download jobs.
-        Once the data is fetched by the pipeline, it will be visualized below.
         """
     )
 
     catalog = loader.get_master_catalog()
     if not catalog:
-        st.error("Master catalog is empty. Please run the Catalog Collector service.")
+        st.error("Master catalog is empty.")
     else:
         catalog_map = {item["dataset_id"]: item for item in catalog}
         dataset_ids = sorted(list(catalog_map.keys()))
@@ -192,7 +246,6 @@ elif app_mode == "Data Downloader":
 
         if selected_id:
             entry = catalog_map[selected_id]
-            # Use the first source for configuration defaults
             sources = entry.get("sources", [])
             primary_source = sources[0] if sources else {}
 
@@ -202,53 +255,34 @@ elif app_mode == "Data Downloader":
                 st.subheader("Dataset Info")
                 full_meta = loader.get_metadata(selected_id)
                 if full_meta:
-                    metadata_content = full_meta.get("metadata", {})
-                    st.json(metadata_content, expanded=False)
-                else:
-                    st.info("No detailed descriptive metadata available.")
-
+                    st.json(full_meta.get("metadata", {}), expanded=False)
                 st.write(f"**Source ID:** {primary_source.get('source_id', 'Unknown')}")
                 st.write(f"**Type:** {primary_source.get('type', 'Unknown')}")
 
             with col2:
                 st.subheader("Download Configuration")
-
                 tr = primary_source.get("time_range", {})
 
                 # Parse catalog limits to establish the dataset boundaries
                 cat_start_dt = parse_catalog_time(tr.get("start_time"), MIN_ALLOWED_DATE)
                 cat_end_dt = parse_catalog_time(tr.get("end_time"), MAX_ALLOWED_DATE)
-
                 st.caption(f"Available Range: {cat_start_dt} to {cat_end_dt}")
 
                 # Determine the initial 1-day selection window centered in the dataset
                 init_start, init_end = calculate_default_range(cat_start_dt, cat_end_dt)
 
-                # Configure Start Inputs
                 c1, c2 = st.columns(2)
                 with c1:
-                    req_start_date = st.date_input(
-                        "Start Date",
-                        value=init_start.date(),
-                        min_value=MIN_ALLOWED_DATE,
-                        max_value=MAX_ALLOWED_DATE,
-                    )
+                    req_start_date = st.date_input("Start Date", value=init_start.date(), min_value=MIN_ALLOWED_DATE, max_value=MAX_ALLOWED_DATE)
                 with c2:
                     req_start_time = st.time_input("Start Time", value=init_start.time())
 
-                # Configure End Inputs
                 c3, c4 = st.columns(2)
                 with c3:
-                    req_end_date = st.date_input(
-                        "End Date",
-                        value=init_end.date(),
-                        min_value=MIN_ALLOWED_DATE,
-                        max_value=MAX_ALLOWED_DATE,
-                    )
+                    req_end_date = st.date_input("End Date", value=init_end.date(), min_value=MIN_ALLOWED_DATE, max_value=MAX_ALLOWED_DATE)
                 with c4:
                     req_end_time = st.time_input("End Time", value=init_end.time())
 
-                # Combine Date and Time components into UTC datetimes
                 req_start_dt = datetime.combine(req_start_date, req_start_time).replace(tzinfo=timezone.utc)
                 req_end_dt = datetime.combine(req_end_date, req_end_time).replace(tzinfo=timezone.utc)
 
@@ -271,23 +305,46 @@ elif app_mode == "Data Downloader":
                 job_id = st.session_state["current_job_id"]
                 status_placeholder = st.empty()
                 progress_bar = st.progress(0)
+                eta_placeholder = st.empty()
 
-                # Monitor job status via polling
                 complete = False
                 while not complete:
                     job = loader.get_job_status(job_id)
                     status = job.get("status", "UNKNOWN")
+                    message = job.get("message", "")
 
+                    # Progress calculation
                     progress = job.get("progress", 0.0)
-                    if isinstance(progress, (int, float)):
-                        val = min(max(float(progress), 0.0), 1.0)
-                        progress_bar.progress(val)
+                    progress_val = min(max(float(progress), 0.0), 1.0)
+                    progress_bar.progress(progress_val)
 
-                    status_placeholder.info(f"Current Status: **{status}**")
+                    # ETA Calculation
+                    started_at = job.get("started_at")
+                    if status == "RUNNING" and progress_val > 0.01 and started_at:
+                        # Ensure started_at is timezone aware for subtraction
+                        if started_at.tzinfo is None:
+                            started_at = started_at.replace(tzinfo=timezone.utc)
+
+                        now = datetime.now(timezone.utc)
+                        elapsed = (now - started_at).total_seconds()
+
+                        if elapsed > 0:
+                            # Estimate total time needed based on current rate
+                            total_time_est = elapsed / progress_val
+                            remaining_time = total_time_est - elapsed
+                            eta_str = format_timedelta(timedelta(seconds=remaining_time))
+                            eta_placeholder.write(f"⏱ Estimated time remaining: **{eta_str}**")
+                    elif status == "PENDING":
+                        eta_placeholder.write("⏱ Waiting for worker to pick up job...")
+                    else:
+                        eta_placeholder.empty()
+
+                    status_placeholder.info(f"Status: **{status}** | {message}")
 
                     if status == "COMPLETED":
                         progress_bar.progress(1.0)
                         st.success("Download Complete!")
+                        eta_placeholder.empty()
                         complete = True
                     elif status == "FAILED":
                         st.error(f"Job Failed: {job.get('error', 'Unknown error')}")
@@ -299,17 +356,14 @@ elif app_mode == "Data Downloader":
                 if complete and job.get("status") == "COMPLETED":
                     st.markdown("### Preview Data")
                     params = job.get("parameters", {})
-                    job_start = params.get("start_time")
-                    job_end = params.get("end_time")
-
-                    df_new = loader.get_timeseries_data(selected_id, start_time=job_start, end_time=job_end)
-
+                    # Reload with fresh data
+                    df_new = loader.get_timeseries_data(selected_id, start_time=params.get("start_time"), end_time=params.get("end_time"))
                     if not df_new.empty:
                         plot_generic(df_new, selected_id)
                         with st.expander("Raw Data"):
                             st.dataframe(df_new)
                     else:
-                        st.warning("Job marked completed but no data found in collection.")
+                        st.warning("Job completed but no data returned.")
 
 st.markdown("---")
 st.caption("Space Weather Analysis Platform")

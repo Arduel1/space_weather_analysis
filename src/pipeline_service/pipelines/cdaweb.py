@@ -2,7 +2,7 @@ import logging
 import pathlib
 import pickle
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Generator, List, Optional, Tuple, cast
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, cast
 
 import gridfs
 import pandas as pd
@@ -60,18 +60,18 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         datasets: List[str],
         start_time: Optional[datetime],
         end_time: Optional[datetime],
+        progress_callback: Optional[Callable[[float, str], None]] = None,
     ) -> None:
         """
         Runs the complete data pipeline orchestration.
 
-        This method iterates through the specified time range in 7-day
-        chunks to avoid failures on large requests with data gaps.
-        It checks if data for a chunk already exists before fetching.
+        Iterates through time chunks and reports progress.
 
         Args:
             datasets: A list of dataset IDs to fetch.
             start_time: The start time for the data query.
             end_time: The end time for the data query.
+            progress_callback: Optional callback to report progress and status.
         """
         if not start_time or not end_time:
             logger.error("Start time and end time are required for CDAWeb pipeline.")
@@ -92,9 +92,12 @@ class CdawebPipeline(MongoLoader, BasePipeline):
 
         chunk_delta = timedelta(days=7)
         time_chunks = generate_time_chunks(start_time, end_time, chunk_delta)
+        total_chunks = len(time_chunks)
         time_field = "timestamp"
 
-        for dataset_id in datasets:
+        total_datasets = len(datasets)
+
+        for i, dataset_id in enumerate(datasets):
             group_name = self._get_fido_source_from_db(dataset_id)
             if not group_name:
                 logger.error(f"Skipping {dataset_id}: Could not find its {self.SOURCE_ID} group in catalog.")
@@ -105,10 +108,18 @@ class CdawebPipeline(MongoLoader, BasePipeline):
             # Ensure the target collection exists with time-series options
             self._ensure_timeseries_collection(collection_name, time_field=time_field, meta_field="metadata")
 
-            logger.info(f"Processing dataset {dataset_id} (group {group_name}) for {len(time_chunks)} chunks...")
+            logger.info(f"Processing dataset {dataset_id} (group {group_name}) for {total_chunks} chunks...")
 
-            for i, (chunk_start, chunk_stop) in enumerate(time_chunks):
-                logger.info(f"Checking chunk {i + 1}/{len(time_chunks)}: {chunk_start} to {chunk_stop}")
+            for j, (chunk_start, chunk_stop) in enumerate(time_chunks):
+                if progress_callback:
+                    # Calculate granular progress
+                    dataset_base = i / total_datasets
+                    chunk_contribution = (j / total_chunks) / total_datasets
+                    progress = dataset_base + chunk_contribution
+                    msg = f"Downloading {dataset_id}: Chunk {j + 1}/{total_chunks}"
+                    progress_callback(progress, msg)
+
+                logger.info(f"Checking chunk {j + 1}/{total_chunks}: {chunk_start} to {chunk_stop}")
 
                 # Check if data for this chunk already exists in DB
                 query = {time_field: {"$gte": chunk_start, "$lt": chunk_stop}}

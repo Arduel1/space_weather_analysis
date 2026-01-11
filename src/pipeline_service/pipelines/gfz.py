@@ -1,7 +1,7 @@
 import logging
 import pathlib
 from datetime import datetime
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from pymongo import ReplaceOne
 from pymongo.database import Database
@@ -42,6 +42,7 @@ class GfzPipeline(MongoLoader, BasePipeline):
         datasets: List[str],
         start_time: Optional[datetime],
         end_time: Optional[datetime],
+        progress_callback: Optional[Callable[[float, str], None]] = None,
     ) -> None:
         """
         Executes the download process for the requested GFZ datasets.
@@ -50,13 +51,20 @@ class GfzPipeline(MongoLoader, BasePipeline):
             datasets: List of index names (e.g., 'Kp').
             start_time: Start of the data range.
             end_time: End of the data range.
+            progress_callback: Optional callback to report progress.
         """
         if not start_time or not end_time:
             logger.error("Start and end time are required for GFZ pipeline.")
             return
 
-        for dataset_id in datasets:
+        total_datasets = len(datasets)
+
+        for i, dataset_id in enumerate(datasets):
             logger.info(f"Processing GFZ dataset: {dataset_id}")
+
+            if progress_callback:
+                progress = i / total_datasets
+                progress_callback(progress, f"Fetching GFZ data: {dataset_id}")
 
             try:
                 df = self.client.get_data(dataset_id, start_time, end_time)

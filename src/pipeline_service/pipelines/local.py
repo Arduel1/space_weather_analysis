@@ -1,7 +1,7 @@
 import logging
 import pathlib
 from datetime import datetime
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from pymongo.database import Database
 
@@ -36,6 +36,7 @@ class LocalPipeline(BasePipeline):
         datasets: List[str],
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
+        progress_callback: Optional[Callable[[float, str], None]] = None,
     ) -> None:
         """
         Triggers specific local processors based on the requested dataset ID.
@@ -44,10 +45,17 @@ class LocalPipeline(BasePipeline):
             datasets: List of dataset IDs (e.g., 'silso_sunspot_daily').
             start_time: Ignored for local static files.
             end_time: Ignored for local static files.
+            progress_callback: Optional callback for progress reporting.
         """
         logger.info(f"Running Local Pipeline for datasets: {datasets}")
 
-        for dataset_id in datasets:
+        total_datasets = len(datasets)
+
+        for i, dataset_id in enumerate(datasets):
+            if progress_callback:
+                progress = i / total_datasets
+                progress_callback(progress, f"Processing local file for: {dataset_id}")
+
             try:
                 if dataset_id == "silso_sunspot_daily":
                     file_path = self.base_data_path / "SN_d_tot_V2.0.csv"

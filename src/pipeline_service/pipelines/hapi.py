@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from pymongo.database import Database
 from sunpy.timeseries import GenericTimeSeries
@@ -52,20 +52,21 @@ class HapiPipeline(MongoLoader, BasePipeline):
         start_time: Optional[datetime],
         end_time: Optional[datetime],
         chunk_delta: timedelta = timedelta(days=7),
+        progress_callback: Optional[Callable[[float, str], None]] = None,
     ) -> None:
         """
         Runs the full streaming pipeline for a list of datasets.
 
         This method iterates through the specified time range in chunks
-        to avoid failures on large requests. It checks if data for a chunk
-        already exists before fetching. If start_time and end_time are None,
-        the pipeline attempts to discover the full available time range.
+        to avoid failures on large requests. It updates the progress via
+        the callback if provided.
 
         Args:
             datasets: A list of dataset IDs to fetch.
             start_time: The start time for the data query (or None for auto).
             end_time: The end time for the data query (or None for auto).
             chunk_delta: The duration of each processing chunk. Defaults to 7 days.
+            progress_callback: Optional callback to report progress (0.0 to 1.0) and status message.
         """
         logger.info(f"Starting Generic {self.SOURCE_ID} Pipeline")
 
@@ -73,9 +74,10 @@ class HapiPipeline(MongoLoader, BasePipeline):
             logger.error("Client has no catalog map loaded from DB. Aborting pipeline.")
             return
 
-        logger.info(f"Processing {len(datasets)} datasets...")
+        total_datasets = len(datasets)
+        logger.info(f"Processing {total_datasets} datasets...")
 
-        for dataset_id in datasets:
+        for i, dataset_id in enumerate(datasets):
             # Resolve Time Range Per Dataset
             effective_start, effective_end = self._resolve_time_range(dataset_id, start_time, end_time)
 
@@ -85,9 +87,10 @@ class HapiPipeline(MongoLoader, BasePipeline):
 
             # Generate Chunks
             time_chunks = generate_time_chunks(effective_start, effective_end, chunk_delta)
+            total_chunks = len(time_chunks)
             time_field = "timestamp"
 
-            logger.info(f"Dataset {dataset_id}: Processing range {effective_start} to {effective_end} ({len(time_chunks)} chunks).")
+            logger.info(f"Dataset {dataset_id}: Processing range {effective_start} to {effective_end} ({total_chunks} chunks).")
 
             collection_name = sanitize_collection_name(dataset_id)
             collection = self.db[collection_name]
@@ -98,8 +101,18 @@ class HapiPipeline(MongoLoader, BasePipeline):
                 meta_field="metadata",
             )
 
-            for i, (chunk_start, chunk_stop) in enumerate(time_chunks):
-                logger.info(f"Checking chunk {i + 1}/{len(time_chunks)}: {chunk_start} to {chunk_stop}")
+            for j, (chunk_start, chunk_stop) in enumerate(time_chunks):
+                # Calculate progress: Base progress for completed datasets + progress within current dataset
+                if progress_callback:
+                    dataset_base_progress = i / total_datasets
+                    chunk_progress = j / total_chunks
+                    # Scale chunk progress to fit into the dataset's slice of total progress
+                    current_progress = dataset_base_progress + (chunk_progress / total_datasets)
+
+                    msg = f"Dataset {dataset_id}: Processing chunk {j + 1}/{total_chunks}"
+                    progress_callback(current_progress, msg)
+
+                logger.info(f"Checking chunk {j + 1}/{total_chunks}: {chunk_start} to {chunk_stop}")
 
                 query = {time_field: {"$gte": chunk_start, "$lt": chunk_stop}}
                 exists = collection.find_one(query, {"_id": 1})
