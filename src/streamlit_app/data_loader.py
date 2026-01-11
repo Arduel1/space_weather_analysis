@@ -1,8 +1,9 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
+from bson.objectid import ObjectId
 from pymongo.database import Database
 
 from common.database.connection import DatabaseConnection
@@ -16,6 +17,7 @@ class DataLoader:
 
     This class acts as an abstraction layer between the UI and the database,
     formatting raw MongoDB documents into pandas DataFrames suitable for plotting.
+    It now also handles catalog retrieval and job management for data downloads.
     """
 
     def __init__(self) -> None:
@@ -52,9 +54,10 @@ class DataLoader:
                 not in [
                     "system.views",
                     "system.profile",
-                    "system.buckets"
+                    "system.buckets",
                     "dataset_metadata",
                     "master_catalog",
+                    "jobs",
                 ]
             ]
             return sorted(filtered)
@@ -142,6 +145,83 @@ class DataLoader:
             return {}
 
         try:
-            return self.db["dataset_metadata"].find_one({"_id": dataset_id}) or {}
+            return self.db["dataset_metadata"].find_one({"dataset_id": dataset_id}) or {}
         except Exception:
+            return {}
+
+    def get_master_catalog(self) -> List[Dict[str, Any]]:
+        """
+        Retrieves the entire master catalog to list available datasets.
+
+        Returns:
+            List[Dict[str, Any]]: A list of catalog entries containing dataset IDs and source info.
+        """
+        if self.db is None:
+            return []
+        try:
+            # Return all entries, excluding the internal _id field
+            return list(self.db["master_catalog"].find({}, {"_id": 0}))
+        except Exception as e:
+            logger.error(f"Error fetching master catalog: {e}")
+            return []
+
+    def create_download_job(
+        self,
+        dataset_id: str,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> Optional[str]:
+        """
+        Creates a new download job in the database without specifying the source explicitly.
+
+        The Orchestrator will resolve the correct source based on the dataset_id.
+
+        Args:
+            dataset_id: The specific dataset identifier to download.
+            start_time: The start datetime for the data range.
+            end_time: The end datetime for the data range.
+
+        Returns:
+            Optional[str]: The string representation of the new job ID, or None if failed.
+        """
+        if self.db is None:
+            return None
+
+        job_doc = {
+            # Source ID is deliberately omitted here; determined by pipeline logic.
+            "parameters": {
+                "datasets": [dataset_id],
+                "start_time": start_time,
+                "end_time": end_time,
+            },
+            "status": "PENDING",
+            "created_at": datetime.now(timezone.utc),
+            "progress": 0.0,
+            "message": "Job created",
+        }
+
+        try:
+            result = self.db["jobs"].insert_one(job_doc)
+            return str(result.inserted_id)
+        except Exception as e:
+            logger.error(f"Error creating job: {e}")
+            return None
+
+    def get_job_status(self, job_id: str) -> Dict[str, Any]:
+        """
+        Retrieves the current status of a specific job.
+
+        Args:
+            job_id: The unique identifier of the job (as a string).
+
+        Returns:
+            Dict[str, Any]: The job document including status and any error messages.
+        """
+        if self.db is None:
+            return {}
+
+        try:
+            return self.db["jobs"].find_one({"_id": ObjectId(job_id)}) or {}
+        except Exception as e:
+            logger.error(f"Error fetching job status: {e}")
             return {}

@@ -22,6 +22,7 @@ class PipelineOrchestrator:
     """
 
     JOBS_COLLECTION = "jobs"
+    CATALOG_COLLECTION = "master_catalog"
     POLLING_INTERVAL_SECONDS = 10
     # Define a default directory for data storage relative to the project root
     DATA_BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent / "data"
@@ -109,8 +110,49 @@ class PipelineOrchestrator:
 
         # Atomically find a pending job and set it to running
         return collection.find_one_and_update(
-            {"status": "PENDING"}, {"$set": {"status": "RUNNING", "started_at": datetime.now(timezone.utc)}}, return_document=True
+            {"status": "PENDING"},
+            {
+                "$set": {
+                    "status": "RUNNING",
+                    "started_at": datetime.now(timezone.utc),
+                }
+            },
+            return_document=True,
         )
+
+    def _resolve_source_type(self, datasets: List[str]) -> Optional[str]:
+        """
+        Determines the correct pipeline source type for a given list of datasets.
+
+        It queries the master catalog to find the 'type' field (e.g., 'HAPI', 'FIDO_CDAWEB')
+        associated with the dataset.
+
+        Args:
+            datasets: A list of dataset IDs.
+
+        Returns:
+            The source type string if found, otherwise None.
+        """
+        if not datasets:
+            return None
+
+        # We assume all datasets in a single job belong to the same source.
+        # We take the first one to resolve the source.
+        dataset_id = datasets[0]
+
+        catalog_entry = self.db[self.CATALOG_COLLECTION].find_one({"dataset_id": dataset_id})
+        if not catalog_entry:
+            logger.error(f"Dataset {dataset_id} not found in master catalog.")
+            return None
+
+        sources = catalog_entry.get("sources", [])
+        if not sources:
+            logger.error(f"No sources defined for dataset {dataset_id}.")
+            return None
+
+        # We prefer the first source listed (usually the primary one)
+        # The 'type' field corresponds to the factory keys (e.g. 'HAPI')
+        return sources[0].get("type")
 
     def _process_job(self, job: Dict[str, Any]) -> None:
         """
@@ -120,20 +162,25 @@ class PipelineOrchestrator:
             job (Dict[str, Any]): The job document containing execution details.
         """
         job_id = job.get("_id")
-        source_id = job.get("source_id")
         params = job.get("parameters", {})
+        datasets = params.get("datasets", [])
 
-        logger.info(f"Processing job {job_id} for source {source_id}")
+        # The job might explicitly specify a source_id (legacy), or we resolve it.
+        # 'source_id' in the job context refers to the Pipeline Factory Type.
+        source_type = job.get("source_id")
+
+        if not source_type:
+            logger.info(f"Resolving source type for job {job_id}...")
+            source_type = self._resolve_source_type(datasets)
+
+        logger.info(f"Processing job {job_id} for source type {source_type}")
 
         try:
             # Extract parameters safely
-            datasets = params.get("datasets", [])
-            # Timestamps in MongoDB are usually datetime objects already,
-            # but we ensure they are handled correctly by the pipeline.
             start_time = params.get("start_time")
             end_time = params.get("end_time")
 
-            self._execute_pipeline(source_id, datasets, start_time, end_time)
+            self._execute_pipeline(source_type, datasets, start_time, end_time)
 
             self._update_job_status(job_id, "COMPLETED")
             logger.info(f"Job {job_id} completed successfully.")
@@ -158,7 +205,13 @@ class PipelineOrchestrator:
 
         self.db[self.JOBS_COLLECTION].update_one({"_id": job_id}, {"$set": update_doc})
 
-    def _execute_pipeline(self, source_id: Optional[str], datasets: List[str], start_time: Optional[datetime], end_time: Optional[datetime]) -> None:
+    def _execute_pipeline(
+        self,
+        source_id: Optional[str],
+        datasets: List[str],
+        start_time: Optional[datetime],
+        end_time: Optional[datetime],
+    ) -> None:
         """
         Delegates the execution to a specific pipeline instance.
 
@@ -172,7 +225,7 @@ class PipelineOrchestrator:
             ValueError: If the source_id is missing or not supported.
         """
         if not source_id:
-            raise ValueError("Source ID is required to execute a pipeline.")
+            raise ValueError("Source Type could not be resolved or is missing.")
 
         pipeline = self.pipeline_factory.get_pipeline(source_id)
         pipeline.run(datasets, start_time, end_time)
