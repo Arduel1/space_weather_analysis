@@ -1,7 +1,7 @@
 import json
 import logging
 import pathlib
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from pymongo import ReplaceOne
 from pymongo import errors as pymongo_errors
@@ -22,6 +22,7 @@ class CatalogLoader:
     """
 
     COLLECTION_NAME = "master_catalog"
+    METADATA_COLLECTION_NAME = "dataset_metadata"
     DEFAULT_BATCH_SIZE = 1000
 
     def __init__(self, db: Database, file_path: pathlib.Path):
@@ -68,10 +69,12 @@ class CatalogLoader:
         """
         Upserts catalog entries into the MongoDB collection.
         """
-        logger.info("--- Loading Catalog to MongoDB ---")
+        logger.info(f"--- Loading Catalog Cache from {self.file_path} to MongoDB ---")
         items = self._load_json()
         if not items:
+            logger.warning("Catalog file is empty or missing. Starting with empty DB.")
             return
+        logger.info(f"Found {len(items)} datasets in catalog file.")
 
         collection = self.db[self.COLLECTION_NAME]
 
@@ -105,3 +108,64 @@ class CatalogLoader:
             logger.error(f"DB Load failed: {e}", exc_info=True)
 
         logger.info("--- Catalog Load Finished ---")
+
+    def upsert_dataset(self, dataset_id: str, sources: List[CatalogEntryDict]) -> None:
+        """
+        Upserts a single dataset entry into MongoDB.
+        """
+        collection = self.db[self.COLLECTION_NAME]
+
+        # Sort sources to ensure deterministic storage
+        sorted_sources = sorted(sources, key=self._get_sortable_key)
+
+        item = {"dataset_id": dataset_id, "sources": sorted_sources}
+
+        try:
+            result = collection.replace_one({"dataset_id": dataset_id}, item, upsert=True)
+            action = "Created" if result.upserted_id else "Updated"
+            logger.info(f"DB {action}: {dataset_id} (Sources: {len(sorted_sources)})")
+        except Exception as e:
+            logger.error(f"Failed to upsert dataset {dataset_id}: {e}")
+
+    def delete_dataset(self, dataset_id: str) -> None:
+        """
+        Deletes a dataset from the MongoDB collection.
+        """
+        collection = self.db[self.COLLECTION_NAME]
+        try:
+            result = collection.delete_one({"dataset_id": dataset_id})
+            if result.deleted_count > 0:
+                logger.info(f"DB Deleted: {dataset_id}")
+            else:
+                logger.info(f"DB Delete skipped (not found): {dataset_id}")
+        except Exception as e:
+            logger.error(f"Failed to delete dataset {dataset_id}: {e}")
+
+    def upsert_metadata(self, dataset_id: str, metadata: Dict[str, Any]) -> None:
+        """
+        Upserts metadata for a dataset into the metadata collection.
+        """
+        collection = self.db[self.METADATA_COLLECTION_NAME]
+        item = {"dataset_id": dataset_id, "metadata": metadata}
+
+        try:
+            # replace_one checks for changes if the document exists
+            result = collection.replace_one({"dataset_id": dataset_id}, item, upsert=True)
+            if result.upserted_id:
+                logger.info(f"Metadata Created: {dataset_id}")
+            elif result.modified_count > 0:
+                logger.info(f"Metadata Updated: {dataset_id}")
+        except Exception as e:
+            logger.error(f"Failed to upsert metadata for {dataset_id}: {e}")
+
+    def delete_metadata(self, dataset_id: str) -> None:
+        """
+        Deletes metadata for a dataset.
+        """
+        collection = self.db[self.METADATA_COLLECTION_NAME]
+        try:
+            result = collection.delete_one({"dataset_id": dataset_id})
+            if result.deleted_count > 0:
+                logger.info(f"Metadata Deleted: {dataset_id}")
+        except Exception as e:
+            logger.error(f"Failed to delete metadata for {dataset_id}: {e}")

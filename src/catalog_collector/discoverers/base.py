@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import Generator
+from typing import Any, Dict, Generator, Optional, Tuple
 
-from src.common.util.types import DiscoveryYield
+from src.common.util.types import CatalogEntryDict
 
 
 class AbstractDiscoverer(ABC):
@@ -13,7 +13,7 @@ class AbstractDiscoverer(ABC):
     """
 
     @abstractmethod
-    def discover(self) -> Generator[DiscoveryYield, None, None]:
+    def discover(self) -> Generator[Tuple[str, CatalogEntryDict, Optional[Dict[str, Any]]], None, None]:
         """
         Runs the discovery process for the specific source.
 
@@ -21,7 +21,6 @@ class AbstractDiscoverer(ABC):
         to minimize memory usage.
 
         Yields:
-            Generator[DiscoveryYield, None, None]: A generator of
-            (dataset_id, catalog_entry) tuples.
+            Generator: A generator of (dataset_id, catalog_entry, metadata) tuples.
         """
         pass

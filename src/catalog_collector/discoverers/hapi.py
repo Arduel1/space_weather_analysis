@@ -1,10 +1,10 @@
 import logging
 import pathlib
-from typing import Any, Dict, Generator, List
+from typing import Any, Dict, Generator, List, Tuple
 
 from src.catalog_collector.discoverers.base import AbstractDiscoverer
 from src.common.clients.hapi import HapiClient
-from src.common.util.types import CatalogEntryDict, DiscoveryYield
+from src.common.util.types import CatalogEntryDict
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,11 @@ class HapiDiscoverer(AbstractDiscoverer):
             server_urls.append(url)
         return server_urls
 
-    def _get_entry_for_dataset(self, server_url: str, dataset: Dict[str, Any]) -> Generator[DiscoveryYield, None, None]:
+    def _get_entry_for_dataset(
+        self,
+        server_url: str,
+        dataset: Dict[str, Any],
+    ) -> Generator[Tuple[str, CatalogEntryDict, Dict[str, Any]], None, None]:
         """
         Retrieves the metadata for a single dataset and yields it
         as a catalog entry tuple.
@@ -73,27 +77,31 @@ class HapiDiscoverer(AbstractDiscoverer):
             server_url (str): The URL of the server to query.
             dataset (Dict[str, Any]): The dataset dictionary from the catalog.
 
-        Yields:
-            Generator[DiscoveryYield, None, None]:
-            A generator yielding a single (dataset_id, entry) tuple.
+        Yields: A generator yielding a single (dataset_id, entry, metadata) tuple.
         """
         dataset_id = dataset.get("id")
         if not dataset_id:
             return
 
-        # Try to get metadata from the catalog entry first (optimization)
+        # Try to get basic info from the catalog entry first
         start_date = dataset.get("startDate")
         stop_date = dataset.get("stopDate")
+        info_meta = {}
 
+        # Fetch metadata from server (/info endpoint)
+        # This provides the description and other details needed for the metadata collection.
+        try:
+            info_meta = self.client.fetch_dataset_metadata_from_server(dataset_id, server_url) or {}
+        except Exception:
+            logger.warning(f"Could not fetch metadata for {dataset_id} from {server_url}")
+
+        # If dates were missing in catalog, try to fill them from info_meta
         if start_date and stop_date:
             logger.info(f"Using metadata from catalog list for '{dataset_id}'.")
-        else:
-            logger.info(f"Metadata missing in catalog for '{dataset_id}'. Requesting /info endpoint...")
-            # Use the client to fetch metadata directly from the server (/info endpoint)
-            info_meta = self.client.fetch_dataset_metadata_from_server(dataset_id, server_url)
-            if info_meta:
-                start_date = info_meta.get("startDate")
-                stop_date = info_meta.get("stopDate")
+        elif info_meta:
+            logger.info(f"Metadata missing in catalog for '{dataset_id}'. Using /info result.")
+            start_date = info_meta.get("startDate")
+            stop_date = info_meta.get("stopDate")
 
         if start_date and stop_date:
             new_entry: CatalogEntryDict = {
@@ -105,11 +113,11 @@ class HapiDiscoverer(AbstractDiscoverer):
                 },
             }
             logger.info(f"Successfully captured metadata for '{dataset_id}': {start_date} -> {stop_date}")
-            yield dataset_id, new_entry
+            yield dataset_id, new_entry, info_meta
         else:
             logger.warning(f"Dataset {dataset_id} on {server_url} has no time range. Skipping.")
 
-    def _discover_datasets_for_server(self, server_url: str) -> Generator[DiscoveryYield, None, None]:
+    def _discover_datasets_for_server(self, server_url: str) -> Generator[Tuple[str, CatalogEntryDict, Dict[str, Any]], None, None]:
         """
         Retrieves the full dataset catalog from a single server.
 
@@ -117,8 +125,7 @@ class HapiDiscoverer(AbstractDiscoverer):
             server_url (str): The URL of the server to query.
 
         Yields:
-            Generator[DiscoveryYield, None, None]:
-            A generator of catalog entries from this server.
+            Generator of catalog entries from this server.
         """
         try:
             catalog = self.client.fetch_server_catalog(server_url)
@@ -143,7 +150,7 @@ class HapiDiscoverer(AbstractDiscoverer):
                 next_id = catalog[index].get("id", "Unknown")
                 logger.info(f"Finished '{dataset_id}'. Next up: '{next_id}'")
 
-    def discover(self) -> Generator[DiscoveryYield, None, None]:
+    def discover(self) -> Generator[Tuple[str, CatalogEntryDict, Dict[str, Any]], None, None]:
         """
         Implements the discovery process for HAPI sources.
 

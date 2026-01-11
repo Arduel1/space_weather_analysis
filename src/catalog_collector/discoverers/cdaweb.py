@@ -1,9 +1,9 @@
 import logging
-from typing import Generator
+from typing import Any, Dict, Generator, Optional, Tuple
 
 from src.catalog_collector.discoverers.base import AbstractDiscoverer
 from src.common.clients.cdaweb import CdawebClient
-from src.common.util.types import DiscoveryYield
+from src.common.util.types import CatalogEntryDict
 
 logger = logging.getLogger(__name__)
 
@@ -22,16 +22,15 @@ class CdawebDiscoverer(AbstractDiscoverer):
         """
         self.client = CdawebClient()
 
-    def _discover_datasets_for_group(self, group_name: str) -> Generator[DiscoveryYield, None, None]:
+    def _discover_datasets_for_group(self, group_name: str) -> Generator[Tuple[str, CatalogEntryDict, Optional[Dict[str, Any]]], None, None]:
         """
         Retrieves and iterates over all datasets for a single group.
 
         Args:
             group_name (str): The name of the group to query.
 
-        Yields:
-            Generator[DiscoveryYield, None, None]:
-            A generator yielding catalog entries for the group.
+        Yields: 
+            A generator yielding (dataset_id, entry, metadata) for the group.
         """
         logger.info(f"Getting datasets for group: {group_name}")
         try:
@@ -44,7 +43,8 @@ class CdawebDiscoverer(AbstractDiscoverer):
                 # Use the client's helper to parse the raw row into a standardized entry
                 entry = self.client.parse_dataset_row(dataset_row, group_name)
                 if entry:
-                    yield str(entry["dataset_id"]), entry
+                    # Metadata retrieval for CDAWeb is handled in the Data Pipeline or separate process
+                    yield str(entry["dataset_id"]), entry, None
 
         except Exception as e:
             logger.error(
@@ -52,7 +52,7 @@ class CdawebDiscoverer(AbstractDiscoverer):
                 exc_info=True,
             )
 
-    def discover(self) -> Generator[DiscoveryYield, None, None]:
+    def discover(self) -> Generator[Tuple[str, CatalogEntryDict, Optional[Dict[str, Any]]], None, None]:
         """
         Implements the discovery process for data sources.
 

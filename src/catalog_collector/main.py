@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # Service-specific constants defining file system paths
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
-CATALOG_FILE = DATA_DIR / "master_catalog.json"
+CATALOG_FILE = DATA_DIR / "config" / "master_catalog.json"
 HAPI_SERVER_LIST_FILE = DATA_DIR / "hapi_config" / "all.txt"
 
 
@@ -50,14 +50,13 @@ def main() -> None:
 
         discoverers: List[AbstractDiscoverer] = [hapi_discoverer, fido_discoverer]
 
+        # Initialize Loader first
+        loader = CatalogLoader(db=db, file_path=CATALOG_FILE)
+
         # Aggregate findings from all discoverers into a master JSON file
         logger.info(f"Targeting output file: {CATALOG_FILE}")
-        builder = CatalogBuilder(discoverers=discoverers, catalog_output_path=CATALOG_FILE)
+        builder = CatalogBuilder(discoverers=discoverers, catalog_output_path=CATALOG_FILE, loader=loader)
         builder.build_catalog()
-
-        # Synchronize the local catalog file with the MongoDB collection
-        loader = CatalogLoader(db=db, file_path=CATALOG_FILE)
-        loader.load_to_db()
 
     except Exception as e:
         logger.critical(f"Catalog Collector execution failed: {e}", exc_info=True)
