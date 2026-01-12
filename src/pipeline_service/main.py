@@ -3,9 +3,9 @@ import sys
 from datetime import datetime, timezone
 from typing import Any, Dict
 
+from src.pipeline_service.orchestrator import PipelineOrchestrator
 from src.space_weather_analysis.database.connection import DatabaseConnection
 from src.space_weather_analysis.logging.config import setup_logging
-from src.pipeline_service.orchestrator import PipelineOrchestrator
 
 logger = logging.getLogger(__name__)
 

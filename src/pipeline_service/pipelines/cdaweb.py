@@ -10,8 +10,6 @@ import xarray as xr
 from pymongo.database import Database
 from sunpy.timeseries.timeseriesbase import GenericTimeSeries
 
-from space_weather_analysis.clients.cdaweb import CdawebClient
-from space_weather_analysis.util.netcdf_utils import parse_xarray_timestamp
 from pipeline_service.database.mongo_loader import MongoLoader
 from pipeline_service.metadata.generator import MetadataWriter
 from pipeline_service.metadata.models import VariableMetadata
@@ -19,6 +17,8 @@ from pipeline_service.parsing.file_parser import parse_datafiles
 from pipeline_service.pipelines.base import BasePipeline
 from pipeline_service.util.naming import sanitize_collection_name
 from pipeline_service.util.time import generate_time_chunks
+from space_weather_analysis.clients.cdaweb import CdawebClient
+from space_weather_analysis.util.netcdf_utils import parse_xarray_timestamp
 
 logger = logging.getLogger(__name__)
 

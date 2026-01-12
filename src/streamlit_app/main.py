@@ -180,7 +180,6 @@ elif app_mode == "Cycle Correlation Analysis":
     and the **SOHO/LASCO CME Catalog** (representing impulsive solar events) to visualize relationships.
     """
     )
-    # (Existing correlation code remains unchanged)
     target_sunspot = "silso_sunspot_daily"
     target_cme = "cme_catalog"
     target_xray = "goesp_xray_flux_P1M"

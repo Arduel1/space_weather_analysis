@@ -50,15 +50,8 @@ class DataLoader:
             filtered = [
                 c
                 for c in collections
-                if c
-                not in [
-                    "system.views",
-                    "system.profile",
-                    "system.buckets",
-                    "dataset_metadata",
-                    "master_catalog",
-                    "jobs",
-                ]
+                if not c.startswith("system.")
+                and c not in ["dataset_metadata", "master_catalog", "jobs"]
             ]
             return sorted(filtered)
         except Exception as e:

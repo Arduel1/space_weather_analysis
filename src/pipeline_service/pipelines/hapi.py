@@ -5,9 +5,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from pymongo.database import Database
 from sunpy.timeseries import GenericTimeSeries
 
-from space_weather_analysis.clients.hapi import HapiClient
-from space_weather_analysis.util.error_handling import log_and_handle_unexpected_failure
-from space_weather_analysis.util.time_utils import parse_iso_time
 from pipeline_service.database.mongo_loader import MongoLoader
 from pipeline_service.metadata.generator import MetadataWriter
 from pipeline_service.metadata.models import VariableMetadata
@@ -16,6 +13,9 @@ from pipeline_service.pipelines.base import BasePipeline
 from pipeline_service.util.documents import dataframe_to_documents
 from pipeline_service.util.naming import sanitize_collection_name
 from pipeline_service.util.time import generate_time_chunks
+from space_weather_analysis.clients.hapi import HapiClient
+from space_weather_analysis.util.error_handling import log_and_handle_unexpected_failure
+from space_weather_analysis.util.time_utils import parse_iso_time
 
 logger = logging.getLogger(__name__)
 
