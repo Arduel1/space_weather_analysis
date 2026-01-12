@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
-from streamlit_app.util.solar_cycles import calculate_cycle_boundaries
+from streamlit_app.util.solar_cycles import calculate_cycle_boundaries, get_significant_events
 
 
 def plot_solar_cycle_correlation(cme_df: pd.DataFrame, sunspot_df: pd.DataFrame) -> None:
@@ -109,6 +109,7 @@ def plot_solar_cycle_correlation(cme_df: pd.DataFrame, sunspot_df: pd.DataFrame)
         )
 
     cycle_boundaries = calculate_cycle_boundaries(num_cycles=30)
+    significant_events = get_significant_events()
 
     # Calculate dynamic axis range for exponents
     min_log = np.floor(cme_plot["log_energy"].min())
@@ -140,6 +141,20 @@ def plot_solar_cycle_correlation(cme_df: pd.DataFrame, sunspot_df: pd.DataFrame)
                 line_color="rgba(128, 128, 128, 0.5)",
                 annotation_text="Cycle",
                 annotation_position="bottom right",
+            )
+
+    for event in significant_events:
+        if data_min_date <= event <= data_max_date:
+            # Convert datetime to ms timestamp for Plotly shape compatibility
+            event_ms = pd.Timestamp(event).timestamp() * 1000
+
+            fig.add_vline(
+                x=event_ms,
+                line_width=1.5,
+                line_dash="dot",
+                line_color="green",
+                annotation_text="Event",
+                annotation_position="top right",
             )
 
     # Configure Left Y-Axis (CME Energy)

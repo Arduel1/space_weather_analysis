@@ -2,7 +2,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from streamlit_app.util.solar_cycles import calculate_cycle_boundaries
+from streamlit_app.util.solar_cycles import calculate_cycle_boundaries, get_significant_events
 
 
 def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
@@ -71,6 +71,7 @@ def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
 
     # Add Cycle Markers based on theoretical minima
     cycle_boundaries = calculate_cycle_boundaries(num_cycles=30)
+    significant_events = get_significant_events()
     shapes = []
     data_min_date = df.index.min()
     data_max_date = df.index.max()
@@ -87,6 +88,21 @@ def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
                     xref="x",
                     yref="paper",
                     line=dict(color="blue", width=1, dash="dash"),
+                )
+            )
+
+    for event in significant_events:
+        if data_min_date <= event <= data_max_date:
+            shapes.append(
+                dict(
+                    type="line",
+                    x0=event,
+                    y0=0,
+                    x1=event,
+                    y1=1,
+                    xref="x",
+                    yref="paper",
+                    line=dict(color="green", width=1.5, dash="dot"),
                 )
             )
 

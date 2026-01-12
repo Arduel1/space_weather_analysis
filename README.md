@@ -12,6 +12,15 @@ The core components of this project are:
 2. Exploratory Data Analysis (EDA) to investigate known physical relationships, such as the 11-year solar cycle and the in-situ signatures of Coronal Mass Ejections (CMEs).
 3. A predictive model to forecast geomagnetic activity (using the Kp-Index) based on real-time solar wind data.
 
+
+TODO:
+1. Fester Datensatz
+2. CDAWeb Schnittstelle
+3. Nutzung von Sunpy
+4. Sonnenzyklen zu Sonnenflecken
+5. Zyklus zu CMEs
+6. Als .exe bereitstellen
+
 ---
 
 ### Project Structure
