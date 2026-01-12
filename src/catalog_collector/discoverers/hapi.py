@@ -3,8 +3,8 @@ import pathlib
 from typing import Any, Dict, Generator, List, Tuple
 
 from src.catalog_collector.discoverers.base import AbstractDiscoverer
-from src.common.clients.hapi import HapiClient
-from src.common.util.types import CatalogEntryDict
+from src.space_weather_analysis.clients.hapi import HapiClient
+from src.space_weather_analysis.util.types import CatalogEntryDict
 
 logger = logging.getLogger(__name__)
 

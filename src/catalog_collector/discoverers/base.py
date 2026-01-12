@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Generator, Optional, Tuple
 
-from src.common.util.types import CatalogEntryDict
+from src.space_weather_analysis.util.types import CatalogEntryDict
 
 
 class AbstractDiscoverer(ABC):

@@ -9,8 +9,8 @@ from src.catalog_collector.discoverers.cdaweb import CdawebDiscoverer
 from src.catalog_collector.discoverers.gfz import GfzDiscoverer
 from src.catalog_collector.discoverers.hapi import HapiDiscoverer
 from src.catalog_collector.loader import CatalogLoader
-from src.common.database.connection import DatabaseConnection
-from src.common.logging.config import setup_logging
+from src.space_weather_analysis.database.connection import DatabaseConnection
+from src.space_weather_analysis.logging.config import setup_logging
 
 # Setup logging configuration for the service
 setup_logging(service_name="CatalogCollector")

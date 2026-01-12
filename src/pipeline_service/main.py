@@ -3,8 +3,8 @@ import sys
 from datetime import datetime, timezone
 from typing import Any, Dict
 
-from src.common.database.connection import DatabaseConnection
-from src.common.logging.config import setup_logging
+from src.space_weather_analysis.database.connection import DatabaseConnection
+from src.space_weather_analysis.logging.config import setup_logging
 from src.pipeline_service.orchestrator import PipelineOrchestrator
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ def main() -> None:
     # Configuration for HAPI Data Ingestion
     hapi_manual_config: Dict[str, Any] = {
         "start_time": datetime(2025, 10, 1, 0, 0, 0, tzinfo=timezone.utc),
-        "end_time": datetime(2025, 11, 26, 0, 0, 0, tzinfo=timezone.utc),
+        "end_time": datetime(2026, 1, 12, 0, 0, 0, tzinfo=timezone.utc),
         "datasets": [
             "goesp_xray_flux_P1M",  # 1-minute X-Ray Flux
             "goesp_part_flux_P5M",  # 5-minute Particle Flux
@@ -59,7 +59,7 @@ def main() -> None:
     # Configuration for GFZ Data Ingestion
     gfz_manual_config: Dict[str, Any] = {
         "start_time": datetime(2020, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
-        "end_time": datetime(2025, 11, 26, 0, 0, 0, tzinfo=timezone.utc),
+        "end_time": datetime(2026, 1, 12, 0, 0, 0, tzinfo=timezone.utc),
         "datasets": ["Kp"],
     }
 

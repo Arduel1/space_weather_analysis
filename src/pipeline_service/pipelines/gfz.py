@@ -3,11 +3,9 @@ import pathlib
 from datetime import datetime
 from typing import Callable, List, Optional
 
-from pymongo import ReplaceOne
 from pymongo.database import Database
-from pymongo.errors import BulkWriteError
 
-from src.common.clients.gfz import GfzClient
+from src.space_weather_analysis.clients.gfz import GfzClient
 from src.pipeline_service.database.mongo_loader import MongoLoader
 from src.pipeline_service.pipelines.base import BasePipeline
 from src.pipeline_service.util.documents import dataframe_to_documents
@@ -79,15 +77,7 @@ class GfzPipeline(MongoLoader, BasePipeline):
                 documents = dataframe_to_documents(df, f"GFZ_POTSDAM/{dataset_id}")
 
                 if documents:
-                    ops = [ReplaceOne({"timestamp": doc["timestamp"]}, doc, upsert=True) for doc in documents]
-                    try:
-                        result = self.db[collection_name].bulk_write(ops)
-                        logger.info(
-                            f"Processed {len(documents)} documents for {collection_name}. "
-                            f"Upserted: {result.upserted_count}, Modified: {result.modified_count}, Matched: {result.matched_count}"
-                        )
-                    except BulkWriteError as bwe:
-                        logger.error(f"Bulk write error in GFZ pipeline: {bwe.details}")
+                    self._load_data(collection_name, documents)
 
             except Exception as e:
                 logger.error(f"Failed to process {dataset_id}: {e}", exc_info=True)

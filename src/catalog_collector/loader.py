@@ -7,7 +7,7 @@ from pymongo import ReplaceOne
 from pymongo import errors as pymongo_errors
 from pymongo.database import Database
 
-from src.common.util.types import CatalogEntryDict, MasterCatalogItem
+from src.space_weather_analysis.util.types import CatalogEntryDict, MasterCatalogItem
 
 logger = logging.getLogger(__name__)
 

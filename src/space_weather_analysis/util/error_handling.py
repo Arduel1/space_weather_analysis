@@ -18,9 +18,6 @@ class SpaceWeatherError(Exception):
 class DataRetrievalError(SpaceWeatherError):
     """
     Raised when data cannot be retrieved from any available source.
-
-    This exception indicates that all fallback mechanisms have been exhausted
-    and the requested data is unavailable.
     """
 
     pass
@@ -29,9 +26,6 @@ class DataRetrievalError(SpaceWeatherError):
 class DataProcessingError(SpaceWeatherError):
     """
     Raised when data processing fails after successful retrieval.
-
-    This exception indicates an issue with data transformation, validation,
-    or storage rather than retrieval.
     """
 
     pass
@@ -40,21 +34,21 @@ class DataProcessingError(SpaceWeatherError):
 class CatalogError(SpaceWeatherError):
     """
     Raised when catalog operations fail.
-
-    This exception indicates issues with catalog discovery, building,
-    or querying operations.
     """
 
     pass
 
 
-def log_and_handle_expected_failure(operation_name: str, context: str, error: Exception, logger_instance: logging.Logger) -> None:
+def log_and_handle_expected_failure(
+    operation_name: str,
+    context: str,
+    error: Exception,
+    logger_instance: logging.Logger,
+) -> None:
     """
-    Logs an expected operational failure at the appropriate level.
+    Logs an expected operational failure at the INFO/WARNING level.
 
-    Expected failures are normal operational conditions such as server
-    timeouts during fallback attempts or missing optional data sources.
-    These are logged at INFO or WARNING level depending on context.
+    Used for non-critical failures like server timeouts during fallback attempts.
 
     Args:
         operation_name: Name of the operation that failed.
@@ -65,12 +59,14 @@ def log_and_handle_expected_failure(operation_name: str, context: str, error: Ex
     logger_instance.info(f"{operation_name} failed as expected during {context}: {error}")
 
 
-def log_and_handle_unexpected_failure(operation_name: str, context: str, error: Exception, logger_instance: logging.Logger) -> None:
+def log_and_handle_unexpected_failure(
+    operation_name: str,
+    context: str,
+    error: Exception,
+    logger_instance: logging.Logger,
+) -> None:
     """
     Logs an unexpected failure at ERROR level with full stack trace.
-
-    Unexpected failures indicate genuine errors that require investigation,
-    such as programming errors, data corruption, or infrastructure failures.
 
     Args:
         operation_name: Name of the operation that failed.
@@ -78,7 +74,10 @@ def log_and_handle_unexpected_failure(operation_name: str, context: str, error: 
         error: The exception that occurred.
         logger_instance: Logger instance to use for output.
     """
-    logger_instance.error(f"{operation_name} failed unexpectedly during {context}: {error}", exc_info=True)
+    logger_instance.error(
+        f"{operation_name} failed unexpectedly during {context}: {error}",
+        exc_info=True,
+    )
 
 
 def safe_execute_with_fallback(
@@ -89,10 +88,6 @@ def safe_execute_with_fallback(
 ) -> Optional[T]:
     """
     Executes an operation with optional fallback handling.
-
-    This function provides a standardized pattern for operations that may
-    have fallback alternatives. It distinguishes between expected failures
-    during primary operations and genuine errors.
 
     Args:
         primary_operation: The primary operation to attempt.
@@ -106,17 +101,19 @@ def safe_execute_with_fallback(
     try:
         return primary_operation()
     except Exception as primary_error:
-        # No fallback available
         if fallback_operation is None:
-            log_and_handle_unexpected_failure(operation_name, "execution (no fallback available)", primary_error, logger_instance)
+            log_and_handle_unexpected_failure(
+                operation_name,
+                "execution (no fallback available)",
+                primary_error,
+                logger_instance,
+            )
             return None
 
-        # Primary error is "expected".
         log_and_handle_expected_failure(operation_name, "primary attempt", primary_error, logger_instance)
 
         try:
             return fallback_operation()
         except Exception as fallback_error:
-            # Fallback failed
             log_and_handle_unexpected_failure(operation_name, "fallback attempt", fallback_error, logger_instance)
             return None

@@ -6,7 +6,7 @@ import pandas as pd
 from bson.objectid import ObjectId
 from pymongo.database import Database
 
-from common.database.connection import DatabaseConnection
+from space_weather_analysis.database.connection import DatabaseConnection
 
 logger = logging.getLogger(__name__)
 

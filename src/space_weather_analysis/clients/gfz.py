@@ -7,7 +7,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from common.clients.base import BaseClient
+from space_weather_analysis.clients.base import BaseClient
 
 logger = logging.getLogger(__name__)
 
