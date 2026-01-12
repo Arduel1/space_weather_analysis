@@ -5,11 +5,11 @@ from typing import Callable, List, Optional
 
 from pymongo.database import Database
 
-from src.space_weather_analysis.clients.gfz import GfzClient
 from src.pipeline_service.database.mongo_loader import MongoLoader
 from src.pipeline_service.pipelines.base import BasePipeline
 from src.pipeline_service.util.documents import dataframe_to_documents
 from src.pipeline_service.util.naming import sanitize_collection_name
+from src.space_weather_analysis.clients.gfz import GfzClient
 
 logger = logging.getLogger(__name__)
 
