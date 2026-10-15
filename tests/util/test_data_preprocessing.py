@@ -1,11 +1,9 @@
 from datetime import datetime, timedelta, timezone
 from typing import List
 
-from space_weather_analysis.util.data_preprocessing import (
-    batch_generator,
-    generate_time_chunks,
-    sanitize_collection_name,
-)
+from pipeline_service.util.batching import batch_generator
+from pipeline_service.util.naming import sanitize_collection_name
+from pipeline_service.util.time import generate_time_chunks
 
 # --- Tests for batch_generator ---
 

@@ -206,6 +206,8 @@ poetry run ruff format src
 poetry run mypy src
 ```
 
+`pytest` runs the unit tests; tests marked `integration` need a running MongoDB and are run with `poetry run pytest -m integration`.
+
 Jupyter notebooks for exploratory analysis live in `notebooks/` and can be run with `poetry run jupyter lab`.
 
 Tools started outside Docker, such as the notebooks, need `MONGO_HOST=localhost` (and the published port as `MONGO_PORT` if it was changed).

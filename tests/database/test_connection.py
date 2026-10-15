@@ -8,6 +8,8 @@ from pymongo.database import Database
 from space_weather_analysis.database.connection import DatabaseConnection
 
 
+# Needs a running MongoDB reachable with the credentials from .env
+@pytest.mark.integration
 class TestDatabaseConnection:
     @pytest.fixture(autouse=True)
     def reset_singleton(self) -> Generator[None, None, None]:

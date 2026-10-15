@@ -44,6 +44,11 @@ types-requests = "^2.32.4.20250913"
 pythonpath = "src"
 addopts = [
     "--import-mode=importlib",
+    "--strict-markers",
+    "-m", "not integration",
+]
+markers = [
+    "integration: tests that need a running MongoDB",
 ]
 
 [build-system]
