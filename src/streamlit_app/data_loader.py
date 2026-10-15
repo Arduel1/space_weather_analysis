@@ -47,12 +47,7 @@ class DataLoader:
         try:
             collections = self.db.list_collection_names()
             # Exclude system and metadata collections to keep the UI clean
-            filtered = [
-                c
-                for c in collections
-                if not c.startswith("system.")
-                and c not in ["dataset_metadata", "master_catalog", "jobs"]
-            ]
+            filtered = [c for c in collections if not c.startswith("system.") and c not in ["dataset_metadata", "master_catalog", "jobs"]]
             return sorted(filtered)
         except Exception as e:
             logger.error(f"Error fetching collections: {e}")

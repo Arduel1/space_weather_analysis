@@ -29,7 +29,7 @@ class CdawebDiscoverer(AbstractDiscoverer):
         Args:
             group_name (str): The name of the group to query.
 
-        Yields: 
+        Yields:
             A generator yielding (dataset_id, entry, metadata) for the group.
         """
         logger.info(f"Getting datasets for group: {group_name}")

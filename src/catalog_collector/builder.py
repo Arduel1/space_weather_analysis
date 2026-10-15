@@ -191,9 +191,7 @@ class CatalogBuilder:
 
             # Keep only sources that were found in this run
             kept_sources = [
-                s for s in sources
-                if s.get("source_id") and s.get("type") and
-                (dataset_id, s["source_id"], s["type"]) in found_signatures
+                s for s in sources if s.get("source_id") and s.get("type") and (dataset_id, s["source_id"], s["type"]) in found_signatures
             ]
 
             if not kept_sources:

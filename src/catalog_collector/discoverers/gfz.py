@@ -16,7 +16,7 @@ class GfzDiscoverer(AbstractDiscoverer):
     and exposes them as catalog entries for the system.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initializes the discoverer with a GFZ client instance."""
         self.client = GfzClient()
 

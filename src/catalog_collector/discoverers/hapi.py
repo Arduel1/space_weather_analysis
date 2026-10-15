@@ -86,7 +86,7 @@ class HapiDiscoverer(AbstractDiscoverer):
         # Try to get basic info from the catalog entry first
         start_date = dataset.get("startDate")
         stop_date = dataset.get("stopDate")
-        info_meta = {}
+        info_meta: Dict[str, Any] = {}
 
         # Fetch metadata from server (/info endpoint)
         # This provides the description and other details needed for the metadata collection.

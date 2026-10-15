@@ -30,7 +30,7 @@ def plot_kp_index(df: pd.DataFrame) -> None:
     # 8: G4 Severe (Dark Red)
     # 9: G5 Extreme (Purple/Black equivalent or vivid Red)
 
-    def get_color(kp_value):
+    def get_color(kp_value: float) -> str:
         if kp_value < 5:
             return "#2ECC71"  # Green
         elif kp_value < 6:

@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, Mapping, Sequence
 
 
 class BaseClient(ABC):
@@ -12,14 +12,14 @@ class BaseClient(ABC):
     """
 
     @abstractmethod
-    def get_catalog_entries(self) -> List[Dict[str, Any]]:
+    def get_catalog_entries(self) -> Sequence[Mapping[str, Any]]:
         """
         Retrieves a list of available datasets or groups from the provider.
 
         This is primarily used by the Catalog Service for discovery.
 
         Returns:
-            List[Dict[str, Any]]: A list of raw dataset entries or groups.
+            Sequence[Mapping[str, Any]]: A list of raw dataset entries or groups.
         """
         pass
 

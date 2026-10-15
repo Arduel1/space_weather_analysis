@@ -1,3 +1,5 @@
+from typing import Optional
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -9,7 +11,7 @@ def plot_xray_flux(
     df: pd.DataFrame,
     collection_name: str,
     key_suffix: str = "",
-    kp_df: pd.DataFrame = None,
+    kp_df: Optional[pd.DataFrame] = None,
 ) -> None:
     """
     Visualizes GOES X-Ray flux data with classification backgrounds.

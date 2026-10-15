@@ -330,7 +330,7 @@ def _is_datetime_type(da: xr.DataArray) -> bool:
     return dtype is not None and dtype.kind == "M"
 
 
-def _evaluate_variable_confidence(name: str, da: Any, attributes: Optional[Dict[str, Any]] = None) -> int:
+def _evaluate_variable_confidence(name: str, da: Any, attributes: Optional[Dict[str, Any]] = None) -> TimeConfidence:
     """
     Determines the likelihood of a variable being the time axis based on rules.
 
@@ -340,7 +340,7 @@ def _evaluate_variable_confidence(name: str, da: Any, attributes: Optional[Dict[
         attributes (Optional[Dict]): Attributes override (useful for NetCDF backend vars).
 
     Returns:
-        int: TimeConfidence integer level.
+        TimeConfidence: The confidence level.
     """
     if attributes is None:
         attributes = getattr(da, "attrs", {}) or {}

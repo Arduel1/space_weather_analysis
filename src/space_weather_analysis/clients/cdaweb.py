@@ -14,6 +14,7 @@ from sunpy.net.fido_factory import UnifiedResponse
 
 from space_weather_analysis.clients.base import BaseClient
 from space_weather_analysis.util.resilience import retry_interaction
+from space_weather_analysis.util.types import CatalogEntryDict
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,7 @@ class CdawebClient(BaseClient):
             )
             return None
 
-    def parse_dataset_row(self, row: Union[Row, Dict[str, Any]], group_name: str) -> Optional[Dict[str, Any]]:
+    def parse_dataset_row(self, row: Union[Row, Dict[str, Any]], group_name: str) -> Optional[CatalogEntryDict]:
         """
         Parses a raw dataset row from SunPy into a standardized catalog entry.
 

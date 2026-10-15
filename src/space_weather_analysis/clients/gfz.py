@@ -8,6 +8,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from space_weather_analysis.clients.base import BaseClient
+from space_weather_analysis.util.types import CatalogEntryDict
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ class GfzClient(BaseClient):
     BASE_URL = "https://kp.gfz-potsdam.de/app/json/"
     SOURCE_TYPE = "GFZ_POTSDAM"
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initializes the client with a resilient session strategy."""
         self.session = requests.Session()
         # Configure retry strategy to handle transient network issues
@@ -35,7 +36,7 @@ class GfzClient(BaseClient):
         )
         self.session.mount("https://", HTTPAdapter(max_retries=retries))
 
-    def get_catalog_entries(self) -> List[Dict[str, Any]]:
+    def get_catalog_entries(self) -> List[CatalogEntryDict]:
         """
         Returns the available indices as catalog entries.
 
@@ -43,7 +44,7 @@ class GfzClient(BaseClient):
         index as a catalog entry to be discoverable by the collector.
 
         Returns:
-            List[Dict[str, Any]]: A list containing the Kp index definition.
+            List[CatalogEntryDict]: A list containing the Kp index definition.
         """
         return [
             {
