@@ -177,6 +177,8 @@ The full stack runs in Docker. Poetry is only required for local development, te
    | `pipeline-service` | ETL / data pipeline | (no public port) |
    | `catalog-collector` | Dataset catalog builder | (no public port) |
 
+   The ports shown are the defaults; the published ports can be changed in `.env` (see `example.env`).
+
 4. Open the dashboard at [http://localhost:8501](http://localhost:8501).
 
 5. Stop the stack:
@@ -205,6 +207,8 @@ poetry run mypy src
 ```
 
 Jupyter notebooks for exploratory analysis live in `notebooks/` and can be run with `poetry run jupyter lab`.
+
+Tools started outside Docker, such as the notebooks, need `MONGO_HOST=localhost` (and the published port as `MONGO_PORT` if it was changed).
 
 ## Project Structure
 
