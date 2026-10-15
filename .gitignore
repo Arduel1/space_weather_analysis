@@ -1,5 +1,8 @@
 # Custom
-data/cache
+# Local runtime data: third-party files are not redistributed (see docs/local-data.md);
+# only the project's own HAPI server list is tracked.
+data/*
+!data/hapi_config/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
