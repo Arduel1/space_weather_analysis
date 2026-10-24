@@ -45,7 +45,7 @@ The system is a modular monolith: a shared core library (`space_weather_analysis
 
 Solid arrows show data flow; dashed arrows show the fetch-job queue between the frontend and the pipeline service. The diagram is an editable draw.io file and can be opened directly in draw.io.
 
-The shared `space_weather_analysis` library (clients, database connection, logging, utilities) is used in-process by all three components, keeping domain logic independent of MongoDB, HTTP, and Streamlit.
+The shared `space_weather_analysis` library (clients, configuration, database connection, logging, utilities) is used in-process by all three components, keeping domain logic independent of MongoDB, HTTP, and Streamlit.
 
 ## Data Sources and Licenses
 
@@ -131,6 +131,7 @@ For the ground magnetometer data we gratefully acknowledge: INTERMAGNET; USGS Ge
 
 - Language: Python 3.12
 - Dependency management: Poetry (with lockfile)
+- Configuration: pydantic-settings (environment variables)
 - Storage: MongoDB (with GridFS for large files), browsed via mongo-express
 - Frontend: Streamlit and Plotly
 - Scientific stack: pandas, xarray, NumPy/SciPy, astropy, sunpy, cdflib, netCDF4
@@ -225,7 +226,7 @@ Tools started outside Docker, such as the notebooks, need `MONGO_HOST=localhost`
 ├── docs/                       # Architecture diagram (editable draw.io SVG) and local data notes
 ├── notebooks/                  # Jupyter notebooks for exploratory analysis
 ├── src/
-│   ├── space_weather_analysis/ # Shared core library (clients, DB, logging, utils)
+│   ├── space_weather_analysis/ # Shared core library (clients, config, DB, logging, utils)
 │   ├── catalog_collector/      # Dataset discovery and master catalog builder
 │   ├── pipeline_service/       # ETL: fetch, parse, normalize, store
 │   └── streamlit_app/          # Streamlit dashboard and plots

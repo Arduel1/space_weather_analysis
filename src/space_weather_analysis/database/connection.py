@@ -1,86 +1,82 @@
 import logging
-import os
 from typing import Optional
 
 from pymongo import MongoClient
 from pymongo.database import Database
 from pymongo.errors import ConnectionFailure
 
+from space_weather_analysis.config.mongo import MongoSettings
+
 # Logger initialization for the database module
 logger = logging.getLogger(__name__)
 
 
-class DatabaseConnection:
+class MongoConnection:
     """
-    Manages the global MongoDB connection using a Singleton-like pattern.
+    Manages one MongoDB client built from the given settings.
 
-    This class ensures that only one database client instance is created
-    and shared throughout the application lifecycle. It retrieves connection
-    credentials from environment variables and handles the initialization
-    and teardown of the connection.
+    A service creates one instance in its entry point and passes the resulting
+    database on to the components that need it. The client is created lazily
+    on the first call to get_database() and released by close().
     """
 
-    _client: Optional[MongoClient] = None
-    _db: Optional[Database] = None
-
-    @classmethod
-    def get_database(cls) -> Optional[Database]:
+    def __init__(self, settings: MongoSettings) -> None:
         """
-        Retrieves the active MongoDB database instance.
+        Initializes the connection without contacting the server yet.
 
-        If a connection has not been established yet, this method attempts
-        to create one using the configured environment variables. If a
-        connection already exists, the cached instance is returned to
-        minimize overhead.
+        Args:
+            settings (MongoSettings): The MongoDB settings to connect with.
+        """
+        self._settings = settings
+        self._client: Optional[MongoClient] = None
+        self._db: Optional[Database] = None
+
+    def get_database(self) -> Optional[Database]:
+        """
+        Retrieves the configured MongoDB database.
+
+        On the first call, a client is created and the server is pinged to verify
+        that it is reachable and the authentication succeeded. Later calls return
+        the cached database.
 
         Returns:
-            Optional[Database]: The MongoDB database object if the connection
-            is successful, otherwise None.
+            Optional[Database]: The MongoDB database named by the settings if the
+            connection is successful, otherwise None.
         """
-        if cls._db is not None:
-            return cls._db
+        if self._db is not None:
+            return self._db
 
         try:
-            mongo_user = os.getenv("MONGO_USER")
-            mongo_pass = os.getenv("MONGO_PASS")
-            mongo_host = os.getenv("MONGO_HOST", "mongo")
-            mongo_port = os.getenv("MONGO_PORT", "27017")
-
-            if not all([mongo_user, mongo_pass]):
-                logger.error("Missing MongoDB credentials in environment variables.")
-                return None
-
-            connection_string = f"mongodb://{mongo_user}:{mongo_pass}@{mongo_host}:{mongo_port}"
-
-            logger.info("Attempting to connect to MongoDB...")
-            cls._client = MongoClient(connection_string, serverSelectionTimeoutMS=5000)
+            logger.info(f"Attempting to connect to MongoDB at {self._settings.host}:{self._settings.port}...")
+            self._client = MongoClient(self._settings.connection_uri(), serverSelectionTimeoutMS=5000)
 
             # Verify that the server is actually reachable and authentication was successful.
-            cls._client.admin.command("ping")
+            self._client.admin.command("ping")
             logger.info("Successfully connected to MongoDB.")
 
-            # Defaulting to a specific database name
-            cls._db = cls._client["space_weather"]
-            return cls._db
+            self._db = self._client[self._settings.db_name]
+            return self._db
 
         except ConnectionFailure as e:
             logger.critical(f"Could not connect to MongoDB: {e}", exc_info=True)
+            self.close()
             return None
         except Exception as e:
             logger.critical(f"Unexpected error during database connection: {e}", exc_info=True)
+            self.close()
             return None
 
-    @classmethod
-    def close(cls) -> None:
+    def close(self) -> None:
         """
-        Closes the active MongoDB connection.
+        Closes the MongoDB client of this connection.
 
         This method should be called during application shutdown to ensure
         that sockets are released properly. It is safe to call this method
-        even if no connection is active.
+        even if no connection is active. A later call to get_database()
+        creates a new client.
         """
-        if cls._client:
+        if self._client is not None:
             logger.info("Closing MongoDB connection.")
-            cls._client.close()
-            cls._client = None
-            cls._db = None
+            self._client.close()
+            self._client = None
+            self._db = None

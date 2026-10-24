@@ -1,3 +1,4 @@
+import logging
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
@@ -5,7 +6,11 @@ from typing import Optional, Tuple
 import pandas as pd
 import streamlit as st
 from dateutil import parser
+from pydantic import ValidationError
 
+from space_weather_analysis.config.errors import format_settings_error
+from space_weather_analysis.config.mongo import MongoSettings
+from space_weather_analysis.database.connection import MongoConnection
 from streamlit_app.data_loader import DataLoader
 from streamlit_app.plots.cme import plot_cmes
 from streamlit_app.plots.correlation import plot_solar_cycle_correlation
@@ -19,6 +24,8 @@ from streamlit_app.plots.xray import plot_xray_flux
 # from defaulting to a narrow +/- 10 year range.
 MIN_ALLOWED_DATE = datetime(1800, 1, 1)
 MAX_ALLOWED_DATE = datetime(2200, 1, 1)
+
+logger = logging.getLogger(__name__)
 
 
 def parse_catalog_time(time_str: Optional[str], default: datetime) -> datetime:
@@ -92,12 +99,31 @@ st.set_page_config(
 
 
 @st.cache_resource
-def get_loader() -> DataLoader:
-    """Returns a cached singleton instance of the DataLoader."""
-    return DataLoader()
+def get_loader() -> Optional[DataLoader]:
+    """
+    Returns a cached instance of the DataLoader.
+
+    The MongoDB settings and the connection are built only once per Streamlit
+    server process, because this function is cached as a shared resource.
+
+    Returns:
+        Optional[DataLoader]: The data loader, or None if the MongoDB settings
+        in the environment are invalid or incomplete.
+    """
+    try:
+        mongo_settings = MongoSettings()
+    except ValidationError as e:
+        logger.error(f"Invalid MongoDB settings, check the MONGO_* environment variables: {format_settings_error(e)}")
+        return None
+
+    connection = MongoConnection(mongo_settings)
+    return DataLoader(connection.get_database())
 
 
 loader = get_loader()
+if loader is None:
+    st.error("The MongoDB settings are invalid or incomplete. Check the MONGO_* environment variables and restart the app.")
+    st.stop()
 
 st.sidebar.title("Navigation")
 app_mode = st.sidebar.radio("Choose Mode", ["Dataset Explorer", "Cycle Correlation Analysis", "Data Downloader"])

@@ -3,13 +3,17 @@ import pathlib
 import sys
 from typing import List
 
+from pydantic import ValidationError
+
 from src.catalog_collector.builder import CatalogBuilder
 from src.catalog_collector.discoverers.base import AbstractDiscoverer
 from src.catalog_collector.discoverers.cdaweb import CdawebDiscoverer
 from src.catalog_collector.discoverers.gfz import GfzDiscoverer
 from src.catalog_collector.discoverers.hapi import HapiDiscoverer
 from src.catalog_collector.loader import CatalogLoader
-from src.space_weather_analysis.database.connection import DatabaseConnection
+from src.space_weather_analysis.config.errors import format_settings_error
+from src.space_weather_analysis.config.mongo import MongoSettings
+from src.space_weather_analysis.database.connection import MongoConnection
 from src.space_weather_analysis.logging.config import setup_logging
 
 # Setup logging configuration for the service
@@ -35,8 +39,16 @@ def main() -> None:
     """
     logger.info("Starting Catalog Collector Service execution.")
 
-    # Retrieve the singleton database connection
-    db = DatabaseConnection.get_database()
+    # Build the MongoDB settings once from the environment
+    try:
+        mongo_settings = MongoSettings()
+    except ValidationError as e:
+        logger.critical(f"Invalid MongoDB settings, check the MONGO_* environment variables: {format_settings_error(e)}. Exiting.")
+        sys.exit(1)
+
+    # Establish the database connection for this run
+    connection = MongoConnection(mongo_settings)
+    db = connection.get_database()
     if db is None:
         logger.critical("Failed to obtain database connection. Exiting.")
         sys.exit(1)
@@ -64,11 +76,11 @@ def main() -> None:
 
     except Exception as e:
         logger.critical(f"Catalog Collector execution failed: {e}", exc_info=True)
-        DatabaseConnection.close()
+        connection.close()
         sys.exit(1)
 
     # Clean up resources before exiting
-    DatabaseConnection.close()
+    connection.close()
     logger.info("Catalog Collector Service execution finished successfully.")
 
 

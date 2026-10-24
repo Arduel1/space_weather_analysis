@@ -32,6 +32,7 @@ cdasws = "^1.8.11"
 hapiclient = "^0.2.6"
 streamlit = "^1.51.0"
 plotly = "^6.5.0"
+pydantic-settings = "^2"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.4.1"
@@ -77,6 +78,8 @@ indent-style = "space"
 
 [tool.mypy]
 python_version = "3.12"
+# Lets mypy understand pydantic models, including settings fields filled from the environment.
+plugins = ["pydantic.mypy"]
 warn_return_any = false
 warn_unused_configs = true
 disallow_untyped_defs = true

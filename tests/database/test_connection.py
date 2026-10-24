@@ -1,91 +1,82 @@
-import os
 from typing import Generator
-from unittest.mock import patch
 
 import pytest
+from pydantic import SecretStr
 from pymongo.database import Database
 
-from space_weather_analysis.database.connection import DatabaseConnection
+from space_weather_analysis.config.mongo import MongoSettings
+from space_weather_analysis.database.connection import MongoConnection
 
 
-# Needs a running MongoDB reachable with the credentials from .env
+# Needs a running MongoDB reachable with the credentials from the environment or .env
+# (see the mongo_settings fixture in conftest.py). Only the dedicated test database is used.
 @pytest.mark.integration
-class TestDatabaseConnection:
-    @pytest.fixture(autouse=True)
-    def reset_singleton(self) -> Generator[None, None, None]:
+class TestMongoConnection:
+    @pytest.fixture
+    def connection(self, mongo_settings: MongoSettings) -> Generator[MongoConnection, None, None]:
         """
-        Automatically reset the Singleton state before and after each test
+        Provides a fresh connection per test and closes it afterwards
         to ensure isolation.
         """
-        DatabaseConnection.close()
-        yield
-        DatabaseConnection.close()
+        connection = MongoConnection(mongo_settings)
+        yield connection
+        connection.close()
 
-    def test_connect_success_local(self) -> None:
+    def test_connect_success(self, connection: MongoConnection, mongo_settings: MongoSettings) -> None:
         """
-        Test that get_database returns a Database object when env vars are correct.
-        Assumes local .env is set up correctly for localhost.
+        Test that get_database returns the configured Database object when the settings are correct.
         """
-        # Ensure we are pointing to localhost for this test run
-        with patch.dict(os.environ, {"MONGO_HOST": "localhost"}):
-            db = DatabaseConnection.get_database()
-            assert db is not None
-            assert isinstance(db, Database)
+        db = connection.get_database()
+        assert db is not None
+        assert isinstance(db, Database)
+        assert db.name == mongo_settings.db_name
 
-            # Verify it's actually connected
-            # pymongo Database objects have a 'client' attribute
-            assert db.client.admin.command("ping")["ok"] == 1.0
+        # Verify it's actually connected
+        # pymongo Database objects have a 'client' attribute
+        assert db.client.admin.command("ping")["ok"] == 1.0
 
-    def test_singleton_behavior(self) -> None:
+    def test_repeated_calls_reuse_database(self, connection: MongoConnection) -> None:
         """
-        Test that multiple calls to get_database return the exact same instance.
+        Test that multiple calls on the same connection return the exact same instance.
         """
-        with patch.dict(os.environ, {"MONGO_HOST": "localhost"}):
-            db1 = DatabaseConnection.get_database()
-            db2 = DatabaseConnection.get_database()
+        db1 = connection.get_database()
+        db2 = connection.get_database()
 
-            # Type narrowing assertions
-            assert db1 is not None
-            assert db2 is not None
+        # Type narrowing assertions
+        assert db1 is not None
+        assert db2 is not None
 
-            assert db1 is db2
-            assert db1.client is db2.client
+        assert db1 is db2
+        assert db1.client is db2.client
 
-    def test_missing_credentials(self) -> None:
+    def test_wrong_credentials(self, mongo_settings: MongoSettings) -> None:
         """
-        Test that connection fails gracefully if credentials are missing.
+        Test that connection fails gracefully if the server rejects the credentials.
         """
-        # Remove MONGO_USER to simulate error
-        with patch.dict(os.environ, {}, clear=True):
-            # We explicitly allow MONGO_DB_NAME but remove credentials
-            os.environ["MONGO_DB_NAME"] = "test_db"
+        wrong_settings = mongo_settings.model_copy(update={"password": SecretStr("definitely-not-the-password")})
+        connection = MongoConnection(wrong_settings)
 
-            db = DatabaseConnection.get_database()
-            assert db is None
+        assert connection.get_database() is None
+        connection.close()
 
-    def test_missing_db_name(self) -> None:
+    def test_close_connection(self, connection: MongoConnection) -> None:
         """
-        Test that connection returns None if MONGO_DB_NAME is missing,
-        even if credentials are OK.
+        Test that close() actually closes the client and resets the connection.
         """
-        with patch.dict(os.environ, {"MONGO_DB_NAME": ""}):
-            db = DatabaseConnection.get_database()
-            assert db is None
+        # Initialize connection
+        assert connection.get_database() is not None
 
-    def test_close_connection(self) -> None:
-        """
-        Test that close() actually closes the client and resets the singleton.
-        """
-        with patch.dict(os.environ, {"MONGO_HOST": "localhost"}):
-            # Initialize connection
-            _ = DatabaseConnection.get_database()
+        # Pre-condition check
+        assert connection._client is not None
 
-            # Pre-condition check
-            assert DatabaseConnection._client is not None
+        # Action
+        connection.close()
 
-            # Action
-            DatabaseConnection.close()
+        # Post-condition check
+        assert connection._client is None
+        assert connection._db is None
 
-            # Post-condition check
-            assert DatabaseConnection._client is None
-            assert DatabaseConnection._db is None
+        # A new client is created on the next use
+        db = connection.get_database()
+        assert db is not None
+        assert db.client.admin.command("ping")["ok"] == 1.0

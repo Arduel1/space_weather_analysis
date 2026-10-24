@@ -44,8 +44,8 @@ class CatalogEntryDict(TypedDict):
         type: The type identifier of the source (e.g., 'HAPI', 'FIDO_CDAWEB').
         source_id: The specific identifier for the source (e.g., URL for HAPI, Group Name for CDAWeb).
         time_range: The temporal coverage of this dataset at this source.
-        dataset_id: Optional dataset identifier, added by some discoverers (e.g. CDAWeb, GFZ).
-        description: Optional human-readable description of the dataset (e.g. GFZ).
+        dataset_id: Optional dataset identifier, added by some discoverers.
+        description: Optional human-readable description of the dataset.
 
     Example:
         {

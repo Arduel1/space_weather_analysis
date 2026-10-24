@@ -1,33 +1,60 @@
 import os
-from typing import Generator
+import pathlib
+from typing import Generator, Optional
 
 import pytest
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 from pymongo import MongoClient
 from pymongo.database import Database
 
-# Load environment variables from .env file
-load_dotenv()
+from space_weather_analysis.config.mongo import MongoSettings
+
+# Only the integration fixtures below read the project's .env file, so unit tests never
+# see the real credentials.
+ENV_FILE = pathlib.Path(__file__).resolve().parent.parent / ".env"
+
+# Integration tests always use this dedicated database, never the configured MONGO_DB_NAME,
+# because the fixtures write to it and drop its collections.
+TEST_DB_NAME = "space_weather_test"
 
 
 @pytest.fixture(scope="session")
-def mongo_client() -> Generator[MongoClient, None, None]:
+def mongo_settings() -> MongoSettings:
+    """
+    Builds MongoDB settings for the integration tests.
+
+    Credentials are taken from the environment if set, otherwise from the
+    project's .env file. The host defaults to 'localhost' because the tests
+    usually run outside the Compose network. The database is always the
+    dedicated test database.
+    """
+    file_values = dotenv_values(ENV_FILE) if ENV_FILE.is_file() else {}
+
+    def lookup(name: str) -> Optional[str]:
+        return os.environ.get(name) or file_values.get(name)
+
+    user = lookup("MONGO_USER")
+    password = lookup("MONGO_PASS")
+    if not user or not password:
+        pytest.fail("Missing MongoDB credentials (MONGO_USER, MONGO_PASS) in the environment and in .env.")
+
+    # The password field is populated via its alias, which is the environment variable name.
+    return MongoSettings(
+        user=user,
+        MONGO_PASS=password,
+        host=lookup("MONGO_HOST") or "localhost",
+        port=int(lookup("MONGO_PORT") or 27017),
+        db_name=TEST_DB_NAME,
+    )
+
+
+@pytest.fixture(scope="session")
+def mongo_client(mongo_settings: MongoSettings) -> Generator[MongoClient, None, None]:
     """
     Creates a MongoDB connection for the entire test session.
-    Relies on environment variables loaded from .env.
+    Relies on the settings from the mongo_settings fixture.
     """
-    user = os.getenv("MONGO_USER")
-    pw = os.getenv("MONGO_PASS")
-    port = os.getenv("MONGO_PORT")
-
-    # Host is vital for switching between Docker ('mongo') and local ('localhost')
-    host = os.getenv("MONGO_HOST", "localhost")
-
-    if not all([user, pw, port]):
-        pytest.fail("Missing MongoDB credentials in environment variables (MONGO_USER, MONGO_PASS, MONGO_PORT).")
-
-    uri = f"mongodb://{user}:{pw}@{host}:{port}/"
-    client: MongoClient = MongoClient(uri, serverSelectionTimeoutMS=2000)
+    client: MongoClient = MongoClient(mongo_settings.connection_uri(), serverSelectionTimeoutMS=2000)
 
     try:
         # Check if the database is reachable
@@ -40,15 +67,12 @@ def mongo_client() -> Generator[MongoClient, None, None]:
 @pytest.fixture(scope="function")
 def db(mongo_client: MongoClient) -> Generator[Database, None, None]:
     """
-    Provides a clean database instance for each test function.
+    Provides a clean test database instance for each test function.
     Drops all collections after the test to prevent side effects,
     EXCEPT for critical collections like 'master_catalog'.
+    Always uses the dedicated test database, never the configured MONGO_DB_NAME.
     """
-    db_name = os.getenv("MONGO_DB_NAME")
-    if not db_name:
-        pytest.fail("MONGO_DB_NAME not set in environment.")
-
-    database = mongo_client[db_name]
+    database = mongo_client[TEST_DB_NAME]
 
     # Pre-test cleanup
     _clean_database(database)
@@ -67,6 +91,9 @@ def _clean_database(database: Database) -> None:
     - master_catalog: Required for discovery/pipeline tests.
     - system.*: Internal MongoDB collections.
     """
+    if database.name != TEST_DB_NAME:
+        raise RuntimeError(f"Refusing to clean database '{database.name}': only '{TEST_DB_NAME}' may be cleaned.")
+
     preserved_collections = {"master_catalog"}
 
     for collection_name in database.list_collection_names():

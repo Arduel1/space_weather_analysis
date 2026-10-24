@@ -3,8 +3,12 @@ import sys
 from datetime import datetime, timezone
 from typing import Any, Dict
 
+from pydantic import ValidationError
+
 from src.pipeline_service.orchestrator import PipelineOrchestrator
-from src.space_weather_analysis.database.connection import DatabaseConnection
+from src.space_weather_analysis.config.errors import format_settings_error
+from src.space_weather_analysis.config.mongo import MongoSettings
+from src.space_weather_analysis.database.connection import MongoConnection
 from src.space_weather_analysis.logging.config import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -28,8 +32,16 @@ def main() -> None:
     setup_logging(service_name="PipelineService")
     logger.info("Initializing Pipeline Service...")
 
+    # Build the MongoDB settings once from the environment
+    try:
+        mongo_settings = MongoSettings()
+    except ValidationError as e:
+        logger.critical(f"Invalid MongoDB settings, check the MONGO_* environment variables: {format_settings_error(e)}. Exiting.")
+        sys.exit(1)
+
     # Establish connection to the database
-    db = DatabaseConnection.get_database()
+    connection = MongoConnection(mongo_settings)
+    db = connection.get_database()
     if db is None:
         logger.critical("Failed to connect to the database. Exiting.")
         sys.exit(1)
@@ -93,11 +105,11 @@ def main() -> None:
         logger.info("Pipeline Service stopped by user.")
     except Exception as e:
         logger.critical(f"Pipeline Service encountered a fatal error: {e}", exc_info=True)
-        DatabaseConnection.close()
+        connection.close()
         sys.exit(1)
     finally:
         # Cleanup resources
-        DatabaseConnection.close()
+        connection.close()
         logger.info("Pipeline Service finished successfully.")
 
 

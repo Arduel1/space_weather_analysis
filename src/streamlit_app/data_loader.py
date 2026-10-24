@@ -6,28 +6,28 @@ import pandas as pd
 from bson.objectid import ObjectId
 from pymongo.database import Database
 
-from space_weather_analysis.database.connection import DatabaseConnection
-
 logger = logging.getLogger(__name__)
 
 
 class DataLoader:
     """
-    Manages data retrieval for the Streamlit frontend by connecting directly to MongoDB.
+    Manages data retrieval for the Streamlit frontend from MongoDB.
 
     This class acts as an abstraction layer between the UI and the database,
     formatting raw MongoDB documents into pandas DataFrames suitable for plotting.
-    It now also handles catalog retrieval and job management for data downloads.
+    It also handles catalog retrieval and job management for data downloads.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, db: Optional[Database]) -> None:
         """
-        Initializes the data loader.
+        Initializes the data loader with the database provided by the caller.
 
-        The database connection is retrieved via the common singleton pattern
-        to ensure connection pooling and consistency across services.
+        Args:
+            db (Optional[Database]): The MongoDB database to read from, or None if
+                                     no connection could be established. Without a
+                                     database, all queries return empty results.
         """
-        self.db: Optional[Database] = DatabaseConnection.get_database()
+        self.db: Optional[Database] = db
         if self.db is None:
             logger.error("Could not establish database connection for Streamlit app.")
 
