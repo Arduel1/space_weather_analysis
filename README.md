@@ -230,7 +230,7 @@ Tools started outside Docker, such as the notebooks, need `MONGO_HOST=localhost`
 │   ├── catalog_collector/      # Dataset discovery and master catalog builder
 │   ├── pipeline_service/       # ETL: fetch, parse, normalize, store
 │   └── streamlit_app/          # Streamlit dashboard and plots
-└── tests/                      # Test suite
+└── tests/                      # Unit tests (tests/unit) and integration tests (tests/integration)
 ```
 
 ## Background
