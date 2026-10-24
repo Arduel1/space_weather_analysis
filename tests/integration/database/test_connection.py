@@ -8,8 +8,8 @@ from space_weather_analysis.config.mongo import MongoSettings
 from space_weather_analysis.database.connection import MongoConnection
 
 
-# Needs a running MongoDB reachable with the credentials from the environment or .env
-# (see the mongo_settings fixture in conftest.py). Only the dedicated test database is used.
+# Runs against the throwaway MongoDB container started by the fixtures in conftest.py.
+# Only the dedicated test database is used.
 @pytest.mark.integration
 class TestMongoConnection:
     @pytest.fixture
@@ -52,6 +52,7 @@ class TestMongoConnection:
     def test_wrong_credentials(self, mongo_settings: MongoSettings) -> None:
         """
         Test that connection fails gracefully if the server rejects the credentials.
+        The settings point to the same container but carry a wrong password.
         """
         wrong_settings = mongo_settings.model_copy(update={"password": SecretStr("definitely-not-the-password")})
         connection = MongoConnection(wrong_settings)

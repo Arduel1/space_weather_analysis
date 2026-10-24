@@ -1,49 +1,57 @@
-import os
-import pathlib
-from typing import Generator, Optional
+from typing import Generator
 
 import pytest
-from dotenv import dotenv_values
 from pymongo import MongoClient
 from pymongo.database import Database
+from testcontainers.community.mongodb import MongoDbContainer
 
 from space_weather_analysis.config.mongo import MongoSettings
 
-# Only the integration fixtures below read the project's .env file, so unit tests never
-# see the real credentials.
-ENV_FILE = pathlib.Path(__file__).resolve().parent.parent / ".env"
+# The same image reference as the 'mongo' service in docker-compose.yml.
+MONGO_IMAGE = "mongo"
 
-# Integration tests always use this dedicated database, never the configured MONGO_DB_NAME,
-# because the fixtures write to it and drop its collections.
+# Root credentials of the throwaway container. They are passed explicitly so that
+# the container never picks up MONGO_INITDB_* variables from the environment.
+CONTAINER_USER = "test"
+CONTAINER_PASSWORD = "test"
+
+# Integration tests always use this dedicated database, because the fixtures
+# write to it and drop its collections.
 TEST_DB_NAME = "space_weather_test"
 
 
 @pytest.fixture(scope="session")
-def mongo_settings() -> MongoSettings:
+def mongo_container() -> Generator[MongoDbContainer, None, None]:
     """
-    Builds MongoDB settings for the integration tests.
+    Starts a throwaway MongoDB container for the entire test session.
 
-    Credentials are taken from the environment if set, otherwise from the
-    project's .env file. The host defaults to 'localhost' because the tests
-    usually run outside the Compose network. The database is always the
-    dedicated test database.
+    The container is started via Docker and removed at the end of the session.
+    Before it is handed out, the server is pinged until it accepts authenticated
+    connections, because the image runs a temporary mongod while it creates the root user.
     """
-    file_values = dotenv_values(ENV_FILE) if ENV_FILE.is_file() else {}
+    with MongoDbContainer(MONGO_IMAGE, username=CONTAINER_USER, password=CONTAINER_PASSWORD) as container:
+        client: MongoClient = MongoClient(container.get_connection_url(), serverSelectionTimeoutMS=30000)
+        try:
+            client.admin.command("ping")
+        finally:
+            client.close()
+        yield container
 
-    def lookup(name: str) -> Optional[str]:
-        return os.environ.get(name) or file_values.get(name)
 
-    user = lookup("MONGO_USER")
-    password = lookup("MONGO_PASS")
-    if not user or not password:
-        pytest.fail("Missing MongoDB credentials (MONGO_USER, MONGO_PASS) in the environment and in .env.")
+@pytest.fixture(scope="session")
+def mongo_settings(mongo_container: MongoDbContainer) -> MongoSettings:
+    """
+    Builds MongoDB settings that point to the throwaway container.
 
+    Host, mapped port and root credentials are taken from the container. The
+    database is always the dedicated test database.
+    """
     # The password field is populated via its alias, which is the environment variable name.
     return MongoSettings(
-        user=user,
-        MONGO_PASS=password,
-        host=lookup("MONGO_HOST") or "localhost",
-        port=int(lookup("MONGO_PORT") or 27017),
+        user=mongo_container.username,
+        MONGO_PASS=mongo_container.password,
+        host=mongo_container.get_container_host_ip(),
+        port=mongo_container.get_exposed_port(mongo_container.port),
         db_name=TEST_DB_NAME,
     )
 

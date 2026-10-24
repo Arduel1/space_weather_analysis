@@ -207,7 +207,9 @@ poetry run ruff format src
 poetry run mypy src
 ```
 
-`pytest` runs the unit tests; tests marked `integration` need a running MongoDB and are run with `poetry run pytest -m integration`.
+`pytest` runs the unit tests; tests marked `integration` need Docker, start a throwaway MongoDB themselves (no running stack or credentials needed) and are run with `poetry run pytest -m integration`.
+
+Test coverage can be inspected with `poetry run pytest --cov=src --cov-report=term-missing`.
 
 Jupyter notebooks for exploratory analysis live in `notebooks/` and can be run with `poetry run jupyter lab`.
 
