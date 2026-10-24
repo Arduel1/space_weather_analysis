@@ -77,7 +77,7 @@ class CatalogBuilder:
         # Check for duplicates or updates
         for i, existing_entry in enumerate(sources):
             if existing_entry["type"] == entry["type"] and existing_entry["source_id"] == entry["source_id"]:
-                # Check if content changed (e.g. time_range)
+                # Replace the stored entry if any of its fields differ
                 if existing_entry != entry:
                     logger.info(f"Updating existing entry for {dataset_id} from {entry['source_id']}")
                     sources[i] = entry

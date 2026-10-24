@@ -56,7 +56,7 @@ def _log_coordinate_details(ds: xr.Dataset, coord: Hashable, prefix: str) -> Non
     Args:
         ds (xr.Dataset): The dataset containing the coordinate.
         coord (Hashable): The name/key of the coordinate.
-        prefix (str): A prefix string for log messages (e.g., filename).
+        prefix (str): A prefix string for log messages.
     """
     try:
         da = ds.coords[coord]
@@ -84,8 +84,8 @@ def _log_small_sample(da: xr.DataArray, prefix: str) -> None:
     """
     Logs a small sample of values from a DataArray.
 
-    This is intended for small arrays (e.g., length <= 8) to provide
-    immediate insight into the data values.
+    It logs at most the first 8 values and is called only for arrays with
+    at most 8 elements to provide immediate insight into the data values.
 
     Args:
         da (xr.DataArray): The DataArray to sample.

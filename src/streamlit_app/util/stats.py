@@ -10,8 +10,7 @@ def aggregate_categorical_time_distribution(df: pd.DataFrame, categorical_col: s
     Aggregates a categorical column over time to show the distribution of classes per period.
 
     This transformation moves categorical values from rows to columns and counts their
-    occurrences per time period, which is useful for stacked bar charts or trend analysis
-    (e.g., counting types of solar flares per year).
+    occurrences per time period, which is useful for stacked bar charts or trend analysis.
 
     Args:
         df: Input DataFrame with a DatetimeIndex.
@@ -19,8 +18,10 @@ def aggregate_categorical_time_distribution(df: pd.DataFrame, categorical_col: s
         freq: Pandas frequency string (defaults to 'YE' for Year End).
 
     Returns:
-        A DataFrame where the index represents time, columns represent categories,
-        and values represent counts. Returns empty DataFrame on error.
+        A DataFrame where the index represents time, columns represent categories
+        plus a 'Total' column with the sum per period, and values represent counts.
+        Returns an empty DataFrame if the input is empty, the column is missing
+        or the aggregation fails.
     """
     if df.empty or categorical_col not in df.columns:
         return pd.DataFrame()

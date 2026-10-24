@@ -174,7 +174,7 @@ class PipelineOrchestrator:
 
         Args:
             job_id (Any): The unique identifier of the job.
-            status (str): The new status string (e.g., COMPLETED, FAILED).
+            status (str): The final status string, 'COMPLETED' or 'FAILED'.
             error_message (Optional[str]): An optional error description if failed.
         """
         update_doc = {"status": status, "completed_at": datetime.now(timezone.utc)}
@@ -196,10 +196,12 @@ class PipelineOrchestrator:
         Delegates the execution to a specific pipeline instance.
 
         Args:
-            source_id (Optional[str]): The identifier for the data source (e.g., HAPI).
+            source_id (Optional[str]): The source type identifier used to select the pipeline.
             datasets (List[str]): The list of dataset IDs to process.
             start_time (Optional[datetime]): The start of the time range.
             end_time (Optional[datetime]): The end of the time range.
+            job_id (Optional[Any]): The database ID of the job. If set, progress updates are
+                written to this job's document in the jobs collection; otherwise they are logged.
 
         Raises:
             ValueError: If the source_id is missing or not supported.

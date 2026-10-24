@@ -7,17 +7,17 @@ class VariableMetadata:
     """
     A standardized data structure for representing variable metadata.
 
-    This class serves as a common format, ensuring that all pipelines
+    This class serves as a common format, ensuring that pipelines
     convert their metadata into this structure before
-    passing it to utilities like the MetadataWriter.
+    passing it to the MetadataWriter.
 
     Attributes:
         name: The name of the variable.
         description: A human-readable description of the variable.
-        units: The physical units of the variable (e.g., 'nT', 'km/s').
+        units: The physical units of the variable as reported by the source.
         fill: The fill value used to denote missing data. Can be a string or number.
-        type: The data type of the variable (e.g., 'float', 'int').
-        size: The shape/dimensions of the variable if it is an array (e.g., [3]).
+        type: The data type name of the variable as reported by the source.
+        size: The array dimensions of the variable as a list of lengths, or None if the source reports none.
         file_attributes: Raw metadata/attributes extracted directly from the source file.
     """
 
@@ -28,5 +28,5 @@ class VariableMetadata:
     type: Optional[str] = None
     size: Optional[List[int]] = None
 
-    # Specific to metadata found only in downloaded files (e.g., CDF attributes)
+    # Attributes parsed from the downloaded data file rather than from the source API
     file_attributes: Dict[str, Any] = field(default_factory=dict)

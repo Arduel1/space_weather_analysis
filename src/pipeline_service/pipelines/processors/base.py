@@ -13,8 +13,8 @@ class BaseETLProcessor(MongoLoader, ABC):
     """
     Abstract base class for local ETL (Extract, Transform, Load) processors.
 
-    This class standardizes the workflow for processing local datasets like
-    Sunspots or CME catalogs, providing database loading capabilities via inheritance.
+    This class standardizes the workflow for processing local dataset files,
+    providing database loading capabilities via inheritance.
     """
 
     def __init__(self, db: Database) -> None:
@@ -29,7 +29,7 @@ class BaseETLProcessor(MongoLoader, ABC):
     @abstractmethod
     def _extract(self) -> Any:
         """
-        Extracts raw data from a source (e.g., a local file).
+        Extracts raw data from the processor's source.
 
         Returns:
             The raw data object (usually a DataFrame).

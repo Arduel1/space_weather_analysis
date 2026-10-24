@@ -8,9 +8,10 @@ def plot_cmes(df: pd.DataFrame, collection_name: str) -> None:
     """
     Visualizes Coronal Mass Ejection (CME) data.
 
-    This function splits the analysis into three tabs: timeline impact,
-    energy distribution, and morphology (Halo vs Non-Halo). It handles
-    data cleaning and dynamic axis scaling for logarithmic energy values.
+    Renders a timeline scatter plot of kinetic energy (log10) per event, colored
+    by Halo vs Non-Halo type and sized by angular width, with reference lines
+    for the Carrington class and the average energy. Non-numeric and
+    non-positive speed, width and energy values are treated as missing.
 
     Args:
         df: The dataframe containing CME data.
@@ -40,11 +41,11 @@ def plot_cmes(df: pd.DataFrame, collection_name: str) -> None:
             min_log = np.floor(np.log10(valid_energy.min()))
             max_log = np.ceil(np.log10(valid_energy.max()))
 
-            # Generate integer ticks (e.g., 10^28, 10^29) for readability
+            # Generate ticks at integer powers of ten for readability
             tick_vals = list(range(int(min_log), int(max_log) + 2))
             tick_text = [f"10^{i}" for i in tick_vals]
 
-    # Timeline Plot Tab
+    # Timeline plot
     st.caption("Temporal view of CME events by Energy and Type. High-Energy Halo CMEs (Red) are typically the most critical.")
 
     if has_energy:

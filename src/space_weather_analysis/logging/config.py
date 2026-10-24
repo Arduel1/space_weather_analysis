@@ -11,10 +11,9 @@ def setup_logging(service_name: str, level: int = logging.INFO) -> None:
     easier. It directs all logs to the standard output (stdout).
 
     Args:
-        service_name (str): The name of the service (e.g., 'Catalog', 'Pipeline').
-                            This name will appear in every log message to identify
-                            the source.
-        level (int): The logging threshold level (e.g., logging.INFO, logging.DEBUG).
+        service_name (str): The name of the service. This name will appear in every
+                            log message to identify the source.
+        level (int): The logging threshold level as a numeric level of the `logging` module.
                      Defaults to logging.INFO.
     """
     # Define the format string to include time, level, service name, and message.
@@ -28,8 +27,7 @@ def setup_logging(service_name: str, level: int = logging.INFO) -> None:
         force=True,  # Ensures that any existing configuration is overwritten.
     )
 
-    # Set the log level for external libraries to WARNING to reduce noise,
-    # unless debugging is explicitly required.
+    # Set the log level for external libraries to WARNING to reduce noise.
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("pymongo").setLevel(logging.WARNING)
     logging.getLogger("fido").setLevel(logging.WARNING)

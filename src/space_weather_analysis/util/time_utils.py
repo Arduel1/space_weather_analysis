@@ -35,7 +35,8 @@ def parse_iso_time(time_str: str) -> Optional[datetime]:
     Safely parses an ISO time string into a timezone-aware datetime.
 
     Args:
-        time_str (str): The ISO formatted time string (e.g., "2023-01-01T12:00:00Z").
+        time_str (str): A time string in a format accepted by `datetime.fromisoformat`;
+            naive times are treated as UTC.
 
     Returns:
         Optional[datetime]: A timezone-aware datetime object (UTC), or None if parsing fails.
@@ -88,7 +89,7 @@ def attempt_numeric_time_conversions(
     plausible_year_max: Optional[int] = None,
 ) -> Tuple[Optional[np.ndarray], Dict[str, Any]]:
     """
-    Attempts standard numeric-to-datetime transformations (Unix, Julian Day, etc.).
+    Attempts standard numeric-to-datetime transformations.
 
     Can optionally evaluate plausibility by checking if the resulting years fall within
     a specified range. If no range is provided, any valid timestamp is accepted.
@@ -194,7 +195,7 @@ def _score_dtindex(dtindex: pd.DatetimeIndex, min_year: Optional[int], max_year:
     else:
         # Apply year constraints only if specified
         if min_year is not None:
-            # Sichere Variante: Prüfe erst auf NaT, bevor wir .year verwenden
+            # NaT entries are already excluded by the mask above
             year_mask = dtindex.year >= min_year
             mask &= year_mask
 
@@ -294,8 +295,8 @@ def convert_cftime_object(val: Any) -> Optional[datetime]:
     Converts a cftime object to a standard Python datetime.
 
     Assumes the cftime object has year, month, day attributes.
-    Handles potential calendar mismatches (e.g. 360_day calendar dates like Feb 30)
-    by returning None instead of crashing.
+    Dates that do not exist in the Gregorian calendar, which non-standard cftime
+    calendars can produce, return None instead of raising.
 
     Args:
         val (Any): The cftime object.
@@ -348,11 +349,13 @@ def parse_numeric_with_units(val: float, units: str, calendar: Any) -> Optional[
 
     Args:
         val (float): Numeric value.
-        units (str): Units string (e.g. "seconds since 1970...").
+        units (str): CF-style units string of the form '<unit> since <reference date>'.
         calendar (Any): Calendar string or None.
 
     Returns:
-        Optional[datetime]: Decoded datetime.
+        Optional[datetime]: The decoded datetime in UTC, or None if num2date raises an exception,
+            returns no value or a value without a 'year' attribute, or the cftime result
+            cannot be converted to a standard datetime.
     """
     try:
         cal_str = str(calendar) if calendar is not None else "standard"
@@ -373,7 +376,7 @@ def parse_numeric_with_units(val: float, units: str, calendar: Any) -> Optional[
 
 def parse_numeric_fallback(val: float) -> Optional[datetime]:
     """
-    Parses a numeric value using fallback heuristics (Unix, JD, etc.).
+    Parses a numeric value using the heuristics of `attempt_numeric_time_conversions`.
 
     Args:
         val (float): The numeric value to test.

@@ -24,9 +24,12 @@ class TimeRangeDict(TypedDict):
     """
     Represents a start and end time pair in the catalog.
 
+    Both values are date or date-time strings in the format of the source that
+    reported them; they are not normalized to a common format.
+
     Attributes:
-        start_time: The start timestamp in ISO 8601 format (e.g., '2023-01-01T00:00:00Z').
-        end_time: The end timestamp in ISO 8601 format.
+        start_time: The start of the time range.
+        end_time: The end of the time range.
     """
 
     start_time: str
@@ -37,22 +40,16 @@ class CatalogEntryDict(TypedDict):
     """
     A dictionary representing a single source entry in the catalog.
 
-    This structure maps a specific data source (like a HAPI server URL)
-    to a dataset type and the time range available at that source.
+    This structure maps a specific data source to a dataset type and the
+    time range available at that source.
 
     Attributes:
-        type: The type identifier of the source (e.g., 'HAPI', 'FIDO_CDAWEB').
-        source_id: The specific identifier for the source (e.g., URL for HAPI, Group Name for CDAWeb).
+        type: The source type identifier: 'HAPI', 'FIDO_CDAWEB' or 'GFZ_POTSDAM'.
+        source_id: The identifier of the source within its type: the server URL for HAPI,
+            the group name for FIDO_CDAWEB and 'GFZ' for GFZ_POTSDAM.
         time_range: The temporal coverage of this dataset at this source.
         dataset_id: Optional dataset identifier, added by some discoverers.
         description: Optional human-readable description of the dataset.
-
-    Example:
-        {
-            "type": "HAPI",
-            "source_id": "http://hapi-server.org/data",
-            "time_range": {"start_time": "2020-01-01T00:00:00Z", "end_time": "2020-01-02T00:00:00Z"}
-        }
     """
 
     type: str
@@ -88,7 +85,7 @@ Keys are strings (field names), values can be any BSON-compatible type.
 MetadataDict: TypeAlias = Dict[str, Any]
 """
 A dictionary containing metadata about a dataset or variable.
-Typically contains keys like 'units', 'description', etc.
+The keys depend on the source.
 """
 
 TimeRange: TypeAlias = Tuple[datetime, datetime]

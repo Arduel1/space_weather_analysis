@@ -42,7 +42,8 @@ class LocalPipeline(BasePipeline):
         Triggers specific local processors based on the requested dataset ID.
 
         Args:
-            datasets: List of dataset IDs (e.g., 'silso_sunspot_daily').
+            datasets: List of local dataset IDs; 'silso_sunspot_daily' and 'cme_catalog' are supported,
+                other IDs are logged as unknown.
             start_time: Ignored for local static files.
             end_time: Ignored for local static files.
             progress_callback: Optional callback for progress reporting.

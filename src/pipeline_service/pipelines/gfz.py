@@ -47,7 +47,7 @@ class GfzPipeline(MongoLoader, BasePipeline):
         Executes the download process for the requested GFZ datasets.
 
         Args:
-            datasets: List of index names (e.g., 'Kp').
+            datasets: List of GFZ index names.
             start_time: Start of the data range.
             end_time: End of the data range.
             progress_callback: Optional callback to report progress.

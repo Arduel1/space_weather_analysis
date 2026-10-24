@@ -45,7 +45,7 @@ class TestEnsureAware:
 
     def test_aware_non_utc_converts_to_utc(self) -> None:
         """
-        Scenario: Input is aware but NOT UTC (e.g. UTC+1).
+        Scenario: Input is aware but NOT UTC (UTC+1).
         Expected: Result is converted to UTC (time shifted).
         """
         # UTC+1
@@ -256,9 +256,9 @@ class TestNumericTimeConversions:
 
     def test_respects_range_constraints(self) -> None:
         """
-        Scenario: Dates are technically valid but fall outside the 'plausible' range (e.g. 1900).
+        Scenario: A date in 1900 is technically valid but falls outside the 'plausible' range.
         Expected:
-            - Should be rejected if range is set to 1950-2050.
+            - Should be rejected if range is set to 1975-2050.
             - Should be accepted if range is None.
         """
         # Unix timestamp for 1900-01-01: approx -2208988800
@@ -302,8 +302,7 @@ class TestNumericTimeConversions:
 
     def test_rejects_garbage(self) -> None:
         """
-        Scenario: Random numbers that don't make sense in any time format
-                  (e.g., extremely large numbers resulting in year 50000+).
+        Scenario: Values (1e20, 1e21) too large to be a timestamp in any supported time format.
         Expected: Returns None even without explicit range, as pandas usually
                   fails to convert overflows or results in obviously wrong data logic.
         """
@@ -626,7 +625,7 @@ class TestParseNumericWithUnits:
             assert result == mock_dt.replace(tzinfo=timezone.utc)
 
     def test_handles_cftime_object(self) -> None:
-        """Scenario: num2date returns a cftime object (e.g. for noleap calendar)."""
+        """Scenario: num2date returns a cftime-like object for the noleap calendar."""
 
         with patch("space_weather_analysis.util.time_utils.num2date") as mock_num2date:
             # Mock a cftime-like object
@@ -642,7 +641,7 @@ class TestParseNumericWithUnits:
             assert result.tzinfo == timezone.utc
 
     def test_returns_none_on_error(self) -> None:
-        """Scenario: netCDF4 raises an error (e.g. bad units)."""
+        """Scenario: num2date raises an error for an invalid units string."""
         with patch("space_weather_analysis.util.time_utils.num2date") as mock_num2date:
             mock_num2date.side_effect = Exception("Bad units")
 

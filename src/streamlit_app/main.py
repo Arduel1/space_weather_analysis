@@ -33,7 +33,7 @@ def parse_catalog_time(time_str: Optional[str], default: datetime) -> datetime:
     Parses a time string from the catalog into a timezone-aware datetime object.
 
     Args:
-        time_str: The ISO formatted time string (e.g., '2000-01-01T00:00:00Z').
+        time_str: The catalog time string in any format accepted by dateutil; naive times are treated as UTC.
         default: A fallback datetime to return if parsing fails or input is None.
 
     Returns:

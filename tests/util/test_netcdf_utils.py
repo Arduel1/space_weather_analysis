@@ -216,7 +216,7 @@ class TestIsDatetimeType:
         assert _is_datetime_type(da) is False
 
     def test_handles_mock_objects_gracefully(self) -> None:
-        """Scenario: Input has no dtype attribute (e.g. mocked bad input)."""
+        """Scenario: Input object has no dtype attribute."""
         mock_obj = MagicMock()
         del mock_obj.dtype  # Simulate missing attribute
         assert _is_datetime_type(mock_obj) is False  # type: ignore

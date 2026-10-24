@@ -61,7 +61,7 @@ class GfzClient(BaseClient):
         Retrieves metadata for the specified index.
 
         Args:
-            dataset_id (str): The index name (e.g., 'Kp').
+            dataset_id (str): The GFZ index name.
 
         Returns:
             Dict[str, Any]: Metadata including units and description.
@@ -73,7 +73,7 @@ class GfzClient(BaseClient):
         Fetches Kp index data for the specified time range.
 
         Args:
-            dataset_id (str): The index to fetch (default 'Kp').
+            dataset_id (str): The GFZ index name to fetch.
             start_time (datetime): Start of the window.
             end_time (datetime): End of the window.
 
@@ -88,8 +88,7 @@ class GfzClient(BaseClient):
 
         params = {"start": start_str, "end": end_str, "index": dataset_id}
 
-        # Some indices support a 'status' parameter, but we default to 'def' (definitive)
-        # or 'all' based on typical usage. Here we omit it to get everything unless specified.
+        # The optional 'status' parameter is only sent if it is passed in kwargs
         if "status" in kwargs:
             params["status"] = kwargs["status"]
 

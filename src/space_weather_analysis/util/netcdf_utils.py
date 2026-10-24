@@ -186,7 +186,7 @@ def find_heuristic_time_candidates(ds: xr.Dataset, time_dim: str) -> List[str]:
                 continue
 
             # Use existing confidence logic from this module
-            # This checks for name patterns like 'time', 'epoch', etc.
+            # This rates the variable by its units, CF attributes and name
             confidence = _evaluate_variable_confidence(str(var_name), da)
 
             # Prefer 1D variables (vectors) over multi-dimensional matrices
@@ -409,10 +409,10 @@ def _scan_netcdf_backend(ds: xr.Dataset) -> Tuple[Optional[str], int]:
 
 def decode_time_variable_from_file(ds: xr.Dataset, time_coord: str) -> Optional[np.ndarray]:
     """
-    Decodes a time variable using only file metadata (e.g. NetCDF attributes).
+    Decodes a time variable using only metadata stored in the file.
 
-    Prefers using `netCDF4.num2date` if 'units' and 'calendar' attributes are present
-    on the underlying NetCDF variable.
+    Prefers using `netCDF4.num2date` if the underlying NetCDF variable has a string
+    'units' attribute; a missing 'calendar' attribute defaults to 'standard'.
 
     Args:
         ds (xr.Dataset): The dataset.

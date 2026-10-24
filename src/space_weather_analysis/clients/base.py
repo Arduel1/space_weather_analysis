@@ -29,10 +29,10 @@ class BaseClient(ABC):
         Retrieves detailed metadata for a specific dataset.
 
         Args:
-            dataset_id (str): The unique identifier of the dataset.L
+            dataset_id (str): The unique identifier of the dataset.
 
         Returns:
-            Dict[str, Any]: Detailed metadata (parameters, units, etc.).
+            Dict[str, Any]: Detailed metadata; the keys depend on the implementation.
         """
         pass
 
@@ -45,7 +45,7 @@ class BaseClient(ABC):
             dataset_id (str): The unique identifier of the dataset.
             start_time (datetime): The start of the requested time range.
             end_time (datetime): The end of the requested time range.
-            **kwargs: Additional provider-specific arguments (e.g., parameters).
+            **kwargs: Additional provider-specific arguments.
 
         Returns:
             Any: The fetched data (structure depends on implementation).

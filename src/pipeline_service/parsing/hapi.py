@@ -100,7 +100,7 @@ def _expand_array_parameter(
 
     Returns:
         A DataFrame with columns for each component of the array,
-        or None if validation fails (e.g., shape mismatch).
+        or None if the 'size' attribute is missing or the data shape does not match it.
     """
     # Safety check for size attribute
     size_list = param_meta.get("size")
@@ -123,10 +123,10 @@ def _expand_array_parameter(
     col_names: List[str]
 
     if isinstance(labels, list) and len(labels) == vector_length:
-        # Use provided labels (e.g., ["x", "y", "z"] -> "B_x", "B_y", "B_z")
+        # One column '<param_name>_<label>' per provided label
         col_names = [f"{param_name}_{label}" for label in labels]
     else:
-        # Fallback to numerical indices (e.g., "Flux_0", "Flux_1")
+        # Fall back to one column '<param_name>_<index>' per component
         col_names = [f"{param_name}_{i}" for i in range(vector_length)]
 
     return pd.DataFrame(param_data, index=time_index, columns=col_names)

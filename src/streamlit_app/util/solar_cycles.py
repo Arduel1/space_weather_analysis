@@ -12,7 +12,7 @@ def calculate_cycle_boundaries(num_cycles: int = 30) -> List[datetime]:
     catalog lookups.
 
     Args:
-        num_cycles: Number of future cycles to calculate.
+        num_cycles: Number of cycle boundaries to calculate, starting at 1810.
 
     Returns:
         A list of datetime objects representing the theoretical minima.
@@ -32,7 +32,8 @@ def calculate_cycle_boundaries(num_cycles: int = 30) -> List[datetime]:
 
 def get_significant_events() -> List[datetime]:
     """
-    Returns a list of dates representing significant solar events (e.g. major storms).
+    Returns a fixed list of historically significant solar and geomagnetic storm events,
+    each dated to the first day of its month.
     """
     return [
         datetime(1859, 9, 1),
