@@ -130,7 +130,7 @@ For the ground magnetometer data we gratefully acknowledge: INTERMAGNET; USGS Ge
 ## Tech Stack
 
 - Language: Python 3.12
-- Dependency management: Poetry (with lockfile)
+- Dependency management: uv (with lockfile)
 - Configuration: pydantic-settings (environment variables)
 - Storage: MongoDB (with GridFS for large files), browsed via mongo-express
 - Frontend: Streamlit and Plotly
@@ -140,12 +140,12 @@ For the ground magnetometer data we gratefully acknowledge: INTERMAGNET; USGS Ge
 
 ## Getting Started
 
-The full stack runs in Docker. Poetry is only required for local development, tests, and notebooks.
+The full stack runs in Docker. uv is only required for local development, tests, and notebooks.
 
 ### Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) with the Docker Compose plugin
-- [Poetry](https://python-poetry.org/docs/) (for development only)
+- [uv](https://docs.astral.sh/uv/) (for development only)
 
 ### Run the stack
 
@@ -194,26 +194,26 @@ The full stack runs in Docker. Poetry is only required for local development, te
 
 ```bash
 # Install all dependencies, including dev tools
-poetry install
+uv sync
 
 # Run the test suite
-poetry run pytest
+uv run pytest
 
 # Lint and format
-poetry run ruff check src
-poetry run ruff format src
+uv run ruff check src
+uv run ruff format src
 
 # Type-check
-poetry run mypy src
+uv run mypy src
 ```
 
-`pytest` runs the unit tests; tests marked `integration` need Docker, start a throwaway MongoDB themselves (no running stack or credentials needed) and are run with `poetry run pytest -m integration`.
+`pytest` runs the unit tests; tests marked `integration` need Docker, start a throwaway MongoDB themselves (no running stack or credentials needed) and are run with `uv run pytest -m integration`.
 
-Test coverage can be inspected with `poetry run pytest --cov=src --cov-report=term-missing`.
+Test coverage can be inspected with `uv run pytest --cov=src --cov-report=term-missing`.
 
-Jupyter notebooks for exploratory analysis live in `notebooks/` and can be run with `poetry run jupyter lab`.
+Jupyter notebooks for exploratory analysis live in `notebooks/` and can be run with `uv run jupyter lab`.
 
-Tools started outside Docker, such as the notebooks, need `MONGO_HOST=localhost` (and the published port as `MONGO_PORT` if it was changed).
+Tools started outside Docker, such as the notebooks, can load the variables from `.env` with `uv run --env-file .env <command>`. Variables already set in the environment take precedence over the file, so `MONGO_HOST=localhost uv run --env-file .env jupyter lab` reaches the MongoDB published on the host (add `MONGO_PORT=<published port>` if the port was changed).
 
 ## Project Structure
 
@@ -222,7 +222,7 @@ Tools started outside Docker, such as the notebooks, need `MONGO_HOST=localhost`
 ├── docker-compose.yml          # Five-service stack definition
 ├── Dockerfile                  # Shared image for all Python services
 ├── pyproject.toml              # Project metadata, dependencies, tool config
-├── poetry.lock                 # Locked dependency versions
+├── uv.lock                     # Locked dependency versions
 ├── example.env                 # Template for required environment variables
 ├── data/                       # Local data files (not in the repository) and HAPI server list
 ├── docs/                       # Architecture diagram (editable draw.io SVG) and local data notes

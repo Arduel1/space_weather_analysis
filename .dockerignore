@@ -1,0 +1,24 @@
+# Local environment and secrets
+.venv
+.env
+
+# Version control and editor settings
+.git
+.gitignore
+.vscode
+.claude
+
+# Caches and coverage output
+**/__pycache__
+**/*.py[cod]
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.coverage
+.coverage.*
+htmlcov
+
+# Not needed in the image
+notebooks
+tests
+docs
