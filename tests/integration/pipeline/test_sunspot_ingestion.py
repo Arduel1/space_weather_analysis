@@ -42,7 +42,6 @@ def test_sunspot_ingestion_stores_one_document_per_row_at_its_date(
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(strict=True, reason="the date in fraction of year is stored under the field name date_fraction_year")
 def test_sunspot_measurements_stored_as_given(db: Database, sunspot_dir: pathlib.Path, stored_data: StoredData) -> None:
     """The measurement columns are stored unchanged, including a sunspot number of 0."""
     LocalPipeline(db, sunspot_dir).run([SUNSPOT_COLLECTION])
@@ -58,10 +57,6 @@ def test_sunspot_measurements_stored_as_given(db: Database, sunspot_dir: pathlib
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(
-    strict=True,
-    reason="the indicator is stored as the field indicator, false for 0 and true for 1",
-)
 def test_sunspot_is_provisional_set_from_indicator(db: Database, sunspot_dir: pathlib.Path, stored_data: StoredData) -> None:
     """Every document has is_provisional (true for indicator 0) and no bare indicator field."""
     LocalPipeline(db, sunspot_dir).run([SUNSPOT_COLLECTION])

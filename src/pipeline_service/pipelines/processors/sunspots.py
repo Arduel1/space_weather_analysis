@@ -24,7 +24,7 @@ class SilsoETL(BaseETLProcessor):
         "year",
         "month",
         "day",
-        "date_fraction_year",
+        "decimal_year",
         "sunspot_number",
         "std_dev",
         "num_observations",
@@ -85,14 +85,15 @@ class SilsoETL(BaseETLProcessor):
 
         # Combine year, month, and day into a timestamp
         raw_data["timestamp"] = pd.to_datetime(raw_data[["year", "month", "day"]])
-        raw_data["indicator"] = raw_data["indicator"].astype(bool)
+        # SILSO marks provisional values with indicator 0 and definitive values with 1.
+        raw_data["is_provisional"] = raw_data["indicator"] == 0
 
         data_columns = [
             "sunspot_number",
             "std_dev",
             "num_observations",
-            "indicator",
-            "date_fraction_year",
+            "is_provisional",
+            "decimal_year",
         ]
 
         data_payloads = raw_data[data_columns].to_dict("records")
