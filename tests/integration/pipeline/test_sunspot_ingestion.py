@@ -43,7 +43,7 @@ def test_sunspot_ingestion_stores_one_document_per_row_at_its_date(
 
 @pytest.mark.integration
 def test_sunspot_measurements_stored_as_given(db: Database, sunspot_dir: pathlib.Path, stored_data: StoredData) -> None:
-    """The measurement columns are stored unchanged, including a sunspot number of 0."""
+    """The measurement columns are stored unchanged, counts as integers, including a sunspot number of 0."""
     LocalPipeline(db, sunspot_dir).run([SUNSPOT_COLLECTION])
 
     stored = {
@@ -54,6 +54,7 @@ def test_sunspot_measurements_stored_as_given(db: Database, sunspot_dir: pathlib
         REGULAR_DAY: pytest.approx({"sunspot_number": 123, "std_dev": 11.5, "num_observations": 27, "decimal_year": 2001.199}),
         SPOTLESS_DAY: pytest.approx({"sunspot_number": 0, "std_dev": 0.0, "num_observations": 25, "decimal_year": 2001.204}),
     }
+    assert all(isinstance(fields[count], int) for fields in stored.values() for count in ("sunspot_number", "num_observations"))
 
 
 @pytest.mark.integration
@@ -91,10 +92,6 @@ def test_sunspot_std_dev_and_observations_absent_when_number_is_missing(db: Data
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(
-    strict=True,
-    reason="the non-numeric value turns the whole sunspot_number column into strings",
-)
 def test_sunspot_non_numeric_value_affects_only_its_own_field(
     db: Database, data_dir_with_extra_row: DataDirWithExtraRow, stored_data: StoredData
 ) -> None:
@@ -110,10 +107,6 @@ def test_sunspot_non_numeric_value_affects_only_its_own_field(
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(
-    strict=True,
-    reason="the invalid date makes the timestamp conversion of all rows raise, so nothing is stored",
-)
 def test_sunspot_row_skipped_when_date_is_invalid(
     db: Database, data_dir_with_extra_row: DataDirWithExtraRow, stored_timestamps_and_metadata: StoredTimestampsAndMetadata
 ) -> None:

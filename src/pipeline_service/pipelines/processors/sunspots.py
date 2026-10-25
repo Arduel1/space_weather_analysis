@@ -2,7 +2,6 @@ import logging
 import pathlib
 from typing import Any, Dict, List, Optional
 
-import numpy as np
 import pandas as pd
 from pymongo.database import Database
 
@@ -30,6 +29,8 @@ class SilsoETL(BaseETLProcessor):
         "num_observations",
         "indicator",
     ]
+    # Fields that hold placeholders instead of measurements on days without a sunspot number (-1).
+    _FIELDS_UNSET_ON_MISSING_DAY = ["sunspot_number", "std_dev", "num_observations"]
 
     def __init__(self, db: Database, file_path: pathlib.Path) -> None:
         """Initializes the sunspot data ETL processor.
@@ -57,7 +58,8 @@ class SilsoETL(BaseETLProcessor):
                 self.file_path,
                 sep=";",
                 names=self._COLUMN_NAMES,
-                dtype={"year": int, "month": int, "day": int},
+                # Text columns let the transform step convert and validate each field on its own.
+                dtype=str,
                 skipinitialspace=True,
             )
             logger.info(f"Extracted {len(df)} rows from CSV.")
@@ -80,30 +82,37 @@ class SilsoETL(BaseETLProcessor):
             return []
 
         logger.info("--- Starting Transform for SILSO ---")
-        # On days without a sunspot number (-1), std_dev and num_observations are placeholders, not measurements.
-        is_missing = raw_data["sunspot_number"] == -1
-        raw_data["std_dev"] = raw_data["std_dev"].mask(is_missing)
-        # Nullable integer type keeps the count an integer while marking missing days as NA.
-        raw_data["num_observations"] = raw_data["num_observations"].astype("Int64").mask(is_missing)
+        # An unparsable value becomes NA in its own column only, so the rest of the row stays usable.
+        numeric = raw_data.apply(pd.to_numeric, errors="coerce")
 
-        # Replace -1 (missing value indicator) with NaN
-        raw_data["sunspot_number"] = raw_data["sunspot_number"].replace(-1, np.nan)
+        timestamps_all = pd.to_datetime(numeric[["year", "month", "day"]], errors="coerce")
+        has_valid_date = timestamps_all.notna()
+        if not has_valid_date.all():
+            logger.warning(f"Skipped {(~has_valid_date).sum()} rows without a valid date.")
+        numeric = numeric[has_valid_date]
 
-        # Combine year, month, and day into a timestamp
-        raw_data["timestamp"] = pd.to_datetime(raw_data[["year", "month", "day"]])
-        # SILSO marks provisional values with indicator 0 and definitive values with 1.
-        raw_data["is_provisional"] = raw_data["indicator"] == 0
+        is_missing = numeric["sunspot_number"] == -1
+        data = pd.DataFrame(
+            {
+                "sunspot_number": self._to_count(numeric["sunspot_number"]).mask(is_missing),
+                "std_dev": numeric["std_dev"].mask(is_missing),
+                "num_observations": self._to_count(numeric["num_observations"]).mask(is_missing),
+                # SILSO marks provisional values with indicator 0 and definitive values with 1.
+                "is_provisional": numeric["indicator"].map({0: True, 1: False}),
+                "decimal_year": numeric["decimal_year"],
+            }
+        )
 
-        data_columns = [
-            "sunspot_number",
-            "std_dev",
-            "num_observations",
-            "is_provisional",
-            "decimal_year",
-        ]
+        # A field counts as invalid if the file has a value for it that is neither valid nor a documented placeholder.
+        given = raw_data.loc[has_valid_date].rename(columns={"indicator": "is_provisional"})[data.columns].notna()
+        invalid = data.isna() & given
+        invalid.loc[is_missing, self._FIELDS_UNSET_ON_MISSING_DAY] = False
+        for column, count in invalid.sum().items():
+            if count:
+                logger.warning(f"Omitted {count} invalid values in field {column}.")
 
-        data_payloads = raw_data[data_columns].to_dict("records")
-        timestamps = raw_data["timestamp"].to_list()
+        data_payloads = data.to_dict("records")
+        timestamps = timestamps_all[has_valid_date].to_list()
         metadata = {"source": "SILSO_V2.0"}
 
         documents = [
@@ -117,6 +126,18 @@ class SilsoETL(BaseETLProcessor):
 
         logger.info(f"Transformed {len(documents)} documents.")
         return documents
+
+    @staticmethod
+    def _to_count(values: pd.Series) -> pd.Series:
+        """Converts whole numbers to a nullable integer column.
+
+        Args:
+            values: Numeric values, NA where the file held no parsable number.
+
+        Returns:
+            The values as Int64; fractional values become NA.
+        """
+        return values.where(values % 1 == 0).astype("Int64")
 
     def run(self) -> None:
         """Orchestrates the ETL process for sunspot data."""
