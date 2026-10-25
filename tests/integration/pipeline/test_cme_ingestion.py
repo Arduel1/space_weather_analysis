@@ -95,7 +95,6 @@ def test_cme_is_halo_set_from_central_position_angle(db: Database, cme_dir: path
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(strict=True, reason="central_pa is stored as the raw catalog string, 'Halo' for a halo event")
 def test_cme_central_pa_numeric_for_non_halo_and_absent_for_halo(db: Database, cme_dir: pathlib.Path, stored_data: StoredData) -> None:
     """central_pa is a number for a non-halo event and absent for a halo event."""
     LocalPipeline(db, cme_dir).run([CME_COLLECTION])
@@ -115,10 +114,6 @@ def test_cme_placeholder_values_absent_from_document(db: Database, cme_dir: path
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(
-    strict=True,
-    reason="the '*' marker is cut off the value and no marker flag field is stored",
-)
 def test_cme_marker_flags_set_only_for_marked_values(db: Database, cme_dir: pathlib.Path, stored_data: StoredData) -> None:
     """A '*' sets the flag of its value (acceleration, mass, kinetic energy) to true, only on marked events."""
     LocalPipeline(db, cme_dir).run([CME_COLLECTION])
@@ -133,7 +128,6 @@ def test_cme_marker_flags_set_only_for_marked_values(db: Database, cme_dir: path
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(strict=True, reason="whitespace runs in the remarks are collapsed into one space")
 def test_cme_remarks_stored_exactly_as_given(db: Database, cme_dir: pathlib.Path, stored_data: StoredData) -> None:
     """Remarks are stored verbatim, including semicolons and repeated spaces."""
     LocalPipeline(db, cme_dir).run([CME_COLLECTION])
@@ -143,7 +137,6 @@ def test_cme_remarks_stored_exactly_as_given(db: Database, cme_dir: pathlib.Path
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(strict=True, reason="an event without remarks stores remarks as the empty string")
 def test_cme_remarks_absent_when_event_has_none(db: Database, cme_dir: pathlib.Path, stored_data: StoredData) -> None:
     """An event row without remarks is stored without a remarks field."""
     LocalPipeline(db, cme_dir).run([CME_COLLECTION])
@@ -202,7 +195,6 @@ def test_cme_ingestion_creates_timeseries_collection(db: Database, cme_dir: path
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(strict=True, reason="every run appends all documents again, so a second run duplicates them")
 def test_repeated_cme_ingestion_does_not_duplicate_documents(db: Database, cme_dir: pathlib.Path) -> None:
     """Ingesting the unchanged catalog twice keeps one document per event row."""
     LocalPipeline(db, cme_dir).run([CME_COLLECTION])

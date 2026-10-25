@@ -145,6 +145,7 @@ class SilsoETL(BaseETLProcessor):
                 time_field="timestamp",
                 meta_field="metadata",
             )
-            self._load_data(self.COLLECTION_NAME, documents, self.DEFAULT_BATCH_SIZE)
+            # The file holds the complete dataset including revised provisional values, so each run replaces the collection content.
+            self._load_data(self.COLLECTION_NAME, documents, self.DEFAULT_BATCH_SIZE, clear_collection=True)
 
         logger.info("--- Finished ETL process for SILSO ---")

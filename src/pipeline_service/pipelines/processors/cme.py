@@ -1,6 +1,5 @@
 import logging
 import pathlib
-import re
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -34,6 +33,12 @@ class CmeETL(BaseETLProcessor):
     ]
     # Dash runs that the catalog writes in place of an unknown value.
     _PLACEHOLDERS = {"----", "------", "-------"}
+    # Columns in which a trailing '*' marks an uncertain value, mapped to the flag field storing that marker.
+    _MARKER_FLAGS = {
+        "accel": "accel_unreliable",
+        "mass": "mass_uncertain",
+        "kinetic_energy": "kinetic_energy_uncertain",
+    }
 
     def __init__(self, db: Database, file_path: pathlib.Path) -> None:
         """Initializes the CME ETL processor.
@@ -62,19 +67,14 @@ class CmeETL(BaseETLProcessor):
                 lines = f.readlines()
                 # Skip the header rows (first 4 lines)
                 for line in lines[4:]:
-                    line_normalized = re.sub(r"\s+", " ", line).strip()
-                    if not line_normalized:
+                    # The remarks are the rest of the line after the 12th column and keep their inner spacing.
+                    parts = line.rstrip().split(maxsplit=12)
+                    if not parts:
                         continue
-                    try:
-                        # Split into columns, accounting for potential variable whitespace
-                        parts = line_normalized.split(" ", maxsplit=12)
-                        if len(parts) == 12:
-                            parts.append("")  # Handle missing remarks
-                        parsed_data.append(dict(zip(self._COLUMN_NAMES, parts, strict=False)))
-                    except Exception as e:
-                        logger.warning(f"Could not parse line: {line.strip()} | Error: {e}")
+                    # Rows without remarks have 12 parts and get no remarks entry.
+                    parsed_data.append(dict(zip(self._COLUMN_NAMES, parts, strict=False)))
 
-            df = pd.DataFrame(parsed_data)
+            df = pd.DataFrame(parsed_data, columns=self._COLUMN_NAMES)
             logger.info(f"Extracted and parsed {len(df)} rows from CME catalog.")
             return df
         except Exception as e:
@@ -95,7 +95,11 @@ class CmeETL(BaseETLProcessor):
             return []
 
         logger.info("--- Starting Transform for CME Catalog ---")
-        raw_data = raw_data.replace(r"\*.*", "", regex=True)
+        for column, flag in self._MARKER_FLAGS.items():
+            is_marked = raw_data[column].str.endswith("*", na=False)
+            # The flag is stored as true for marked values only; unmarked events get no flag field.
+            raw_data[flag] = is_marked.map({True: True, False: None})
+            raw_data[column] = raw_data[column].str.removesuffix("*")
 
         try:
             raw_data["timestamp"] = pd.to_datetime(
@@ -110,8 +114,11 @@ class CmeETL(BaseETLProcessor):
 
         # Feature engineering
         raw_data["is_halo"] = raw_data["central_pa"].str.contains("Halo", na=False)
+        # A halo CME has no central position angle; is_halo carries that information.
+        raw_data["central_pa"] = raw_data["central_pa"].mask(raw_data["is_halo"])
 
         numeric_cols = [
+            "central_pa",
             "width",
             "linear_speed",
             "spd_initial",
@@ -153,6 +160,7 @@ class CmeETL(BaseETLProcessor):
             "kinetic_energy",
             "mpa",
             "is_halo",
+            *self._MARKER_FLAGS.values(),
             "remarks",
         ]
 
@@ -178,6 +186,7 @@ class CmeETL(BaseETLProcessor):
                 time_field="timestamp",
                 meta_field="metadata",
             )
-            self._load_data(self.COLLECTION_NAME, documents, self.DEFAULT_BATCH_SIZE)
+            # The file holds the complete dataset and records have no unique key, so each run replaces the collection content.
+            self._load_data(self.COLLECTION_NAME, documents, self.DEFAULT_BATCH_SIZE, clear_collection=True)
 
         logger.info("--- Finished ETL process for CME Catalog ---")

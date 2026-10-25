@@ -131,7 +131,6 @@ def test_sunspot_ingestion_creates_timeseries_collection(db: Database, sunspot_d
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(strict=True, reason="every run appends all documents again, so a second run duplicates them")
 def test_repeated_sunspot_ingestion_does_not_duplicate_documents(db: Database, sunspot_dir: pathlib.Path) -> None:
     """Ingesting the unchanged file twice keeps one document per row."""
     LocalPipeline(db, sunspot_dir).run([SUNSPOT_COLLECTION])
