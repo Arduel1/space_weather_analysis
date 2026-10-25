@@ -9,9 +9,7 @@ from space_weather_analysis.config.mongo import MongoSettings
 
 @pytest.fixture(autouse=True)
 def clean_mongo_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """
-    Removes all MONGO_* variables so nothing leaks in from the surrounding environment.
-    """
+    """Removes all MONGO_* variables of the surrounding environment."""
     for name in list(os.environ):
         if name.upper().startswith("MONGO_"):
             monkeypatch.delenv(name)
@@ -19,9 +17,7 @@ def clean_mongo_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    """
-    Sets only the required credentials.
-    """
+    """Sets only the required credentials."""
     monkeypatch.setenv("MONGO_USER", "test-user")
     monkeypatch.setenv("MONGO_PASS", "test-secret")
 
@@ -48,7 +44,7 @@ class TestMongoSettings:
         assert settings.db_name == "other_db"
 
     def test_unrelated_mongo_variables_are_ignored(self, credentials: None, monkeypatch: pytest.MonkeyPatch) -> None:
-        # Variables of the Compose setup that share the prefix must not break the settings.
+        # Compose variables that share the MONGO_ prefix but are not settings fields.
         monkeypatch.setenv("MONGO_HOST_PORT", "27019")
         monkeypatch.setenv("MONGO_EXPRESS_USER", "admin-ui")
 

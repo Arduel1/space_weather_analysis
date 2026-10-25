@@ -10,19 +10,14 @@ from space_weather_analysis.util.error_handling import (
 
 class TestErrorClasses:
     def test_inheritance_hierarchy(self) -> None:
-        """
-        Ensure all custom exceptions inherit from the base SpaceWeatherError.
-        This guarantees that 'except SpaceWeatherError' catches them all.
-        """
+        """All custom exceptions derive from SpaceWeatherError."""
         assert issubclass(DataRetrievalError, SpaceWeatherError)
         assert issubclass(DataProcessingError, SpaceWeatherError)
         assert issubclass(CatalogError, SpaceWeatherError)
         assert issubclass(SpaceWeatherError, Exception)
 
     def test_catch_base_exception(self) -> None:
-        """
-        Verify that raising a specific error is caught by the base class block.
-        """
+        """A specific error is caught by 'except SpaceWeatherError'."""
         try:
             raise DataRetrievalError("Network down")
         except SpaceWeatherError as e:
@@ -32,9 +27,7 @@ class TestErrorClasses:
             pytest.fail("Should have been caught by SpaceWeatherError")
 
     def test_distinct_exceptions(self) -> None:
-        """
-        Verify that specific exceptions can be caught individually.
-        """
+        """A specific error is not caught by a sibling's except block."""
         try:
             raise CatalogError("Invalid JSON")
         except DataRetrievalError:

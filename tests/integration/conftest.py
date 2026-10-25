@@ -7,28 +7,20 @@ from testcontainers.community.mongodb import MongoDbContainer
 
 from space_weather_analysis.config.mongo import MongoSettings
 
-# The same image reference as the 'mongo' service in docker-compose.yml.
+# Same image as the 'mongo' service in docker-compose.yml.
 MONGO_IMAGE = "mongo"
 
-# Root credentials of the throwaway container. They are passed explicitly so that
-# the container never picks up MONGO_INITDB_* variables from the environment.
+# Passed explicitly so the container ignores MONGO_INITDB_* from the environment.
 CONTAINER_USER = "test"
 CONTAINER_PASSWORD = "test"
 
-# Integration tests always use this dedicated database, because the fixtures
-# write to it and drop its collections.
+# The fixtures drop collections, so only this dedicated database is used.
 TEST_DB_NAME = "space_weather_test"
 
 
 @pytest.fixture(scope="session")
 def mongo_container() -> Generator[MongoDbContainer, None, None]:
-    """
-    Starts a throwaway MongoDB container for the entire test session.
-
-    The container is started via Docker and removed at the end of the session.
-    Before it is handed out, the server is pinged until it accepts authenticated
-    connections, because the image runs a temporary mongod while it creates the root user.
-    """
+    """Session-wide throwaway MongoDB; pinged first, as the image runs a temporary mongod during user setup."""
     with MongoDbContainer(MONGO_IMAGE, username=CONTAINER_USER, password=CONTAINER_PASSWORD) as container:
         client: MongoClient = MongoClient(container.get_connection_url(), serverSelectionTimeoutMS=30000)
         try:
@@ -40,13 +32,8 @@ def mongo_container() -> Generator[MongoDbContainer, None, None]:
 
 @pytest.fixture(scope="session")
 def mongo_settings(mongo_container: MongoDbContainer) -> MongoSettings:
-    """
-    Builds MongoDB settings that point to the throwaway container.
-
-    Host, mapped port and root credentials are taken from the container. The
-    database is always the dedicated test database.
-    """
-    # The password field is populated via its alias, which is the environment variable name.
+    """Settings pointing to the container and the dedicated test database."""
+    # The password field is only populated via its alias.
     return MongoSettings(
         user=mongo_container.username,
         MONGO_PASS=mongo_container.password,
@@ -58,14 +45,10 @@ def mongo_settings(mongo_container: MongoDbContainer) -> MongoSettings:
 
 @pytest.fixture(scope="session")
 def mongo_client(mongo_settings: MongoSettings) -> Generator[MongoClient, None, None]:
-    """
-    Creates a MongoDB connection for the entire test session.
-    Relies on the settings from the mongo_settings fixture.
-    """
+    """Session-wide client for the container."""
     client: MongoClient = MongoClient(mongo_settings.connection_uri(), serverSelectionTimeoutMS=2000)
 
     try:
-        # Check if the database is reachable
         client.admin.command("ping")
         yield client
     finally:
@@ -74,31 +57,18 @@ def mongo_client(mongo_settings: MongoSettings) -> Generator[MongoClient, None, 
 
 @pytest.fixture(scope="function")
 def db(mongo_client: MongoClient) -> Generator[Database, None, None]:
-    """
-    Provides a clean test database instance for each test function.
-    Drops all collections after the test to prevent side effects,
-    EXCEPT for critical collections like 'master_catalog'.
-    Always uses the dedicated test database, never the configured MONGO_DB_NAME.
-    """
+    """Test database, cleaned before and after each test."""
     database = mongo_client[TEST_DB_NAME]
 
-    # Pre-test cleanup
     _clean_database(database)
 
     yield database
 
-    # Post-test cleanup
     _clean_database(database)
 
 
 def _clean_database(database: Database) -> None:
-    """
-    Helper function to drop non-essential collections in the database.
-
-    Preserves:
-    - master_catalog: Required for discovery/pipeline tests.
-    - system.*: Internal MongoDB collections.
-    """
+    """Drops all collections except 'master_catalog' and 'system.*'."""
     if database.name != TEST_DB_NAME:
         raise RuntimeError(f"Refusing to clean database '{database.name}': only '{TEST_DB_NAME}' may be cleaned.")
 

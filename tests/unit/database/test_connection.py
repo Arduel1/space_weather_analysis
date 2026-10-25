@@ -10,18 +10,14 @@ from space_weather_analysis.database.connection import MongoConnection
 
 @pytest.fixture
 def settings() -> MongoSettings:
-    """
-    Settings built explicitly, independent of the surrounding environment.
-    """
-    # The password field is populated via its alias, which is the environment variable name.
+    """Settings built explicitly, independent of the environment."""
+    # The password field is only populated via its alias.
     return MongoSettings(user="test-user", MONGO_PASS="test-secret", host="db.example", port=1234, db_name="unit_db")
 
 
 @pytest.fixture
 def mock_client_cls() -> Generator[MagicMock, None, None]:
-    """
-    Replaces MongoClient where the connection module uses it, so no server is needed.
-    """
+    """Patches MongoClient in the connection module."""
     with patch("space_weather_analysis.database.connection.MongoClient") as client_cls:
         yield client_cls
 
