@@ -80,6 +80,12 @@ class SilsoETL(BaseETLProcessor):
             return []
 
         logger.info("--- Starting Transform for SILSO ---")
+        # On days without a sunspot number (-1), std_dev and num_observations are placeholders, not measurements.
+        is_missing = raw_data["sunspot_number"] == -1
+        raw_data["std_dev"] = raw_data["std_dev"].mask(is_missing)
+        # Nullable integer type keeps the count an integer while marking missing days as NA.
+        raw_data["num_observations"] = raw_data["num_observations"].astype("Int64").mask(is_missing)
+
         # Replace -1 (missing value indicator) with NaN
         raw_data["sunspot_number"] = raw_data["sunspot_number"].replace(-1, np.nan)
 

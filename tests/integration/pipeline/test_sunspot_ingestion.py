@@ -82,10 +82,6 @@ def test_sunspot_number_absent_when_value_is_minus_one(db: Database, sunspot_dir
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(
-    strict=True,
-    reason="a day without a number still stores std_dev -1.0 and num_observations 0",
-)
 def test_sunspot_std_dev_and_observations_absent_when_number_is_missing(db: Database, sunspot_dir: pathlib.Path, stored_data: StoredData) -> None:
     """A day without a sunspot number also omits std_dev and num_observations."""
     LocalPipeline(db, sunspot_dir).run([SUNSPOT_COLLECTION])
