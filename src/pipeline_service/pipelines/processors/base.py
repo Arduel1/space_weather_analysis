@@ -1,7 +1,9 @@
 import logging
 from abc import ABC, abstractmethod
-from typing import Any
+from datetime import datetime
+from typing import Any, Dict, List
 
+import pandas as pd
 from pymongo.database import Database
 
 from pipeline_service.database.mongo_loader import MongoLoader
@@ -44,6 +46,26 @@ class BaseETLProcessor(MongoLoader, ABC):
             A list of documents ready for insertion.
         """
         pass
+
+    @staticmethod
+    def _build_documents(timestamps: List[datetime], rows: List[Dict[str, Any]], metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Combines timestamps and data rows into time series documents.
+
+        Missing values (NaN, NA, None) are left out of a document's data instead of being stored.
+
+        Args:
+            timestamps: Time of each row.
+            rows: Field values of each row, in the same order as timestamps.
+            metadata: Metadata stored with every document.
+
+        Returns:
+            One document per row with the fields timestamp, metadata and data.
+        """
+        documents = []
+        for timestamp, row in zip(timestamps, rows, strict=True):
+            present_fields = {field: value for field, value in row.items() if not pd.isna(value)}
+            documents.append({"timestamp": timestamp, "metadata": metadata, "data": present_fields})
+        return documents
 
     @abstractmethod
     def run(self) -> None:

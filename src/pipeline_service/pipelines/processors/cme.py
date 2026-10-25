@@ -3,7 +3,6 @@ import pathlib
 import re
 from typing import Any, Dict, List, Optional
 
-import numpy as np
 import pandas as pd
 from pymongo.database import Database
 
@@ -33,6 +32,8 @@ class CmeETL(BaseETLProcessor):
         "mpa",
         "remarks",
     ]
+    # Dash runs that the catalog writes in place of an unknown value.
+    _PLACEHOLDERS = {"----", "------", "-------"}
 
     def __init__(self, db: Database, file_path: pathlib.Path) -> None:
         """Initializes the CME ETL processor.
@@ -94,8 +95,6 @@ class CmeETL(BaseETLProcessor):
             return []
 
         logger.info("--- Starting Transform for CME Catalog ---")
-        # Clean placeholders
-        raw_data = raw_data.replace(r"-------", np.nan, regex=True)
         raw_data = raw_data.replace(r"\*.*", "", regex=True)
 
         try:
@@ -124,9 +123,14 @@ class CmeETL(BaseETLProcessor):
             "mpa",
         ]
 
-        # Coerce numeric conversions
         for col in numeric_cols:
-            raw_data[col] = pd.to_numeric(raw_data[col], errors="coerce")
+            is_placeholder = raw_data[col].isin(self._PLACEHOLDERS)
+            numeric = pd.to_numeric(raw_data[col].mask(is_placeholder), errors="coerce")
+            # Values that are neither numbers nor placeholders are invalid and omitted like missing ones.
+            invalid_count = (numeric.isna() & raw_data[col].notna() & ~is_placeholder).sum()
+            if invalid_count:
+                logger.warning(f"Omitted {invalid_count} invalid values in field {col}.")
+            raw_data[col] = numeric
 
         raw_data.rename(
             columns={
@@ -156,7 +160,7 @@ class CmeETL(BaseETLProcessor):
         timestamps = raw_data["timestamp"].to_list()
         metadata = {"source": "SOHO/LASCO_CDAW_V2.0"}
 
-        documents = [{"timestamp": ts, "metadata": metadata, "data": data} for ts, data in zip(timestamps, data_payloads, strict=False)]
+        documents = self._build_documents(timestamps, data_payloads, metadata)
 
         logger.info(f"Transformed {len(documents)} CME documents.")
         return documents

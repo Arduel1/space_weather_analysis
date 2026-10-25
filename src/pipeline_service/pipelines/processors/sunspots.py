@@ -115,14 +115,7 @@ class SilsoETL(BaseETLProcessor):
         timestamps = timestamps_all[has_valid_date].to_list()
         metadata = {"source": "SILSO_V2.0"}
 
-        documents = [
-            {
-                "timestamp": ts,
-                "metadata": metadata,
-                "data": {k: v for k, v in data_dict.items() if not pd.isna(v)},
-            }
-            for ts, data_dict in zip(timestamps, data_payloads, strict=False)
-        ]
+        documents = self._build_documents(timestamps, data_payloads, metadata)
 
         logger.info(f"Transformed {len(documents)} documents.")
         return documents

@@ -106,7 +106,6 @@ def test_cme_central_pa_numeric_for_non_halo_and_absent_for_halo(db: Database, c
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(strict=True, reason="placeholder values are stored as NaN")
 def test_cme_placeholder_values_absent_from_document(db: Database, cme_dir: pathlib.Path, stored_data: StoredData) -> None:
     """Fields with a dash placeholder are omitted while the event is stored."""
     LocalPipeline(db, cme_dir).run([CME_COLLECTION])
@@ -154,7 +153,6 @@ def test_cme_remarks_absent_when_event_has_none(db: Database, cme_dir: pathlib.P
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(strict=True, reason="the non-numeric width is stored as NaN")
 def test_cme_non_numeric_value_affects_only_its_own_field(
     db: Database, data_dir_with_extra_row: DataDirWithExtraRow, stored_data: StoredData
 ) -> None:
