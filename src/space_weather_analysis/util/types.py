@@ -21,8 +21,7 @@ from sunpy.timeseries import GenericTimeSeries
 
 
 class TimeRangeDict(TypedDict):
-    """
-    Represents a start and end time pair in the catalog.
+    """Represents a start and end time pair in the catalog.
 
     Both values are date or date-time strings in the format of the source that
     reported them; they are not normalized to a common format.
@@ -37,8 +36,7 @@ class TimeRangeDict(TypedDict):
 
 
 class CatalogEntryDict(TypedDict):
-    """
-    A dictionary representing a single source entry in the catalog.
+    """A dictionary representing a single source entry in the catalog.
 
     This structure maps a specific data source to a dataset type and the
     time range available at that source.
@@ -60,8 +58,7 @@ class CatalogEntryDict(TypedDict):
 
 
 class MasterCatalogItem(TypedDict):
-    """
-    Represents a top-level item in the master catalog JSON structure.
+    """Represents a top-level item in the master catalog JSON structure.
 
     The master catalog groups multiple sources under a single unique dataset_id.
 
@@ -139,16 +136,14 @@ Structure: (dataset_id, catalog_entry_dictionary).
 
 @runtime_checkable
 class ETLProcessor(Protocol):
-    """
-    Protocol defining the interface for ETL processors.
+    """Protocol defining the interface for ETL processors.
 
     All ETL processors must implement the extract, transform, and run methods
     with these exact signatures to ensure interoperability.
     """
 
     def __init__(self, db: Database, **kwargs: Any) -> None:
-        """
-        Initializes the ETL processor.
+        """Initializes the ETL processor.
 
         Args:
             db: The MongoDB database instance.
@@ -157,8 +152,7 @@ class ETLProcessor(Protocol):
         ...
 
     def _extract(self) -> RawData:
-        """
-        Extracts raw data from the source.
+        """Extracts raw data from the source.
 
         Returns:
             RawData: The extracted data (DataFrame or List of Dicts), or None on failure.
@@ -166,8 +160,7 @@ class ETLProcessor(Protocol):
         ...
 
     def _transform(self, raw_data: RawData) -> TransformedDocuments:
-        """
-        Transforms raw data into MongoDB documents.
+        """Transforms raw data into MongoDB documents.
 
         Args:
             raw_data: The raw data from the extract step.
@@ -178,8 +171,7 @@ class ETLProcessor(Protocol):
         ...
 
     def run(self) -> None:
-        """
-        Executes the complete ETL process.
+        """Executes the complete ETL process.
 
         This method orchestrates the extract, transform, and load operations.
         """
@@ -188,16 +180,14 @@ class ETLProcessor(Protocol):
 
 @runtime_checkable
 class DataClient(Protocol):
-    """
-    Protocol defining the interface for data clients.
+    """Protocol defining the interface for data clients.
 
     All data clients must implement these methods to enable consistent
     data retrieval across different source types.
     """
 
     def get_metadata(self, dataset_id: str) -> Optional[MetadataDict]:
-        """
-        Retrieves metadata for a specific dataset.
+        """Retrieves metadata for a specific dataset.
 
         Args:
             dataset_id: The unique identifier of the dataset.
@@ -210,8 +200,7 @@ class DataClient(Protocol):
     def get_data_and_meta(
         self, dataset_id: str, start_time: datetime, end_time: datetime, **kwargs: Any
     ) -> Tuple[Optional[Any], Optional[MetadataDict]]:
-        """
-        Retrieves both data and metadata for a dataset within a time range.
+        """Retrieves both data and metadata for a dataset within a time range.
 
         Args:
             dataset_id: The unique identifier of the dataset.

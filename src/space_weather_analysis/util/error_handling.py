@@ -7,8 +7,8 @@ T = TypeVar("T")
 
 
 class SpaceWeatherError(Exception):
-    """
-    Base class for all exceptions specific to the Space Weather Analysis application.
+    """Base class for all exceptions specific to the Space Weather Analysis application.
+
     Allows catching all app-related errors with a single except block.
     """
 
@@ -16,25 +16,19 @@ class SpaceWeatherError(Exception):
 
 
 class DataRetrievalError(SpaceWeatherError):
-    """
-    Raised when data cannot be retrieved from any available source.
-    """
+    """Raised when data cannot be retrieved from any available source."""
 
     pass
 
 
 class DataProcessingError(SpaceWeatherError):
-    """
-    Raised when data processing fails after successful retrieval.
-    """
+    """Raised when data processing fails after successful retrieval."""
 
     pass
 
 
 class CatalogError(SpaceWeatherError):
-    """
-    Raised when catalog operations fail.
-    """
+    """Raised when catalog operations fail."""
 
     pass
 
@@ -45,8 +39,7 @@ def log_and_handle_expected_failure(
     error: Exception,
     logger_instance: logging.Logger,
 ) -> None:
-    """
-    Logs an expected operational failure at the INFO/WARNING level.
+    """Logs an expected operational failure at the INFO/WARNING level.
 
     Used for non-critical failures like server timeouts during fallback attempts.
 
@@ -65,8 +58,7 @@ def log_and_handle_unexpected_failure(
     error: Exception,
     logger_instance: logging.Logger,
 ) -> None:
-    """
-    Logs an unexpected failure at ERROR level with full stack trace.
+    """Logs an unexpected failure at ERROR level with full stack trace.
 
     Args:
         operation_name: Name of the operation that failed.
@@ -86,8 +78,7 @@ def safe_execute_with_fallback(
     operation_name: str,
     logger_instance: logging.Logger,
 ) -> Optional[T]:
-    """
-    Executes an operation with optional fallback handling.
+    """Executes an operation with optional fallback handling.
 
     Args:
         primary_operation: The primary operation to attempt.

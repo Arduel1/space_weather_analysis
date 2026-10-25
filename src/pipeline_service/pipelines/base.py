@@ -8,8 +8,7 @@ ProgressCallback = Callable[[float, str], None]
 
 
 class BasePipeline(ABC):
-    """
-    Abstract base class defining the common interface for all data pipelines.
+    """Abstract base class defining the common interface for all data pipelines.
 
     This class enforces a consistent structure for executing data processing
     workflows across different data sources.
@@ -23,8 +22,7 @@ class BasePipeline(ABC):
         end_time: Optional[datetime],
         progress_callback: Optional[ProgressCallback] = None,
     ) -> None:
-        """
-        Executes the pipeline for the specified datasets and time range.
+        """Executes the pipeline for the specified datasets and time range.
 
         Args:
             datasets: A list of dataset identifiers to process.

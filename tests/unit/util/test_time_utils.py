@@ -470,7 +470,6 @@ class TestParseNumericWithUnits:
 
     def test_uses_netcdf4_num2date(self) -> None:
         """Passes value, units and calendar to num2date and returns its result as UTC."""
-
         with patch("space_weather_analysis.util.time_utils.num2date") as mock_num2date:
             mock_dt = datetime(2000, 1, 1, 12, 0)
             mock_num2date.return_value = np.array([mock_dt])
@@ -483,7 +482,6 @@ class TestParseNumericWithUnits:
 
     def test_handles_cftime_object(self) -> None:
         """A cftime-like result for the noleap calendar becomes a UTC datetime."""
-
         with patch("space_weather_analysis.util.time_utils.num2date") as mock_num2date:
 
             class MockCftime:

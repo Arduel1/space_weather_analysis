@@ -8,8 +8,7 @@ from streamlit_app.util.solar_cycles import calculate_cycle_boundaries, get_sign
 
 
 def plot_solar_cycle_correlation(cme_df: pd.DataFrame, sunspot_df: pd.DataFrame) -> None:
-    """
-    Visualizes the correlation between the solar cycle and CME events.
+    """Visualizes the correlation between the solar cycle and CME events.
 
     This function constructs a dual-axis chart. The background shows the solar cycle
     using smoothed sunspot numbers, while the foreground displays individual CME

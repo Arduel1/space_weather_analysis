@@ -4,8 +4,7 @@ import streamlit as st
 
 
 def plot_generic(df: pd.DataFrame, collection_name: str) -> None:
-    """
-    Provides a generic time-series visualization for datasets with numeric columns.
+    """Provides a generic time-series visualization for datasets with numeric columns.
 
     This function automatically detects numeric columns and allows the user to
     select which variables to plot. It also implements automatic downsampling

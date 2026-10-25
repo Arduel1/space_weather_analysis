@@ -24,9 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class CdawebPipeline(MongoLoader, BasePipeline):
-    """
-    Orchestrates the process of fetching, downloading, parsing,
-    and documenting data from the CDAWeb service via SunPy/Fido.
+    """Fetches, downloads, parses and documents CDAWeb data via SunPy/Fido.
 
     This pipeline relies on the MongoDB 'master_catalog' collection
     to discover data sources (Observatory Groups) and processes data
@@ -37,8 +35,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
     SOURCE_ID = "FIDO_CDAWEB"
 
     def __init__(self, db: Database, base_data_path: pathlib.Path):
-        """
-        Initializes the pipeline.
+        """Initializes the pipeline.
 
         Args:
             db: The MongoDB database instance.
@@ -62,8 +59,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         end_time: Optional[datetime],
         progress_callback: Optional[Callable[[float, str], None]] = None,
     ) -> None:
-        """
-        Runs the complete data pipeline orchestration.
+        """Runs the complete data pipeline orchestration.
 
         Iterates through time chunks and reports progress.
 
@@ -133,8 +129,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         logger.info("CDAWeb Pipeline finished.")
 
     def _get_fido_source_from_db(self, dataset_id: str) -> Optional[str]:
-        """
-        Queries the master_catalog to find the source_id.
+        """Queries the master_catalog to find the source_id.
 
         Args:
             dataset_id: The dataset ID to query.
@@ -173,8 +168,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         start_time: datetime,
         end_time: datetime,
     ) -> None:
-        """
-        Runs the full pipeline for a single dataset chunk.
+        """Runs the full pipeline for a single dataset chunk.
 
         Args:
             dataset_id: The dataset ID to process.
@@ -234,8 +228,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         collection_name: str,
         source_id: str,
     ) -> None:
-        """
-        Transforms and loads 1D TimeSeries data into MongoDB.
+        """Transforms and loads 1D TimeSeries data into MongoDB.
 
         Args:
             data_object: The parsed 1D timeseries.
@@ -250,8 +243,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         logger.info(f"Successfully loaded {len(documents)} documents into collection '{collection_name}'")
 
     def _transform_dataframe_to_docs(self, df: pd.DataFrame, source_info: str) -> List[Dict[str, Any]]:
-        """
-        Converts a 1D TimeSeries DataFrame into a list of MongoDB documents.
+        """Converts a 1D TimeSeries DataFrame into a list of MongoDB documents.
 
         Args:
             df: The DataFrame (from a TimeSeries) to transform.
@@ -283,8 +275,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         source_id: str,
         opened_datasets: List[xr.Dataset],
     ) -> None:
-        """
-        Loads N-D data by processing files sequentially and storing payloads in GridFS.
+        """Loads N-D data by processing files sequentially and storing payloads in GridFS.
 
         Args:
             data_object: List of (dataset, time_dim, time_coord).
@@ -328,8 +319,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         time_coord: str,
         collection_name: str,
     ) -> Generator[Dict[str, Any], None, None]:
-        """
-        Generator to convert an N-D Dataset into MongoDB documents.
+        """Generator to convert an N-D Dataset into MongoDB documents.
 
         Iterates through the time dimension, serializes each time slice using pickle,
         stores it in GridFS, and yields a metadata document referencing the GridFS file.
@@ -400,8 +390,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         group_name: str,
         file_metadata: Dict[str, Any],
     ) -> None:
-        """
-        Normalizes and saves the pipeline metadata to the database.
+        """Normalizes and saves the pipeline metadata to the database.
 
         Args:
             dataset_id: The dataset ID.
@@ -421,8 +410,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         )
 
     def _normalize_cdaweb_meta_to_variables(self, api_meta: List[Dict[str, Any]], file_meta: Dict[str, Any]) -> List[VariableMetadata]:
-        """
-        Merges file and API metadata into VariableMetadata objects.
+        """Merges file and API metadata into VariableMetadata objects.
 
         Args:
             api_meta: Metadata from an API source.

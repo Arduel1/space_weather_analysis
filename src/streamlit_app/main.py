@@ -29,8 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 def parse_catalog_time(time_str: Optional[str], default: datetime) -> datetime:
-    """
-    Parses a time string from the catalog into a timezone-aware datetime object.
+    """Parses a time string from the catalog into a timezone-aware datetime object.
 
     Args:
         time_str: The catalog time string in any format accepted by dateutil; naive times are treated as UTC.
@@ -51,8 +50,7 @@ def parse_catalog_time(time_str: Optional[str], default: datetime) -> datetime:
 
 
 def calculate_default_range(start_dt: datetime, end_dt: datetime) -> Tuple[datetime, datetime]:
-    """
-    Calculates a default 1-day selection window centered in the given range.
+    """Calculates a default 1-day selection window centered in the given range.
 
     This ensures that when a user selects a dataset, the initial time picker
     values point to valid data rather than an arbitrary 'today' date.
@@ -100,8 +98,7 @@ st.set_page_config(
 
 @st.cache_resource
 def get_loader() -> Optional[DataLoader]:
-    """
-    Returns a cached instance of the DataLoader.
+    """Returns a cached instance of the DataLoader.
 
     The MongoDB settings and the connection are built only once per Streamlit
     server process, because this function is cached as a shared resource.

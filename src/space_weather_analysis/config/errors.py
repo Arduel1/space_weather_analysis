@@ -2,8 +2,7 @@ from pydantic import ValidationError
 
 
 def format_settings_error(error: ValidationError) -> str:
-    """
-    Summarizes a settings validation error without the input values.
+    """Summarizes a settings validation error without the input values.
 
     The default string representation of a pydantic ValidationError contains
     the input values, which may include secrets. This summary only names

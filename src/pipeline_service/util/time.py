@@ -3,8 +3,7 @@ from typing import List, Tuple
 
 
 def generate_time_chunks(start_time: datetime, stop_time: datetime, chunk_delta: timedelta) -> List[Tuple[datetime, datetime]]:
-    """
-    Splits a time range into smaller chunks.
+    """Splits a time range into smaller chunks.
 
     Args:
         start_time: The overall start time.

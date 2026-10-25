@@ -5,8 +5,7 @@ import pandas as pd
 
 
 def dataframe_to_documents(df: pd.DataFrame, source_identifier: str, timestamp_column: Optional[str] = None) -> List[Dict[str, Any]]:
-    """
-    Converts a pandas DataFrame to a list of standardized MongoDB documents.
+    """Converts a pandas DataFrame to a list of standardized MongoDB documents.
 
     This function provides vectorized conversion of DataFrame rows into
     the standard document structure, handling both indexed and column-based
@@ -59,8 +58,7 @@ def build_timeseries_document(
     source_identifier: str,
     additional_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """
-    Builds a standardized time-series document for MongoDB insertion.
+    """Builds a standardized time-series document for MongoDB insertion.
 
     The standard structure places timestamp and metadata at the root level,
     with actual measurements nested under a 'data' field.
@@ -90,8 +88,7 @@ def build_gridfs_reference_document(
     source_identifier: str,
     additional_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """
-    Builds a document that references data stored in GridFS.
+    """Builds a document that references data stored in GridFS.
 
     For multi-dimensional data too large to store directly in documents,
     this function creates a reference document that maintains the same
@@ -118,8 +115,7 @@ def build_gridfs_reference_document(
 
 
 def build_metadata_document(dataset_id: str, source_info: Dict[str, Any], variables: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Builds a standardized metadata document for dataset description.
+    """Builds a standardized metadata document for dataset description.
 
     Metadata documents use the dataset_id as their MongoDB _id to enable
     efficient lookups and ensure one metadata document per dataset.

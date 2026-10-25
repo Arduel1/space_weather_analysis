@@ -6,8 +6,7 @@ from streamlit_app.util.solar_cycles import calculate_cycle_boundaries, get_sign
 
 
 def plot_sunspots(df: pd.DataFrame, collection_name: str) -> None:
-    """
-    Visualizes sunspot data with specialized 11-year cycle markers.
+    """Visualizes sunspot data with specialized 11-year cycle markers.
 
     This function creates a dual-layer visualization showing raw daily observations
     alongside a smoothed trend line to highlight the solar cycle. It also overlaps

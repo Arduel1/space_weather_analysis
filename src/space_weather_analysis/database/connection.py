@@ -12,8 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class MongoConnection:
-    """
-    Manages one MongoDB client built from the given settings.
+    """Manages one MongoDB client built from the given settings.
 
     A service creates one instance in its entry point and passes the resulting
     database on to the components that need it. The client is created lazily
@@ -21,8 +20,7 @@ class MongoConnection:
     """
 
     def __init__(self, settings: MongoSettings) -> None:
-        """
-        Initializes the connection without contacting the server yet.
+        """Initializes the connection without contacting the server yet.
 
         Args:
             settings (MongoSettings): The MongoDB settings to connect with.
@@ -32,8 +30,7 @@ class MongoConnection:
         self._db: Optional[Database] = None
 
     def get_database(self) -> Optional[Database]:
-        """
-        Retrieves the configured MongoDB database.
+        """Retrieves the configured MongoDB database.
 
         On the first call, a client is created and the server is pinged to verify
         that it is reachable and the authentication succeeded. Later calls return
@@ -67,8 +64,7 @@ class MongoConnection:
             return None
 
     def close(self) -> None:
-        """
-        Closes the MongoDB client of this connection.
+        """Closes the MongoDB client of this connection.
 
         This method should be called during application shutdown to ensure
         that sockets are released properly. It is safe to call this method

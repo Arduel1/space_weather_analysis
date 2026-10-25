@@ -10,8 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class DataLoader:
-    """
-    Manages data retrieval for the Streamlit frontend from MongoDB.
+    """Manages data retrieval for the Streamlit frontend from MongoDB.
 
     This class acts as an abstraction layer between the UI and the database,
     formatting raw MongoDB documents into pandas DataFrames suitable for plotting.
@@ -19,8 +18,7 @@ class DataLoader:
     """
 
     def __init__(self, db: Optional[Database]) -> None:
-        """
-        Initializes the data loader with the database provided by the caller.
+        """Initializes the data loader with the database provided by the caller.
 
         Args:
             db (Optional[Database]): The MongoDB database to read from, or None if
@@ -32,8 +30,7 @@ class DataLoader:
             logger.error("Could not establish database connection for Streamlit app.")
 
     def get_available_collections(self) -> List[str]:
-        """
-        Retrieves a list of all collections containing analyzable time-series data.
+        """Retrieves a list of all collections containing analyzable time-series data.
 
         This method filters out internal system collections and metadata catalogs
         to present only relevant datasets to the user.
@@ -60,8 +57,7 @@ class DataLoader:
         end_time: Optional[datetime] = None,
         limit: int = 0,
     ) -> pd.DataFrame:
-        """
-        Fetches time-series data from a specific collection and flattens it.
+        """Fetches time-series data from a specific collection and flattens it.
 
         The method handles the flattening of the nested 'data' structure used in
         the MongoDB documents into a flat DataFrame structure required by Streamlit
@@ -120,8 +116,7 @@ class DataLoader:
             return pd.DataFrame()
 
     def get_metadata(self, dataset_id: str) -> Dict[str, Any]:
-        """
-        Fetches the metadata document for a given dataset.
+        """Fetches the metadata document for a given dataset.
 
         Args:
             dataset_id: The unique dataset identifier (collection name).
@@ -138,8 +133,7 @@ class DataLoader:
             return {}
 
     def get_master_catalog(self) -> List[Dict[str, Any]]:
-        """
-        Retrieves the entire master catalog to list available datasets.
+        """Retrieves the entire master catalog to list available datasets.
 
         Returns:
             List[Dict[str, Any]]: A list of catalog entries containing dataset IDs and source info.
@@ -159,8 +153,7 @@ class DataLoader:
         start_time: datetime,
         end_time: datetime,
     ) -> Optional[str]:
-        """
-        Creates a new download job in the database without specifying the source explicitly.
+        """Creates a new download job in the database without specifying the source explicitly.
 
         The Orchestrator will resolve the correct source based on the dataset_id.
 
@@ -196,8 +189,7 @@ class DataLoader:
             return None
 
     def get_job_status(self, job_id: str) -> Dict[str, Any]:
-        """
-        Retrieves the current status of a specific job.
+        """Retrieves the current status of a specific job.
 
         Args:
             job_id: The unique identifier of the job (as a string).

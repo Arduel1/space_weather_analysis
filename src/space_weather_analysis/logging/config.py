@@ -3,8 +3,7 @@ import sys
 
 
 def setup_logging(service_name: str, level: int = logging.INFO) -> None:
-    """
-    Configures the root logger with a standardized format for all services.
+    """Configures the root logger with a standardized format for all services.
 
     This setup ensures that logs from different microservices (Catalog, Pipeline,
     Frontend) share a consistent structure, making debugging and log aggregation

@@ -75,8 +75,17 @@ select = [
     "F",  # pyflakes
     "I",  # isort (Import sorting)
     "B",  # flake8-bugbear (Likely bugs)
+    "D",  # pydocstyle (Docstring conventions)
 ]
-ignore = []
+# Modules and packages are documented by their names and contents, not by file-level docstrings.
+ignore = ["D100", "D104"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test classes only group test functions; each test function carries its own docstring.
+"tests/**" = ["D101"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
 [tool.ruff.format]
 quote-style = "double"

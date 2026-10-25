@@ -10,16 +10,14 @@ logger = logging.getLogger(__name__)
 
 
 class BaseETLProcessor(MongoLoader, ABC):
-    """
-    Abstract base class for local ETL (Extract, Transform, Load) processors.
+    """Abstract base class for local ETL (Extract, Transform, Load) processors.
 
     This class standardizes the workflow for processing local dataset files,
     providing database loading capabilities via inheritance.
     """
 
     def __init__(self, db: Database) -> None:
-        """
-        Initializes the processor with a database connection.
+        """Initializes the processor with a database connection.
 
         Args:
             db: The MongoDB database instance.
@@ -28,8 +26,7 @@ class BaseETLProcessor(MongoLoader, ABC):
 
     @abstractmethod
     def _extract(self) -> Any:
-        """
-        Extracts raw data from the processor's source.
+        """Extracts raw data from the processor's source.
 
         Returns:
             The raw data object (usually a DataFrame).
@@ -38,8 +35,7 @@ class BaseETLProcessor(MongoLoader, ABC):
 
     @abstractmethod
     def _transform(self, raw_data: Any) -> Any:
-        """
-        Transforms raw data into a format suitable for the database.
+        """Transforms raw data into a format suitable for the database.
 
         Args:
             raw_data: The output from the extraction step.
@@ -51,7 +47,5 @@ class BaseETLProcessor(MongoLoader, ABC):
 
     @abstractmethod
     def run(self) -> None:
-        """
-        Executes the full ETL pipeline: Extract -> Transform -> Load.
-        """
+        """Executes the full ETL pipeline: Extract -> Transform -> Load."""
         pass

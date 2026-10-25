@@ -14,8 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class GfzClient(BaseClient):
-    """
-    Client for interacting with the GFZ Potsdam Kp Index API.
+    """Client for interacting with the GFZ Potsdam Kp Index API.
 
     This client fetches geomagnetic index data (specifically Kp) to provide
     context for solar events. It implements the BaseClient interface to fit
@@ -37,8 +36,7 @@ class GfzClient(BaseClient):
         self.session.mount("https://", HTTPAdapter(max_retries=retries))
 
     def get_catalog_entries(self) -> List[CatalogEntryDict]:
-        """
-        Returns the available indices as catalog entries.
+        """Returns the available indices as catalog entries.
 
         Since GFZ offers a specific set of indices, we expose the primary 'Kp'
         index as a catalog entry to be discoverable by the collector.
@@ -57,8 +55,7 @@ class GfzClient(BaseClient):
         ]
 
     def get_dataset_metadata(self, dataset_id: str) -> Dict[str, Any]:
-        """
-        Retrieves metadata for the specified index.
+        """Retrieves metadata for the specified index.
 
         Args:
             dataset_id (str): The GFZ index name.
@@ -69,13 +66,13 @@ class GfzClient(BaseClient):
         return {"id": dataset_id, "source": self.SOURCE_TYPE, "units": "Index (0-9)", "description": "Global geomagnetic storm index."}
 
     def get_data(self, dataset_id: str, start_time: datetime, end_time: datetime, **kwargs: Any) -> pd.DataFrame:
-        """
-        Fetches Kp index data for the specified time range.
+        """Fetches Kp index data for the specified time range.
 
         Args:
             dataset_id (str): The GFZ index name to fetch.
             start_time (datetime): Start of the window.
             end_time (datetime): End of the window.
+            **kwargs: Optional 'status' value forwarded as the API query parameter; other keys are ignored.
 
         Returns:
             pd.DataFrame: DataFrame containing 'datetime' and the index values.

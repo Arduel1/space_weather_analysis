@@ -8,8 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 def log_xarray_dataset_summary(ds: xr.Dataset, file_path_obj: Optional[pathlib.Path] = None) -> None:
-    """
-    Logs a summary of an XArray Dataset for diagnostic purposes.
+    """Logs a summary of an XArray Dataset for diagnostic purposes.
 
     Args:
         ds: The dataset to inspect.

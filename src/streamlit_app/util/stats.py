@@ -6,8 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 def aggregate_categorical_time_distribution(df: pd.DataFrame, categorical_col: str, freq: str = "YE") -> pd.DataFrame:
-    """
-    Aggregates a categorical column over time to show the distribution of classes per period.
+    """Aggregates a categorical column over time to show the distribution of classes per period.
 
     This transformation moves categorical values from rows to columns and counts their
     occurrences per time period, which is useful for stacked bar charts or trend analysis.

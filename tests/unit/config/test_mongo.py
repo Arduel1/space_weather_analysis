@@ -24,6 +24,7 @@ def credentials(monkeypatch: pytest.MonkeyPatch) -> None:
 
 class TestMongoSettings:
     def test_defaults(self, credentials: None) -> None:
+        """With only credentials set, host, port and database name use their defaults."""
         settings = MongoSettings()
 
         assert settings.user == "test-user"
@@ -33,6 +34,7 @@ class TestMongoSettings:
         assert settings.db_name == "space_weather"
 
     def test_env_overrides(self, credentials: None, monkeypatch: pytest.MonkeyPatch) -> None:
+        """MONGO_HOST, MONGO_PORT and MONGO_DB_NAME override the defaults."""
         monkeypatch.setenv("MONGO_HOST", "localhost")
         monkeypatch.setenv("MONGO_PORT", "27018")
         monkeypatch.setenv("MONGO_DB_NAME", "other_db")
@@ -44,6 +46,7 @@ class TestMongoSettings:
         assert settings.db_name == "other_db"
 
     def test_unrelated_mongo_variables_are_ignored(self, credentials: None, monkeypatch: pytest.MonkeyPatch) -> None:
+        """MONGO_* variables that are not settings fields do not affect the settings."""
         # Compose variables that share the MONGO_ prefix but are not settings fields.
         monkeypatch.setenv("MONGO_HOST_PORT", "27019")
         monkeypatch.setenv("MONGO_EXPRESS_USER", "admin-ui")
@@ -53,6 +56,7 @@ class TestMongoSettings:
         assert settings.port == 27017
 
     def test_password_is_read_from_mongo_pass_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A password in MONGO_PASSWORD instead of MONGO_PASS fails validation."""
         monkeypatch.setenv("MONGO_USER", "test-user")
         monkeypatch.setenv("MONGO_PASSWORD", "wrong-variable")
 
@@ -60,6 +64,7 @@ class TestMongoSettings:
             MongoSettings()
 
     def test_invalid_port_raises(self, credentials: None, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A non-numeric MONGO_PORT fails validation."""
         monkeypatch.setenv("MONGO_PORT", "not-a-number")
 
         with pytest.raises(ValidationError):
@@ -67,24 +72,28 @@ class TestMongoSettings:
 
     @pytest.mark.parametrize("missing", ["MONGO_USER", "MONGO_PASS"])
     def test_missing_credentials_raise(self, credentials: None, monkeypatch: pytest.MonkeyPatch, missing: str) -> None:
+        """A missing user or password fails validation."""
         monkeypatch.delenv(missing)
 
         with pytest.raises(ValidationError):
             MongoSettings()
 
     def test_connection_uri(self, credentials: None, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The connection URI contains credentials, host and port."""
         monkeypatch.setenv("MONGO_HOST", "db.example")
         monkeypatch.setenv("MONGO_PORT", "1234")
 
         assert MongoSettings().connection_uri() == "mongodb://test-user:test-secret@db.example:1234"
 
     def test_connection_uri_escapes_credentials(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Special characters in user and password are percent-encoded in the URI."""
         monkeypatch.setenv("MONGO_USER", "user@domain")
         monkeypatch.setenv("MONGO_PASS", "p@ss:w/rd")
 
         assert MongoSettings().connection_uri() == "mongodb://user%40domain:p%40ss%3Aw%2Frd@mongo:27017"
 
     def test_password_not_in_repr(self, credentials: None) -> None:
+        """The password does not appear in repr, str or the model dump."""
         settings = MongoSettings()
 
         assert "test-secret" not in repr(settings)
@@ -92,6 +101,7 @@ class TestMongoSettings:
         assert "test-secret" not in str(settings.model_dump())
 
     def test_settings_are_immutable(self, credentials: None) -> None:
+        """Assigning to a field after creation raises a validation error."""
         settings = MongoSettings()
 
         with pytest.raises(ValidationError):
@@ -100,6 +110,7 @@ class TestMongoSettings:
 
 class TestFormatSettingsError:
     def test_names_missing_field_without_input_values(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The message names the missing field but leaks no input values."""
         # Only the password is set, so the error input contains it.
         monkeypatch.setenv("MONGO_PASS", "test-secret")
 

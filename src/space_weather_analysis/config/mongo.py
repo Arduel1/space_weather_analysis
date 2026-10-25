@@ -5,8 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class MongoSettings(BaseSettings):
-    """
-    Typed MongoDB connection settings, read from environment variables.
+    """Typed MongoDB connection settings, read from environment variables.
 
     Every field is read from the environment variable 'MONGO_' followed by the
     field name in upper case, except the password, which is read from
@@ -31,8 +30,7 @@ class MongoSettings(BaseSettings):
     db_name: str = "space_weather"
 
     def connection_uri(self) -> str:
-        """
-        Builds the MongoDB connection URI including the credentials.
+        """Builds the MongoDB connection URI including the credentials.
 
         User name and password are percent-escaped as required by the MongoDB
         URI format. The result contains the plain-text password and must

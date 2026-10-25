@@ -21,9 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class HapiPipeline(MongoLoader, BasePipeline):
-    """
-    Orchestrates data streaming, metadata generation, and data loading
-    using the generic HAPI client.
+    """Orchestrates data streaming, metadata generation and loading via the generic HAPI client.
 
     This pipeline handles the complete workflow from fetching data via the HAPI
     protocol to storing it in MongoDB time-series collections. It leverages the
@@ -34,8 +32,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
     SOURCE_ID = "HAPI"
 
     def __init__(self, db: Database, *args: Any, **kwargs: Any) -> None:
-        """
-        Initializes the pipeline with database connection and clients.
+        """Initializes the pipeline with database connection and clients.
 
         Args:
             db: The MongoDB database instance.
@@ -54,8 +51,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
         chunk_delta: timedelta = timedelta(days=7),
         progress_callback: Optional[Callable[[float, str], None]] = None,
     ) -> None:
-        """
-        Runs the full streaming pipeline for a list of datasets.
+        """Runs the full streaming pipeline for a list of datasets.
 
         This method iterates through the specified time range in chunks
         to avoid failures on large requests. It updates the progress via
@@ -132,8 +128,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
         start_time: Optional[datetime],
         end_time: Optional[datetime],
     ) -> Tuple[Optional[datetime], Optional[datetime]]:
-        """
-        Determines the effective time range for a dataset.
+        """Determines the effective time range for a dataset.
 
         If start/end are None, it fetches the full range from the catalog/server.
 
@@ -189,8 +184,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
         chunk_start: datetime,
         chunk_stop: datetime,
     ) -> None:
-        """
-        Runs the full pipeline for a single dataset chunk.
+        """Runs the full pipeline for a single dataset chunk.
 
         Includes data fetching, conversion, transformation, and loading.
         This method logs warnings on failure but does not raise exceptions,
@@ -237,8 +231,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
         dataset_id: str,
         meta: Dict[str, Any],
     ) -> None:
-        """
-        Internal helper to transform and load timeseries data into MongoDB.
+        """Internal helper to transform and load timeseries data into MongoDB.
 
         Args:
             ts: The 1D TimeSeries data.
@@ -256,8 +249,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
         self._load_data(collection_name, documents)
 
     def _save_metadata_to_db(self, meta: Dict[str, Any], dataset_id: str) -> None:
-        """
-        Internal helper to normalize and save metadata to MongoDB.
+        """Internal helper to normalize and save metadata to MongoDB.
 
         Args:
             meta: The raw metadata dict from the client.
@@ -278,9 +270,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
         )
 
     def _normalize_hapi_meta_to_variables(self, hapi_meta: Dict[str, Any]) -> List[VariableMetadata]:
-        """
-        Converts the raw metadata dictionary into a list of
-        standardized VariableMetadata objects.
+        """Converts the raw metadata dictionary into standardized VariableMetadata objects.
 
         Args:
             hapi_meta: The raw metadata dict from the client.
@@ -303,8 +293,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
         return variables
 
     def _transform_timeseries_to_docs(self, ts: GenericTimeSeries, source_info: str) -> List[Dict[str, Any]]:
-        """
-        Converts a TimeSeries object into standardized MongoDB documents.
+        """Converts a TimeSeries object into standardized MongoDB documents.
 
         Args:
             ts: The 1D TimeSeries data.
@@ -322,8 +311,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
         return documents
 
     def _ensure_time_range_is_aware(self, start_time: datetime, end_time: datetime) -> Tuple[datetime, datetime]:
-        """
-        Ensures both start and end times are timezone-aware in UTC.
+        """Ensures both start and end times are timezone-aware in UTC.
 
         Args:
             start_time: The start time to validate.

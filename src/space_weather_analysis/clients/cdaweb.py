@@ -20,8 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class CdawebClient(BaseClient):
-    """
-    A unified client for CDAWeb interactions via SunPy.
+    """A unified client for CDAWeb interactions via SunPy.
 
     This class handles both the discovery of observatory groups and datasets,
     as well as the retrieval of data files using the Fido search and fetch
@@ -34,8 +33,7 @@ class CdawebClient(BaseClient):
 
     @retry_interaction(max_retries=3, exceptions=(Exception,))
     def get_observatory_groups(self) -> Optional[Table]:
-        """
-        Fetches all available observatory groups from CDAWeb.
+        """Fetches all available observatory groups from CDAWeb.
 
         Returns:
             An astropy Table containing observatory groups,
@@ -56,8 +54,7 @@ class CdawebClient(BaseClient):
 
     @retry_interaction(max_retries=3, exceptions=(Exception,))
     def get_datasets_for_group(self, group_name: str) -> Optional[Table]:
-        """
-        Fetches all datasets associated with a specific observatory group.
+        """Fetches all datasets associated with a specific observatory group.
 
         Args:
             group_name: The name of the group to query.
@@ -91,8 +88,7 @@ class CdawebClient(BaseClient):
             return None
 
     def parse_dataset_row(self, row: Union[Row, Dict[str, Any]], group_name: str) -> Optional[CatalogEntryDict]:
-        """
-        Parses a raw dataset row from SunPy into a standardized catalog entry.
+        """Parses a raw dataset row from SunPy into a standardized catalog entry.
 
         Args:
             row: The raw row data.
@@ -133,8 +129,7 @@ class CdawebClient(BaseClient):
     # --- BaseClient Interface Implementation ---
 
     def get_catalog_entries(self) -> List[Dict[str, Any]]:
-        """
-        Lists available observatory groups as standardized catalog entries.
+        """Lists available observatory groups as standardized catalog entries.
 
         Returns:
             A list of dictionaries representing groups.
@@ -145,8 +140,7 @@ class CdawebClient(BaseClient):
         return []
 
     def get_dataset_metadata(self, dataset_id: str) -> Dict[str, Any]:
-        """
-        Provides metadata for a specific dataset.
+        """Provides metadata for a specific dataset.
 
         Args:
             dataset_id: The dataset identifier.
@@ -157,8 +151,7 @@ class CdawebClient(BaseClient):
         return {"id": dataset_id, "source": self.SOURCE_TYPE}
 
     def get_data(self, dataset_id: str, start_time: datetime, end_time: datetime, **kwargs: Any) -> List[pathlib.Path]:
-        """
-        Searches Fido for a dataset within a time range and downloads files.
+        """Searches Fido for a dataset within a time range and downloads files.
 
         Args:
             dataset_id: The dataset ID to search for.

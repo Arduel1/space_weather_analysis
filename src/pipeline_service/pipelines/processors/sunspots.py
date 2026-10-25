@@ -12,8 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class SilsoETL(BaseETLProcessor):
-    """
-    ETL Processor for daily sunspot data (SILSO).
+    """ETL Processor for daily sunspot data (SILSO).
 
     Parses a CSV-like file containing sunspot numbers and loads them into MongoDB.
     """
@@ -33,8 +32,7 @@ class SilsoETL(BaseETLProcessor):
     ]
 
     def __init__(self, db: Database, file_path: pathlib.Path) -> None:
-        """
-        Initializes the sunspot data ETL processor.
+        """Initializes the sunspot data ETL processor.
 
         Args:
             db: The MongoDB database instance.
@@ -44,8 +42,7 @@ class SilsoETL(BaseETLProcessor):
         self.file_path = file_path
 
     def _extract(self) -> Optional[pd.DataFrame]:
-        """
-        Extracts sunspot data from the local CSV file.
+        """Extracts sunspot data from the local CSV file.
 
         Returns:
             A DataFrame containing the raw data, or None if extraction fails.
@@ -70,8 +67,7 @@ class SilsoETL(BaseETLProcessor):
             return None
 
     def _transform(self, raw_data: Optional[pd.DataFrame]) -> List[Dict[str, Any]]:
-        """
-        Transforms the raw sunspot DataFrame into MongoDB documents.
+        """Transforms the raw sunspot DataFrame into MongoDB documents.
 
         Args:
             raw_data: The raw data from the extraction step.
@@ -116,9 +112,7 @@ class SilsoETL(BaseETLProcessor):
         return documents
 
     def run(self) -> None:
-        """
-        Orchestrates the ETL process for sunspot data.
-        """
+        """Orchestrates the ETL process for sunspot data."""
         logger.info("--- Starting ETL process for SILSO ---")
 
         raw_data_df = self._extract()

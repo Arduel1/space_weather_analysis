@@ -55,6 +55,7 @@ class TestErrorLoggingWrappers:
 class TestSafeExecuteWithFallback:
     @pytest.fixture
     def mock_logger(self) -> MagicMock:
+        """Provides a mock with the interface of logging.Logger."""
         return MagicMock(spec=logging.Logger)
 
     def test_primary_success(self, mock_logger: MagicMock) -> None:

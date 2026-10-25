@@ -27,8 +27,7 @@ def parse_datafiles(
     Optional[Union[GenericTimeSeries, List[Tuple[xr.Dataset, str, str]]]],
     Dict[str, Any],
 ]:
-    """
-    Parses downloaded files (CDF, NC) and extracts metadata.
+    """Parses downloaded files (CDF, NC) and extracts metadata.
 
     This function serves as the main entry point for file processing. It attempts
     to parse files first as 1D SunPy TimeSeries (efficient for simple data) and
@@ -97,8 +96,7 @@ def parse_datafiles(
 
 
 def _try_extract_cdf_metadata(file_path: str, variables: List[str]) -> Dict[str, Any]:
-    """
-    Safely extracts attributes from a CDF file using the cdflib library.
+    """Safely extracts attributes from a CDF file using the cdflib library.
 
     Args:
         file_path: Path to the CDF file.
@@ -124,8 +122,7 @@ def _finalize_1d_timeseries(
     nd_datasets: List[Tuple[xr.Dataset, str, str]],
     metadata: Dict[str, Any],
 ) -> Tuple[Optional[GenericTimeSeries], Dict[str, Any]]:
-    """
-    Concatenates and filters 1D timeseries, cleaning up unused N-D datasets.
+    """Concatenates and filters 1D timeseries, cleaning up unused N-D datasets.
 
     Args:
         ts_list: List of 1D timeseries objects.
@@ -159,8 +156,7 @@ def _handle_nd_datafile(
     variables_to_parse: List[str],
     allow_time_fallback: bool = False,
 ) -> Tuple[Optional[xr.Dataset], Optional[Dict[str, Any]], Optional[str], Optional[str]]:
-    """
-    Opens and prepares an N-dimensional file using xarray.
+    """Opens and prepares an N-dimensional file using xarray.
 
     This method orchestrates the opening of the file, logging of its structure,
     identification of the time dimension, and decoding of the time variable.
@@ -219,8 +215,7 @@ def _handle_nd_datafile(
 
 
 def _open_xarray_dataset(file_path: Path) -> Optional[xr.Dataset]:
-    """
-    Attempts to open a dataset using supported xarray engines.
+    """Attempts to open a dataset using supported xarray engines.
 
     Args:
         file_path: Path to the file.
@@ -242,8 +237,7 @@ def _open_xarray_dataset(file_path: Path) -> Optional[xr.Dataset]:
 
 
 def _assign_decoded_times(ds: xr.Dataset, dim: str, name: str, values: np.ndarray) -> None:
-    """
-    Assigns decoded time values as a new coordinate to the dataset.
+    """Assigns decoded time values as a new coordinate to the dataset.
 
     Args:
         ds: The dataset to modify.
@@ -262,8 +256,7 @@ def _assign_decoded_times(ds: xr.Dataset, dim: str, name: str, values: np.ndarra
 def _handle_missing_time_dimension(
     ds: xr.Dataset, variables: List[str], allow_fallback: bool
 ) -> Tuple[Optional[xr.Dataset], Dict[str, Any], Optional[str], Optional[str]]:
-    """
-    Handles cases where no time dimension could be identified from metadata.
+    """Handles cases where no time dimension could be identified from metadata.
 
     Args:
         ds: The dataset.
@@ -295,8 +288,7 @@ def _handle_missing_time_dimension(
 
 
 def _get_cdf_file_metadata(cdf_file: CDF, variables_to_parse: List[str]) -> Dict[str, Any]:
-    """
-    Extracts variable attributes from a CDF file object.
+    """Extracts variable attributes from a CDF file object.
 
     Args:
         cdf_file: Opened CDF file.
@@ -322,8 +314,7 @@ def _get_cdf_file_metadata(cdf_file: CDF, variables_to_parse: List[str]) -> Dict
 
 
 def _get_xarray_file_metadata(ds: xr.Dataset, variables_to_parse: List[str]) -> Dict[str, Any]:
-    """
-    Extracts variable attributes from an xarray Dataset.
+    """Extracts variable attributes from an xarray Dataset.
 
     Args:
         ds: The dataset.
@@ -350,8 +341,7 @@ def _get_xarray_file_metadata(ds: xr.Dataset, variables_to_parse: List[str]) -> 
 
 
 def _parse_1d_timeseries_file(file_path_str: str) -> List[GenericTimeSeries]:
-    """
-    Attempts to parse a file as a 1D timeseries using SunPy.
+    """Attempts to parse a file as a 1D timeseries using SunPy.
 
     Args:
         file_path_str: Path to the file.
@@ -385,8 +375,7 @@ def _parse_1d_timeseries_file(file_path_str: str) -> List[GenericTimeSeries]:
 def _concatenate_timeseries(
     ts_list: List[GenericTimeSeries],
 ) -> Optional[GenericTimeSeries]:
-    """
-    Combines multiple 1D TimeSeries objects into a single sorted TimeSeries.
+    """Combines multiple 1D TimeSeries objects into a single sorted TimeSeries.
 
     Args:
         ts_list: List of timeseries to combine.

@@ -5,8 +5,7 @@ import streamlit as st
 
 
 def plot_cmes(df: pd.DataFrame, collection_name: str) -> None:
-    """
-    Visualizes Coronal Mass Ejection (CME) data.
+    """Visualizes Coronal Mass Ejection (CME) data.
 
     Renders a timeline scatter plot of kinetic energy (log10) per event, colored
     by Halo vs Non-Halo type and sized by angular width, with reference lines

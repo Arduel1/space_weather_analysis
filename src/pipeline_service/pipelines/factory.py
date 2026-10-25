@@ -13,8 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class PipelineFactory:
-    """
-    Creates specific pipeline instances based on the provided source identifier.
+    """Creates specific pipeline instances based on the provided source identifier.
 
     This factory abstracts the instantiation logic of data pipelines, allowing
     the orchestrator to remain agnostic of the concrete pipeline classes.
@@ -29,8 +28,7 @@ class PipelineFactory:
     SOURCE_LOCAL = "LOCAL"
 
     def __init__(self, db: Database, base_data_path: pathlib.Path) -> None:
-        """
-        Initializes the factory with shared dependencies.
+        """Initializes the factory with shared dependencies.
 
         Args:
             db (Database): The MongoDB database instance used by pipelines
@@ -42,8 +40,7 @@ class PipelineFactory:
         self.base_data_path = base_data_path
 
     def get_pipeline(self, source_type: str) -> BasePipeline:
-        """
-        Returns a configured pipeline instance for the given source type.
+        """Returns a configured pipeline instance for the given source type.
 
         This method maps a source string ID to a concrete pipeline class.
         It raises an error if the source type is unknown, ensuring that

@@ -9,8 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class GfzDiscoverer(AbstractDiscoverer):
-    """
-    Discovery strategy for GFZ Potsdam datasets.
+    """Discovery strategy for GFZ Potsdam datasets.
 
     This class utilizes the GfzClient to retrieve available indices
     and exposes them as catalog entries for the system.
@@ -21,8 +20,7 @@ class GfzDiscoverer(AbstractDiscoverer):
         self.client = GfzClient()
 
     def discover(self) -> Generator[Tuple[str, CatalogEntryDict, Optional[Dict[str, Any]]], None, None]:
-        """
-        Retrieves dataset definitions from the GFZ client.
+        """Retrieves dataset definitions from the GFZ client.
 
         Yields:
             A tuple containing the dataset ID, the catalog entry dictionary,

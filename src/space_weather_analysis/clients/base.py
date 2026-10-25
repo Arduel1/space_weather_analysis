@@ -4,8 +4,7 @@ from typing import Any, Dict, Mapping, Sequence
 
 
 class BaseClient(ABC):
-    """
-    Abstract base class for data provider clients.
+    """Abstract base class for data provider clients.
 
     This interface unifies the interaction with different space weather data
     sources. It supports both the discovery phase and the retrieval phase.
@@ -13,8 +12,7 @@ class BaseClient(ABC):
 
     @abstractmethod
     def get_catalog_entries(self) -> Sequence[Mapping[str, Any]]:
-        """
-        Retrieves a list of available datasets or groups from the provider.
+        """Retrieves a list of available datasets or groups from the provider.
 
         This is primarily used by the Catalog Service for discovery.
 
@@ -25,8 +23,7 @@ class BaseClient(ABC):
 
     @abstractmethod
     def get_dataset_metadata(self, dataset_id: str) -> Dict[str, Any]:
-        """
-        Retrieves detailed metadata for a specific dataset.
+        """Retrieves detailed metadata for a specific dataset.
 
         Args:
             dataset_id (str): The unique identifier of the dataset.
@@ -38,8 +35,7 @@ class BaseClient(ABC):
 
     @abstractmethod
     def get_data(self, dataset_id: str, start_time: datetime, end_time: datetime, **kwargs: Any) -> Any:
-        """
-        Fetches time-series data for the specified dataset and time range.
+        """Fetches time-series data for the specified dataset and time range.
 
         Args:
             dataset_id (str): The unique identifier of the dataset.

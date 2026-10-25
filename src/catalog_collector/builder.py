@@ -11,8 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class CatalogBuilder:
-    """
-    Builds a master catalog by orchestrating multiple discovery strategies.
+    """Builds a master catalog by orchestrating multiple discovery strategies.
 
     This class iterates over a list of discoverer objects, collects their
     results, and merges them into a single, sorted master catalog file.
@@ -24,8 +23,7 @@ class CatalogBuilder:
         catalog_output_path: pathlib.Path,
         loader: CatalogLoader,
     ):
-        """
-        Initializes the CatalogBuilder.
+        """Initializes the CatalogBuilder.
 
         Args:
             discoverers (List[AbstractDiscoverer]): A list of concrete
@@ -41,8 +39,7 @@ class CatalogBuilder:
         self.lowercase_id_map: Dict[str, str] = {}
 
     def _get_canonical_dataset_key(self, dataset_id: str) -> str:
-        """
-        Finds the existing canonical key for a dataset, ignoring case.
+        """Finds the existing canonical key for a dataset, ignoring case.
 
         Args:
             dataset_id (str): The dataset ID to check.
@@ -62,8 +59,7 @@ class CatalogBuilder:
         dataset_id: str,
         entry: CatalogEntryDict,
     ) -> bool:
-        """
-        Updates the master catalog with the new entry.
+        """Updates the master catalog with the new entry.
 
         Returns:
             bool: True if the catalog was updated, False otherwise.
@@ -90,9 +86,7 @@ class CatalogBuilder:
         return True
 
     def _save_catalog_to_file(self) -> None:
-        """
-        Saves the completed catalog dictionary to a JSON file.
-        """
+        """Saves the completed catalog dictionary to a JSON file."""
         try:
             # logger.debug(f"Sorting {len(self.master_catalog)} unique dataset IDs alphabetically...")
             sorted_items = sorted(
@@ -128,9 +122,7 @@ class CatalogBuilder:
             logger.warning(f"Failed to load existing catalog: {e}")
 
     def build_catalog(self) -> None:
-        """
-        Runs all discovery tasks and saves the universal catalog.
-        """
+        """Runs all discovery tasks and saves the universal catalog."""
         logger.info("--- Starting Universal Catalog Build ---")
 
         self._load_initial_catalog()
@@ -176,9 +168,7 @@ class CatalogBuilder:
         logger.info("--- Universal Catalog Build Finished ---")
 
     def _prune_catalog(self, found_signatures: Set[Tuple[str, str, str]]) -> None:
-        """
-        Removes entries from the catalog that were not found in the current run.
-        """
+        """Removes entries from the catalog that were not found in the current run."""
         logger.info("--- Pruning Stale Entries ---")
 
         dataset_ids = list(self.master_catalog.keys())

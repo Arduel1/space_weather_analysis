@@ -9,8 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 def log_xarray_dataset_summary(ds: xr.Dataset, file_path_obj: Optional[Path] = None) -> None:
-    """
-    Logs a compact, safe summary of an xarray Dataset without loading large data arrays.
+    """Logs a compact, safe summary of an xarray Dataset without loading large data arrays.
 
     This function inspects dimensions, coordinates, variables, and attributes
     to provide diagnostic information useful for debugging parsing issues. It is
@@ -50,8 +49,7 @@ def log_xarray_dataset_summary(ds: xr.Dataset, file_path_obj: Optional[Path] = N
 
 
 def _log_coordinate_details(ds: xr.Dataset, coord: Hashable, prefix: str) -> None:
-    """
-    Logs details (dimensions, dtype, length) of a specific coordinate in the dataset.
+    """Logs details (dimensions, dtype, length) of a specific coordinate in the dataset.
 
     Args:
         ds (xr.Dataset): The dataset containing the coordinate.
@@ -81,8 +79,7 @@ def _log_coordinate_details(ds: xr.Dataset, coord: Hashable, prefix: str) -> Non
 
 
 def _log_small_sample(da: xr.DataArray, prefix: str) -> None:
-    """
-    Logs a small sample of values from a DataArray.
+    """Logs a small sample of values from a DataArray.
 
     It logs at most the first 8 values and is called only for arrays with
     at most 8 elements to provide immediate insight into the data values.
@@ -100,8 +97,7 @@ def _log_small_sample(da: xr.DataArray, prefix: str) -> None:
 
 
 def _log_variable_details(ds: xr.Dataset, var: Hashable, prefix: str) -> None:
-    """
-    Logs details (dimensions, shape, dtype, attributes) of a specific variable.
+    """Logs details (dimensions, shape, dtype, attributes) of a specific variable.
 
     Args:
         ds (xr.Dataset): The dataset containing the variable.
@@ -138,8 +134,7 @@ def _log_variable_details(ds: xr.Dataset, var: Hashable, prefix: str) -> None:
 
 
 def _log_netcdf_backend_details(ds: xr.Dataset, prefix: str) -> None:
-    """
-    Logs details from the underlying netCDF4 backend object, if accessible.
+    """Logs details from the underlying netCDF4 backend object, if accessible.
 
     This provides a fallback view of the file's metadata as seen by the
     netCDF4 library, which can sometimes differ from xarray's interpretation.

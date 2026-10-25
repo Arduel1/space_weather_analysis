@@ -4,8 +4,7 @@ import streamlit as st
 
 
 def plot_kp_index(df: pd.DataFrame) -> None:
-    """
-    Visualizes the Planetary K-index (Kp) with color-coded severity levels.
+    """Visualizes the Planetary K-index (Kp) with color-coded severity levels.
 
     The plot uses a bar chart where the color indicates the geomagnetic activity
     category, ranging from quiet (Green) to extreme storm (Dark Red).

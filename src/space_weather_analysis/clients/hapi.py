@@ -17,9 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class HapiClient(BaseClient):
-    """
-    A generic client that uses a master catalog from MongoDB to find and
-    stream data from HAPI-compliant data services.
+    """Generic client that streams data from HAPI services found via the MongoDB master catalog.
 
     This client abstracts the HAPI protocol details and implements server
     fallback logic using the catalog's source list. It handles metadata
@@ -30,8 +28,7 @@ class HapiClient(BaseClient):
     SOURCE_TYPE = "HAPI"
 
     def __init__(self, db: Optional[Database] = None) -> None:
-        """
-        Initializes the client using a MongoDB database connection.
+        """Initializes the client using a MongoDB database connection.
 
         Args:
             db: The MongoDB database instance.
@@ -51,8 +48,7 @@ class HapiClient(BaseClient):
                 logger.error(f"Failed to initialize catalog map: {e}", exc_info=True)
 
     def _load_catalog_from_db(self) -> Dict[str, List[CatalogEntryDict]]:
-        """
-        Loads the master catalog from the MongoDB collection into a dictionary map.
+        """Loads the master catalog from the MongoDB collection into a dictionary map.
 
         Returns:
             A dictionary mapping dataset_id to a list of source entries.
@@ -82,8 +78,7 @@ class HapiClient(BaseClient):
 
     @retry_interaction(max_retries=3, exceptions=(Exception,))
     def fetch_server_catalog(self, server_url: str) -> List[Dict[str, Any]]:
-        """
-        Fetches the full catalog from a specific HAPI server URL.
+        """Fetches the full catalog from a specific HAPI server URL.
 
         Args:
             server_url: The base URL of the HAPI server.
@@ -103,8 +98,7 @@ class HapiClient(BaseClient):
 
     @retry_interaction(max_retries=3, exceptions=(Exception,))
     def fetch_dataset_metadata_from_server(self, dataset_id: str, server_url: str) -> Optional[Dict[str, Any]]:
-        """
-        Fetches metadata for a single dataset directly from a specific server.
+        """Fetches metadata for a single dataset directly from a specific server.
 
         Args:
             dataset_id: The dataset ID to fetch.
@@ -133,8 +127,7 @@ class HapiClient(BaseClient):
     # --- BaseClient Interface Implementation ---
 
     def get_catalog_entries(self) -> List[Dict[str, Any]]:
-        """
-        Returns all datasets known to this client (from local DB map).
+        """Returns all datasets known to this client (from local DB map).
 
         Returns:
             A list of dataset entries suitable for the generic interface.
@@ -142,8 +135,7 @@ class HapiClient(BaseClient):
         return [{"id": k, "sources": v} for k, v in self.catalog_map.items()]
 
     def get_dataset_metadata(self, dataset_id: str) -> Dict[str, Any]:
-        """
-        Fetches the metadata (HAPI 'info') for a dataset.
+        """Fetches the metadata (HAPI 'info') for a dataset.
 
         Iterates through known servers until metadata is retrieved.
 
@@ -173,8 +165,7 @@ class HapiClient(BaseClient):
     def get_data(
         self, dataset_id: str, start_time: datetime, end_time: datetime, **kwargs: Any
     ) -> Tuple[Optional[np.ndarray], Optional[Dict[str, Any]]]:
-        """
-        Fetches both data and metadata for a dataset within a time range.
+        """Fetches both data and metadata for a dataset within a time range.
 
         Args:
             dataset_id: The dataset ID to fetch.
@@ -191,8 +182,7 @@ class HapiClient(BaseClient):
     # --- Internal Logic ---
 
     def _get_parameters_for_request(self, dataset_id: str, parameters: Optional[List[str]]) -> str:
-        """
-        Constructs the parameter string for the HAPI request.
+        """Constructs the parameter string for the HAPI request.
 
         Args:
             dataset_id: The dataset ID.
@@ -223,8 +213,7 @@ class HapiClient(BaseClient):
         config_end: datetime,
         parameters: Optional[List[str]] = None,
     ) -> Tuple[Optional[np.ndarray], Optional[Dict[str, Any]]]:
-        """
-        Fetches both data and metadata using server fallback logic.
+        """Fetches both data and metadata using server fallback logic.
 
         Args:
             dataset_id: The dataset ID to fetch.
@@ -263,8 +252,7 @@ class HapiClient(BaseClient):
         config_end: datetime,
         params_str: str,
     ) -> Tuple[Optional[np.ndarray], Optional[Dict[str, Any]]]:
-        """
-        Attempts data download from a single server entry with retry logic.
+        """Attempts data download from a single server entry with retry logic.
 
         Args:
             dataset_id: The dataset ID.

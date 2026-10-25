@@ -13,8 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class CatalogLoader:
-    """
-    Loads the master catalog file into MongoDB.
+    """Loads the master catalog file into MongoDB.
 
     This class reads the generated JSON catalog and updates the MongoDB
     collection, ensuring that the central database reflects the latest
@@ -31,8 +30,7 @@ class CatalogLoader:
         file_path: pathlib.Path,
         metadata_path: Optional[pathlib.Path] = None,
     ):
-        """
-        Initializes the Catalog Loader.
+        """Initializes the Catalog Loader.
 
         Args:
             db (Database): The MongoDB database instance.
@@ -44,8 +42,7 @@ class CatalogLoader:
         self.metadata_path = metadata_path
 
     def _load_json(self) -> Optional[List[MasterCatalogItem]]:
-        """
-        Reads and parses the catalog JSON file.
+        """Reads and parses the catalog JSON file.
 
         Returns:
             Optional[List[MasterCatalogItem]]: List of catalog items or None.
@@ -73,9 +70,7 @@ class CatalogLoader:
         )
 
     def load_to_db(self) -> None:
-        """
-        Upserts catalog entries into the MongoDB collection.
-        """
+        """Upserts catalog entries into the MongoDB collection."""
         logger.info(f"--- Loading Catalog Cache from {self.file_path} to MongoDB ---")
         items = self._load_json()
         if not items:
@@ -117,9 +112,7 @@ class CatalogLoader:
         logger.info("--- Catalog Load Finished ---")
 
     def load_metadata_to_db(self) -> None:
-        """
-        Loads the metadata catalog from file to MongoDB.
-        """
+        """Loads the metadata catalog from file to MongoDB."""
         if not self.metadata_path or not self.metadata_path.exists():
             logger.warning(f"Metadata file not found or not set: {self.metadata_path}")
             return
@@ -172,9 +165,7 @@ class CatalogLoader:
         logger.info("--- Metadata Load Finished ---")
 
     def upsert_dataset(self, dataset_id: str, sources: List[CatalogEntryDict]) -> None:
-        """
-        Upserts a single dataset entry into MongoDB.
-        """
+        """Upserts a single dataset entry into MongoDB."""
         collection = self.db[self.COLLECTION_NAME]
 
         # Sort sources to ensure deterministic storage
@@ -190,9 +181,7 @@ class CatalogLoader:
             logger.error(f"Failed to upsert dataset {dataset_id}: {e}")
 
     def delete_dataset(self, dataset_id: str) -> None:
-        """
-        Deletes a dataset from the MongoDB collection.
-        """
+        """Deletes a dataset from the MongoDB collection."""
         collection = self.db[self.COLLECTION_NAME]
         try:
             result = collection.delete_one({"dataset_id": dataset_id})
@@ -204,9 +193,7 @@ class CatalogLoader:
             logger.error(f"Failed to delete dataset {dataset_id}: {e}")
 
     def upsert_metadata(self, dataset_id: str, metadata: Dict[str, Any]) -> None:
-        """
-        Upserts metadata for a dataset into the metadata collection.
-        """
+        """Upserts metadata for a dataset into the metadata collection."""
         collection = self.db[self.METADATA_COLLECTION_NAME]
         item = {"dataset_id": dataset_id, "metadata": metadata}
 
@@ -221,9 +208,7 @@ class CatalogLoader:
             logger.error(f"Failed to upsert metadata for {dataset_id}: {e}")
 
     def delete_metadata(self, dataset_id: str) -> None:
-        """
-        Deletes metadata for a dataset.
-        """
+        """Deletes metadata for a dataset."""
         collection = self.db[self.METADATA_COLLECTION_NAME]
         try:
             result = collection.delete_one({"dataset_id": dataset_id})

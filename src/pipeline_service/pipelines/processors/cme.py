@@ -13,9 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class CmeETL(BaseETLProcessor):
-    """
-    ETL Processor for Coronal Mass Ejection (CME) catalog data.
-    """
+    """ETL Processor for Coronal Mass Ejection (CME) catalog data."""
 
     COLLECTION_NAME = "cme_catalog"
     DEFAULT_BATCH_SIZE = 5000
@@ -37,8 +35,7 @@ class CmeETL(BaseETLProcessor):
     ]
 
     def __init__(self, db: Database, file_path: pathlib.Path) -> None:
-        """
-        Initializes the CME ETL processor.
+        """Initializes the CME ETL processor.
 
         Args:
             db: The MongoDB database instance.
@@ -48,8 +45,7 @@ class CmeETL(BaseETLProcessor):
         self.file_path = file_path
 
     def _extract(self) -> Optional[pd.DataFrame]:
-        """
-        Extracts CME data from the local space-delimited text file.
+        """Extracts CME data from the local space-delimited text file.
 
         Returns:
             A DataFrame containing the raw data, or None if extraction fails.
@@ -85,8 +81,7 @@ class CmeETL(BaseETLProcessor):
             return None
 
     def _transform(self, raw_data: Optional[pd.DataFrame]) -> List[Dict[str, Any]]:
-        """
-        Transforms the raw CME DataFrame into MongoDB documents.
+        """Transforms the raw CME DataFrame into MongoDB documents.
 
         Args:
             raw_data: The raw data from extraction.
@@ -167,9 +162,7 @@ class CmeETL(BaseETLProcessor):
         return documents
 
     def run(self) -> None:
-        """
-        Orchestrates the ETL process for CME data.
-        """
+        """Orchestrates the ETL process for CME data."""
         logger.info("--- Starting ETL process for CME Catalog ---")
 
         raw_data_df = self._extract()

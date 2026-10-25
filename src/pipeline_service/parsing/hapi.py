@@ -10,8 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 def convert_hapi_to_timeseries(data: np.ndarray, meta: Dict[str, Any]) -> Optional[GenericTimeSeries]:
-    """
-    Converts raw HAPI data and metadata into a SunPy GenericTimeSeries object.
+    """Converts raw HAPI data and metadata into a SunPy GenericTimeSeries object.
 
     This function orchestrates the conversion process:
     - Extracts and parses the time stamps using HAPI-specific logic.
@@ -84,8 +83,7 @@ def _expand_array_parameter(
     param_meta: Dict[str, Any],
     time_index: pd.Index,
 ) -> Optional[pd.DataFrame]:
-    """
-    Expands a multi-dimensional HAPI parameter (array/vector) into a DataFrame.
+    """Expands a multi-dimensional HAPI parameter (array/vector) into a DataFrame.
 
     This helper handles the generation of column names for array parameters based
     on labels provided in the metadata or strictly numerical indices if labels

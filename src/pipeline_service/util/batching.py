@@ -4,8 +4,7 @@ T = TypeVar("T")
 
 
 def batch_generator(data_list: List[T], batch_size: int = 5000) -> Generator[List[T], None, None]:
-    """
-    A generator function that yields data in batches.
+    """A generator function that yields data in batches.
 
     This is used to split a large list of documents before a bulk
     database insertion to avoid timeouts or memory issues.

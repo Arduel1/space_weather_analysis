@@ -3,8 +3,7 @@ from typing import List
 
 
 def calculate_cycle_boundaries(num_cycles: int = 30) -> List[datetime]:
-    """
-    Calculates theoretical solar cycle boundaries (minima).
+    """Calculates theoretical solar cycle boundaries (minima).
 
     The calculation uses a linear approximation based on the average solar cycle
     length of 11.1 years, anchored at the solar minimum of 1810 (start of Cycle 6).
@@ -31,9 +30,9 @@ def calculate_cycle_boundaries(num_cycles: int = 30) -> List[datetime]:
 
 
 def get_significant_events() -> List[datetime]:
-    """
-    Returns a fixed list of historically significant solar and geomagnetic storm events,
-    each dated to the first day of its month.
+    """Returns a fixed list of historically significant solar and geomagnetic storm events.
+
+    Each event is dated to the first day of its month.
     """
     return [
         datetime(1859, 9, 1),

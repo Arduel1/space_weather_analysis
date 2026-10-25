@@ -12,8 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class PipelineOrchestrator:
-    """
-    Manages the execution of data pipelines based on manual requests or database jobs.
+    """Manages the execution of data pipelines based on manual requests or database jobs.
 
     This class acts as the central controller for the pipeline service. It monitors
     a MongoDB job queue for asynchronous tasks and accepts direct configuration
@@ -28,8 +27,7 @@ class PipelineOrchestrator:
     DATA_BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent / "data"
 
     def __init__(self, db: Database) -> None:
-        """
-        Initializes the orchestrator with a database connection.
+        """Initializes the orchestrator with a database connection.
 
         Args:
             db (Database): The MongoDB database instance used for job management.
@@ -44,8 +42,7 @@ class PipelineOrchestrator:
         self.pipeline_factory = PipelineFactory(self.db, self.DATA_BASE_DIR)
 
     def run_manual_jobs(self, manual_jobs: Dict[str, Dict[str, Any]]) -> None:
-        """
-        Executes a set of pipelines defined by a manual configuration dictionary.
+        """Executes a set of pipelines defined by a manual configuration dictionary.
 
         Args:
             manual_jobs (Dict[str, Dict[str, Any]]): A dictionary mapping source
@@ -65,9 +62,7 @@ class PipelineOrchestrator:
             self._execute_pipeline(source_id, datasets, start_time, end_time, job_id=None)
 
     def run_daemon(self) -> None:
-        """
-        Starts the continuous job processing loop.
-        """
+        """Starts the continuous job processing loop."""
         logger.info("Pipeline Orchestrator daemon started.")
 
         while True:
@@ -85,8 +80,7 @@ class PipelineOrchestrator:
                 time.sleep(self.POLLING_INTERVAL_SECONDS)
 
     def _fetch_next_pending_job(self) -> Optional[Dict[str, Any]]:
-        """
-        Retrieves and locks the next pending job from the database.
+        """Retrieves and locks the next pending job from the database.
 
         This method looks for a document with specific status criteria and
         atomically updates it to prevent other instances from picking up the
@@ -110,8 +104,7 @@ class PipelineOrchestrator:
         )
 
     def _resolve_source_type(self, datasets: List[str]) -> Optional[str]:
-        """
-        Determines the correct pipeline source type for a given list of datasets.
+        """Determines the correct pipeline source type for a given list of datasets.
 
         It queries the master catalog to find the 'type' field associated with the dataset.
 
@@ -138,8 +131,7 @@ class PipelineOrchestrator:
         return sources[0].get("type")
 
     def _process_job(self, job: Dict[str, Any]) -> None:
-        """
-        Executes the logic for a single retrieved job.
+        """Executes the logic for a single retrieved job.
 
         Args:
             job (Dict[str, Any]): The job document containing execution details.
@@ -169,8 +161,7 @@ class PipelineOrchestrator:
             self._update_job_status(job_id, "FAILED", str(e))
 
     def _update_job_status(self, job_id: Any, status: str, error_message: Optional[str] = None) -> None:
-        """
-        Updates the final status of a job in the database.
+        """Updates the final status of a job in the database.
 
         Args:
             job_id (Any): The unique identifier of the job.
@@ -192,8 +183,7 @@ class PipelineOrchestrator:
         end_time: Optional[datetime],
         job_id: Optional[Any],
     ) -> None:
-        """
-        Delegates the execution to a specific pipeline instance.
+        """Delegates the execution to a specific pipeline instance.
 
         Args:
             source_id (Optional[str]): The source type identifier used to select the pipeline.

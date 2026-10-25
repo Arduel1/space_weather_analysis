@@ -10,8 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class MetadataWriter:
-    """
-    Creates and saves standardized metadata documents to MongoDB.
+    """Creates and saves standardized metadata documents to MongoDB.
 
     This class handles the normalization of Python/NumPy types into
     BSON-compatible formats suitable for MongoDB storage.
@@ -20,8 +19,7 @@ class MetadataWriter:
     COLLECTION_NAME = "dataset_metadata"
 
     def __init__(self, db: Database) -> None:
-        """
-        Initializes the writer with a database connection.
+        """Initializes the writer with a database connection.
 
         Args:
             db: The MongoDB database instance.
@@ -30,8 +28,7 @@ class MetadataWriter:
         self.collection = self.db[self.COLLECTION_NAME]
 
     def _sanitize_value(self, value: Any) -> Any:
-        """
-        Recursively sanitizes a value to make it BSON-compatible.
+        """Recursively sanitizes a value to make it BSON-compatible.
 
         Handles conversion of:
         - Dictionaries and Lists (recursive)
@@ -81,8 +78,7 @@ class MetadataWriter:
         variables: List[VariableMetadata],
         source_info: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """
-        Combines metadata and upserts it into the MongoDB collection.
+        """Combines metadata and upserts it into the MongoDB collection.
 
         The dataset_id is used as the MongoDB `_id` field to ensure uniqueness
         per dataset.

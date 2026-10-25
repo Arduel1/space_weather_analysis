@@ -204,7 +204,9 @@ class TestEvaluateVariableConfidence:
 
 class TestCalendarIsPresent:
     def test_returns_true_if_key_exists(self) -> None:
+        """Attributes with a 'calendar' key give True."""
         assert calendar_is_present({"calendar": "standard"}) is True
 
     def test_returns_false_if_key_missing(self) -> None:
+        """Attributes without a 'calendar' key give False."""
         assert calendar_is_present({"units": "m"}) is False

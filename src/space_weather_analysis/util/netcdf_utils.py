@@ -29,8 +29,7 @@ class TimeConfidence(IntEnum):
 
 
 def calendar_is_present(attrs: Dict[str, Any]) -> bool:
-    """
-    Checks if a 'calendar' attribute is present and not None.
+    """Checks if a 'calendar' attribute is present and not None.
 
     Args:
         attrs (Dict[str, Any]): The attributes dictionary.
@@ -42,8 +41,7 @@ def calendar_is_present(attrs: Dict[str, Any]) -> bool:
 
 
 def parse_xarray_timestamp(ts_slice: xr.Dataset, time_coord: str, index: int, allow_fallback: bool = False) -> Optional[datetime]:
-    """
-    Parses a single timestamp from an xarray Dataset slice.
+    """Parses a single timestamp from an xarray Dataset slice.
 
     Handles multiple types (numpy datetime64, pandas Timestamp, cftime, strings, numeric).
 
@@ -105,8 +103,7 @@ def parse_xarray_timestamp(ts_slice: xr.Dataset, time_coord: str, index: int, al
 
 
 def find_time_dimension(ds: xr.Dataset) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Identify a time coordinate and its dimension using file metadata logic.
+    """Identify a time coordinate and its dimension using file metadata logic.
 
     Args:
         ds (xr.Dataset): The dataset to inspect.
@@ -158,8 +155,7 @@ def find_time_dimension(ds: xr.Dataset) -> Tuple[Optional[str], Optional[str]]:
 
 
 def find_heuristic_time_candidates(ds: xr.Dataset, time_dim: str) -> List[str]:
-    """
-    Identify numeric variables aligned with `time_dim` as plausible time candidates.
+    """Identify numeric variables aligned with `time_dim` as plausible time candidates.
 
     This routine is heuristic and used by fallback logic. It prioritizes variables
     based on the standardized TimeConfidence score and their dimensionality (1D preferred).
@@ -205,8 +201,7 @@ def find_heuristic_time_candidates(ds: xr.Dataset, time_dim: str) -> List[str]:
 
 
 def _read_variable_sample(da: xr.DataArray, time_dim: str) -> np.ndarray:
-    """
-    Reads a sample of a variable, handling large sizes efficiently.
+    """Reads a sample of a variable, handling large sizes efficiently.
 
     Args:
         da (xr.DataArray): The DataArray to sample.
@@ -240,8 +235,7 @@ def fallback_decode_time(
     plausible_year_min: int = 1950,
     plausible_year_max: int = 2050,
 ) -> Tuple[Optional[np.ndarray], Dict[str, Any]]:
-    """
-    Controlled fallback to decode time values when no file metadata exists.
+    """Controlled fallback to decode time values when no file metadata exists.
 
     This function attempts various numeric interpretations on candidate variables
     identified by `find_heuristic_time_candidates`. It verifies the transform
@@ -314,8 +308,7 @@ def fallback_decode_time(
 
 
 def _is_datetime_type(da: xr.DataArray) -> bool:
-    """
-    Checks if the data array has a datetime-like numpy dtype (datetime64).
+    """Checks if the data array has a datetime-like numpy dtype (datetime64).
 
     This check is performed lazily without loading the data into memory.
 
@@ -331,8 +324,7 @@ def _is_datetime_type(da: xr.DataArray) -> bool:
 
 
 def _evaluate_variable_confidence(name: str, da: Any, attributes: Optional[Dict[str, Any]] = None) -> TimeConfidence:
-    """
-    Determines the likelihood of a variable being the time axis based on rules.
+    """Determines the likelihood of a variable being the time axis based on rules.
 
     Args:
         name (str): Variable name.
@@ -370,8 +362,7 @@ def _evaluate_variable_confidence(name: str, da: Any, attributes: Optional[Dict[
 
 
 def _scan_netcdf_backend(ds: xr.Dataset) -> Tuple[Optional[str], int]:
-    """
-    Scans the hidden netCDF4 object for attributes lost by xarray.
+    """Scans the hidden netCDF4 object for attributes lost by xarray.
 
     Accesses the private `_file_obj` attribute. This is risky but necessary
     for some backends where xarray drops coordinates or attributes.
@@ -408,8 +399,7 @@ def _scan_netcdf_backend(ds: xr.Dataset) -> Tuple[Optional[str], int]:
 
 
 def decode_time_variable_from_file(ds: xr.Dataset, time_coord: str) -> Optional[np.ndarray]:
-    """
-    Decodes a time variable using only metadata stored in the file.
+    """Decodes a time variable using only metadata stored in the file.
 
     Prefers using `netCDF4.num2date` if the underlying NetCDF variable has a string
     'units' attribute; a missing 'calendar' attribute defaults to 'standard'.
@@ -471,8 +461,7 @@ def decode_time_variable_from_file(ds: xr.Dataset, time_coord: str) -> Optional[
 
 
 def _get_netcdf_object(ds: Any) -> Any:
-    """
-    Safely retrieve the underlying netCDF4 object from an xarray Dataset.
+    """Safely retrieve the underlying netCDF4 object from an xarray Dataset.
 
     Args:
         ds (Any): The xarray Dataset or DataArray.
@@ -485,8 +474,7 @@ def _get_netcdf_object(ds: Any) -> Any:
 
 
 def _resolve_dimension_for_variable(ds: xr.Dataset, var_name: str) -> Tuple[str, str]:
-    """
-    Determines the dimension name associated with a variable name.
+    """Determines the dimension name associated with a variable name.
 
     Args:
         ds (xr.Dataset): Dataset.

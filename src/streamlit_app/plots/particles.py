@@ -5,8 +5,7 @@ import streamlit as st
 
 
 def plot_particle_flux(df: pd.DataFrame, collection_name: str, key_suffix: str = "") -> None:
-    """
-    Visualizes GOES Particle Flux (Protons & Electrons).
+    """Visualizes GOES Particle Flux (Protons & Electrons).
 
     This plot highlights specific channels critical for space weather (P10 and E2.0)
     and overlays NOAA Solar Radiation Storm scales to provide context for the flux values.

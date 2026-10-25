@@ -13,8 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def ensure_aware(dt: datetime) -> datetime:
-    """
-    Ensures a datetime object is timezone-aware (UTC).
+    """Ensures a datetime object is timezone-aware (UTC).
 
     If the datetime object is naive (no timezone info), it is assumed to be UTC
     and assigned the UTC timezone. If it is already aware, it is returned as is.
@@ -31,8 +30,7 @@ def ensure_aware(dt: datetime) -> datetime:
 
 
 def parse_iso_time(time_str: str) -> Optional[datetime]:
-    """
-    Safely parses an ISO time string into a timezone-aware datetime.
+    """Safely parses an ISO time string into a timezone-aware datetime.
 
     Args:
         time_str (str): A time string in a format accepted by `datetime.fromisoformat`;
@@ -55,8 +53,7 @@ def calculate_time_intersection(
     range2_start: datetime,
     range2_end: datetime,
 ) -> Optional[Tuple[datetime, datetime]]:
-    """
-    Calculates the overlapping period between two time ranges.
+    """Calculates the overlapping period between two time ranges.
 
     All inputs are converted to timezone-aware (UTC) datetimes before calculation
     to ensure consistent comparison.
@@ -88,8 +85,7 @@ def attempt_numeric_time_conversions(
     plausible_year_min: Optional[int] = None,
     plausible_year_max: Optional[int] = None,
 ) -> Tuple[Optional[np.ndarray], Dict[str, Any]]:
-    """
-    Attempts standard numeric-to-datetime transformations.
+    """Attempts standard numeric-to-datetime transformations.
 
     Can optionally evaluate plausibility by checking if the resulting years fall within
     a specified range. If no range is provided, any valid timestamp is accepted.
@@ -168,8 +164,7 @@ def attempt_numeric_time_conversions(
 
 
 def _score_dtindex(dtindex: pd.DatetimeIndex, min_year: Optional[int], max_year: Optional[int]) -> Dict[str, Any]:
-    """
-    Calculates validity score of a DatetimeIndex based on range (if provided).
+    """Calculates validity score of a DatetimeIndex based on range (if provided).
 
     Args:
         dtindex (pd.DatetimeIndex): The index to score.
@@ -216,8 +211,7 @@ def _select_best_transform(
     transforms: List[Tuple[str, pd.DatetimeIndex, Dict[str, Any]]],
     diagnostics: Dict[str, Any],
 ) -> Tuple[Optional[np.ndarray], Dict[str, Any]]:
-    """
-    Selects the best time transform based on weighted scores with strict range enforcement.
+    """Selects the best time transform based on weighted scores with strict range enforcement.
 
     The scoring prioritizes transforms that produce dates within the specified plausible range.
     If a range is specified, transforms with no in-range dates are strictly rejected.
@@ -266,8 +260,7 @@ def _select_best_transform(
 
 
 def ensure_datetime_type(val: Any) -> datetime:
-    """
-    Converts diverse datetime types (numpy/pandas) to a standardized Python datetime in UTC.
+    """Converts diverse datetime types (numpy/pandas) to a standardized Python datetime in UTC.
 
     Args:
         val (Any): Input value (pd.Timestamp, np.datetime64, or datetime).
@@ -291,8 +284,7 @@ def ensure_datetime_type(val: Any) -> datetime:
 
 
 def convert_cftime_object(val: Any) -> Optional[datetime]:
-    """
-    Converts a cftime object to a standard Python datetime.
+    """Converts a cftime object to a standard Python datetime.
 
     Assumes the cftime object has year, month, day attributes.
     Dates that do not exist in the Gregorian calendar, which non-standard cftime
@@ -324,8 +316,7 @@ def convert_cftime_object(val: Any) -> Optional[datetime]:
 
 
 def parse_string_timestamp(val: Union[str, bytes, np.str_, np.bytes_]) -> Optional[datetime]:
-    """
-    Parses a string or bytes representation of a timestamp using Pandas.
+    """Parses a string or bytes representation of a timestamp using Pandas.
 
     Args:
         val (Union[str, bytes, np.str_, np.bytes_]): The input string/bytes.
@@ -344,8 +335,7 @@ def parse_string_timestamp(val: Union[str, bytes, np.str_, np.bytes_]) -> Option
 
 
 def parse_numeric_with_units(val: float, units: str, calendar: Any) -> Optional[datetime]:
-    """
-    Parses a numeric time value using netCDF4.num2date and unit string.
+    """Parses a numeric time value using netCDF4.num2date and unit string.
 
     Args:
         val (float): Numeric value.
@@ -375,8 +365,7 @@ def parse_numeric_with_units(val: float, units: str, calendar: Any) -> Optional[
 
 
 def parse_numeric_fallback(val: float) -> Optional[datetime]:
-    """
-    Parses a numeric value using the heuristics of `attempt_numeric_time_conversions`.
+    """Parses a numeric value using the heuristics of `attempt_numeric_time_conversions`.
 
     Args:
         val (float): The numeric value to test.

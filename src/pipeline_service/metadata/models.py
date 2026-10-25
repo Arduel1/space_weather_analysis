@@ -4,8 +4,7 @@ from typing import Any, Dict, List, Optional, Union
 
 @dataclass(slots=True)
 class VariableMetadata:
-    """
-    A standardized data structure for representing variable metadata.
+    """A standardized data structure for representing variable metadata.
 
     This class serves as a common format, ensuring that pipelines
     convert their metadata into this structure before

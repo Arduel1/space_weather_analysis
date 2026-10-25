@@ -10,9 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class HapiDiscoverer(AbstractDiscoverer):
-    """
-    Discovers datasets by querying a list of HAPI-compliant servers.
-    """
+    """Discovers datasets by querying a list of HAPI-compliant servers."""
 
     HAPI_SOURCE_ID = "HAPI"
 
@@ -21,8 +19,7 @@ class HapiDiscoverer(AbstractDiscoverer):
         server_list_path: pathlib.Path,
         include_test_servers: bool = False,
     ):
-        """
-        Initializes the HapiDiscoverer.
+        """Initializes the HapiDiscoverer.
 
         Args:
             server_list_path (pathlib.Path): Path to the text file
@@ -36,8 +33,7 @@ class HapiDiscoverer(AbstractDiscoverer):
         self.client = HapiClient(db=None)
 
     def _read_server_list(self) -> List[str]:
-        """
-        Reads and filters the list of server URLs from the text file.
+        """Reads and filters the list of server URLs from the text file.
 
         Returns:
             List[str]: A list of server URLs.
@@ -69,9 +65,7 @@ class HapiDiscoverer(AbstractDiscoverer):
         server_url: str,
         dataset: Dict[str, Any],
     ) -> Generator[Tuple[str, CatalogEntryDict, Dict[str, Any]], None, None]:
-        """
-        Retrieves the metadata for a single dataset and yields it
-        as a catalog entry tuple.
+        """Retrieves the metadata for a single dataset as a catalog entry tuple.
 
         Args:
             server_url (str): The URL of the server to query.
@@ -118,8 +112,7 @@ class HapiDiscoverer(AbstractDiscoverer):
             logger.warning(f"Dataset {dataset_id} on {server_url} has no time range. Skipping.")
 
     def _discover_datasets_for_server(self, server_url: str) -> Generator[Tuple[str, CatalogEntryDict, Dict[str, Any]], None, None]:
-        """
-        Retrieves the full dataset catalog from a single server.
+        """Retrieves the full dataset catalog from a single server.
 
         Args:
             server_url (str): The URL of the server to query.
@@ -151,8 +144,7 @@ class HapiDiscoverer(AbstractDiscoverer):
                 logger.info(f"Finished '{dataset_id}'. Next up: '{next_id}'")
 
     def discover(self) -> Generator[Tuple[str, CatalogEntryDict, Dict[str, Any]], None, None]:
-        """
-        Implements the discovery process for HAPI sources.
+        """Implements the discovery process for HAPI sources.
 
         Iterates through the list of servers, queries each for its
         catalog, and yields standardized entries.

@@ -9,22 +9,18 @@ logger = logging.getLogger(__name__)
 
 
 class CdawebDiscoverer(AbstractDiscoverer):
-    """
-    Discovers datasets by querying the data source via the CdawebClient.
+    """Discovers datasets by querying the data source via the CdawebClient.
 
     This class orchestrates the discovery process by fetching all observatory
     groups and then retrieving the dataset list for each group.
     """
 
     def __init__(self) -> None:
-        """
-        Initializes the discoverer with a shared CdawebClient.
-        """
+        """Initializes the discoverer with a shared CdawebClient."""
         self.client = CdawebClient()
 
     def _discover_datasets_for_group(self, group_name: str) -> Generator[Tuple[str, CatalogEntryDict, Optional[Dict[str, Any]]], None, None]:
-        """
-        Retrieves and iterates over all datasets for a single group.
+        """Retrieves and iterates over all datasets for a single group.
 
         Args:
             group_name (str): The name of the group to query.
@@ -53,8 +49,7 @@ class CdawebDiscoverer(AbstractDiscoverer):
             )
 
     def discover(self) -> Generator[Tuple[str, CatalogEntryDict, Optional[Dict[str, Any]]], None, None]:
-        """
-        Implements the discovery process for data sources.
+        """Implements the discovery process for data sources.
 
         Iterates through all observatory groups, queries each for its
         datasets, and yields standardized entries.

@@ -20,8 +20,7 @@ LOCAL_SOURCE_ID = "LOCAL"
 
 
 def main() -> None:
-    """
-    Initializes and runs the Pipeline Service.
+    """Initializes and runs the Pipeline Service.
 
     This entry point sets up the runtime environment, establishes the database
     connection, and initializes the PipelineOrchestrator. It defines a manual

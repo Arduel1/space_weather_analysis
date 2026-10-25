@@ -30,8 +30,7 @@ HAPI_SERVER_LIST_FILE = DATA_DIR / "hapi_config" / "all.txt"
 
 
 def main() -> None:
-    """
-    Executes the catalog collection workflow.
+    """Executes the catalog collection workflow.
 
     This function orchestrates the discovery of datasets from external sources,
     the construction of a unified catalog file, and the synchronization of

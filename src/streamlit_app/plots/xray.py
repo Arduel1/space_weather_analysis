@@ -13,8 +13,7 @@ def plot_xray_flux(
     key_suffix: str = "",
     kp_df: Optional[pd.DataFrame] = None,
 ) -> None:
-    """
-    Visualizes GOES X-Ray flux data with classification backgrounds.
+    """Visualizes GOES X-Ray flux data with classification backgrounds.
 
     The plot displays both Long and Short wave channels and includes background
     zones corresponding to the C, M, and X flare classifications. If Kp index

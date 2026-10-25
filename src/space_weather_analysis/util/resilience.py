@@ -9,8 +9,7 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 
 def retry_interaction(max_retries: int = 3, backoff_factor: float = 1.0, exceptions: tuple = (Exception,)) -> Callable[[F], F]:
-    """
-    Decorator to retry a function call upon encountering specific exceptions.
+    """Decorator to retry a function call upon encountering specific exceptions.
 
     This ensures robustness for external API calls by
     automatically retrying failed attempts with an exponential backoff strategy.

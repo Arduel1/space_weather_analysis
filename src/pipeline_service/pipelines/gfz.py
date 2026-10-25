@@ -16,16 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 class GfzPipeline(MongoLoader, BasePipeline):
-    """
-    Pipeline implementation for GFZ Potsdam data ingestion.
+    """Pipeline implementation for GFZ Potsdam data ingestion.
 
     This pipeline handles the downloading of geomagnetic indices from GFZ
     and stores them in MongoDB.
     """
 
     def __init__(self, db: Database, base_data_path: pathlib.Path):
-        """
-        Initializes the GFZ pipeline.
+        """Initializes the GFZ pipeline.
 
         Args:
             db: The database connection instance.
@@ -43,8 +41,7 @@ class GfzPipeline(MongoLoader, BasePipeline):
         end_time: Optional[datetime],
         progress_callback: Optional[Callable[[float, str], None]] = None,
     ) -> None:
-        """
-        Executes the download process for the requested GFZ datasets.
+        """Executes the download process for the requested GFZ datasets.
 
         Args:
             datasets: List of GFZ index names.

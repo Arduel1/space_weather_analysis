@@ -10,8 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class MongoLoader:
-    """
-    Abstract Base Class providing common MongoDB loading functionality.
+    """Abstract Base Class providing common MongoDB loading functionality.
 
     Handles TimeSeries collection creation and batched data insertion
     for inheriting classes. This class is designed to be mixed into
@@ -21,8 +20,7 @@ class MongoLoader:
     DEFAULT_BATCH_SIZE = 5000
 
     def __init__(self, db: Database) -> None:
-        """
-        Initializes the loader with a database connection.
+        """Initializes the loader with a database connection.
 
         Args:
             db: The MongoDB database instance.
@@ -36,9 +34,7 @@ class MongoLoader:
         meta_field: str,
         **timeseries_options: Any,
     ) -> None:
-        """
-        Helper method to create a MongoDB time series collection if it
-        does not exist.
+        """Creates a MongoDB time series collection if it does not exist.
 
         Args:
             collection_name: The name of the collection.
@@ -83,8 +79,7 @@ class MongoLoader:
         batch_size: Optional[int] = None,
         clear_collection: bool = False,
     ) -> None:
-        """
-        Handles the "Load" step by inserting documents in batches.
+        """Handles the "Load" step by inserting documents in batches.
 
         Args:
             collection_name: The name of the collection to load into.
