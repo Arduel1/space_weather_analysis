@@ -32,3 +32,30 @@ class BasePipeline(ABC):
                                Signature: (progress: float, message: str) -> None
         """
         pass
+
+    @staticmethod
+    def _report_chunk_progress(
+        progress_callback: Optional[ProgressCallback],
+        dataset_index: int,
+        dataset_count: int,
+        chunk_index: int,
+        chunk_count: int,
+        message: str,
+    ) -> None:
+        """Reports the progress at the start of a chunk, if a callback is given.
+
+        Each dataset takes an equal share of the total progress, which its chunks divide equally.
+
+        Args:
+            progress_callback: The function receiving the progress, or None to report nothing.
+            dataset_index: The zero-based index of the current dataset.
+            dataset_count: The number of datasets in the run.
+            chunk_index: The zero-based index of the current chunk within the dataset.
+            chunk_count: The number of chunks of the dataset.
+            message: The status message passed along with the progress.
+        """
+        if progress_callback is None:
+            return
+        dataset_base_progress = dataset_index / dataset_count
+        chunk_progress = chunk_index / chunk_count
+        progress_callback(dataset_base_progress + (chunk_progress / dataset_count), message)

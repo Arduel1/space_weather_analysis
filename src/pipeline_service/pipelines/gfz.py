@@ -89,12 +89,9 @@ class GfzPipeline(MongoLoader, BasePipeline):
             latest_response: Optional[pd.DataFrame] = None
 
             for j, (chunk_start, chunk_stop) in enumerate(time_chunks):
-                if progress_callback:
-                    dataset_base_progress = i / total_datasets
-                    chunk_progress = j / total_chunks
-                    current_progress = dataset_base_progress + (chunk_progress / total_datasets)
-                    msg = f"Dataset {dataset_id}: Processing chunk {j + 1}/{total_chunks}"
-                    progress_callback(current_progress, msg)
+                self._report_chunk_progress(
+                    progress_callback, i, total_datasets, j, total_chunks, f"Dataset {dataset_id}: Processing chunk {j + 1}/{total_chunks}"
+                )
 
                 # A failing chunk is logged and the remaining chunks still run
                 try:

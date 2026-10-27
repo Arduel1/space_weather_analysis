@@ -172,7 +172,7 @@ class TestIsDatetimeType:
 
 class TestEvaluateVariableConfidence:
     def test_certain_if_units_since(self) -> None:
-        """Units of the form '<unit> since <epoch>' give CERTAIN."""
+        """Units of the form `{unit} since {epoch}` give CERTAIN."""
         da = xr.DataArray([], attrs={"units": "seconds since 1970-01-01"})
         score = _evaluate_variable_confidence("Time", da)
         assert score == TimeConfidence.CERTAIN

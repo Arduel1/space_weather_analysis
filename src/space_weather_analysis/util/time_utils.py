@@ -335,7 +335,7 @@ def parse_numeric_with_units(val: float, units: str, calendar: Any) -> Optional[
 
     Args:
         val (float): Numeric value.
-        units (str): CF-style units string of the form '<unit> since <reference date>'.
+        units (str): CF-style units string of the form `{unit} since {reference date}`.
         calendar (Any): Calendar string or None.
 
     Returns:

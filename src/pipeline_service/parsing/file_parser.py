@@ -1,9 +1,10 @@
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union, cast
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
+import pandas as pd
 import xarray as xr
 from astropy.table import Table
 from astropy.table import vstack as vstack_tables
@@ -15,6 +16,7 @@ from sunpy.util.datatype_factory_base import NoMatchError
 from pipeline_service.util.logging import log_xarray_dataset_summary
 from space_weather_analysis.logging.logging_utils import log_xarray_time_diagnostics
 from space_weather_analysis.util.netcdf_utils import decode_time_variable_from_file, fallback_decode_time, find_time_dimension
+from space_weather_analysis.util.time_utils import ensure_aware
 from space_weather_analysis.util.types import ParsedFileData
 
 logger = logging.getLogger(__name__)
@@ -34,8 +36,8 @@ def parse_datafiles(
 
     Args:
         file_paths: List of file paths to parse.
-        start_time: The start time for truncating 1D data.
-        end_time: The end time for truncating 1D data.
+        start_time: The start of the range kept from 1D data (inclusive).
+        end_time: The end of the range kept from 1D data (exclusive).
         variables_to_parse: Specific variables to extract metadata for.
 
     Returns:
@@ -123,15 +125,18 @@ def _finalize_1d_timeseries(
 ) -> Tuple[Optional[GenericTimeSeries], Dict[str, Any]]:
     """Concatenates and filters 1D timeseries, cleaning up unused N-D datasets.
 
+    The range is half-open, so a record at the end belongs to the following
+    range and is stored only once when consecutive ranges are processed.
+
     Args:
         ts_list: List of 1D timeseries objects.
-        start: Start time filter.
-        end: End time filter.
+        start: Start of the kept range (inclusive).
+        end: End of the kept range (exclusive).
         nd_datasets: List of open N-D datasets to close.
         metadata: File metadata.
 
     Returns:
-        Combined and truncated TimeSeries object and metadata.
+        Combined and filtered TimeSeries object and metadata.
     """
     # Clean up open handles for N-D datasets that won't be used
     for ds, _, _ in nd_datasets:
@@ -143,11 +148,31 @@ def _finalize_1d_timeseries(
 
     try:
         logger.info(f"Filtering combined 1D TimeSeries to range: {start} to {end}")
-        ts_filtered = ts_combined.truncate(start, end)
+        frame = ts_combined.to_dataframe()
+        index_start = _as_index_time(start, frame.index)
+        index_end = _as_index_time(end, frame.index)
+        in_range = (frame.index >= index_start) & (frame.index < index_end)
+        ts_filtered = GenericTimeSeries(frame[in_range], meta=ts_combined.meta, units=ts_combined.units)
         return ts_filtered, metadata
     except Exception as e:
-        logger.error(f"Failed to truncate TimeSeries: {e}", exc_info=True)
+        logger.error(f"Failed to filter TimeSeries: {e}", exc_info=True)
         return ts_combined, metadata
+
+
+def _as_index_time(time: datetime, index: pd.DatetimeIndex) -> pd.Timestamp:
+    """Converts a time into the time zone handling of a DatetimeIndex so both can be compared.
+
+    Args:
+        time: The time to convert; naive times are treated as UTC.
+        index: The index the time is compared with; SunPy builds naive UTC indexes.
+
+    Returns:
+        The time as naive UTC timestamp for a naive index, otherwise in the time zone of the index.
+    """
+    timestamp = pd.Timestamp(ensure_aware(time))
+    if index.tz is None:
+        return timestamp.tz_convert("UTC").tz_localize(None)
+    return timestamp.tz_convert(index.tz)
 
 
 def _handle_nd_datafile(
@@ -194,7 +219,7 @@ def _handle_nd_datafile(
     diag: Dict[str, Any] = {"found": True, "decoded_using_file_metadata": False}
 
     if decoded_times is not None:
-        _assign_decoded_times(ds, time_dim, time_coord, decoded_times)
+        ds = _assign_decoded_times(ds, time_dim, time_coord, decoded_times)
         diag["decoded_using_file_metadata"] = True
     elif allow_time_fallback:
         logger.info("Attempting fallback numeric decoding as allowed by flag.")
@@ -204,7 +229,7 @@ def _handle_nd_datafile(
         if fb_decoded is not None:
             # Create a new coordinate for fallback times to avoid overwriting original data
             new_coord = f"{time_coord}_fallback"
-            _assign_decoded_times(ds, time_dim, new_coord, fb_decoded)
+            ds = _assign_decoded_times(ds, time_dim, new_coord, fb_decoded)
             time_coord = new_coord
 
     file_metadata = _get_xarray_file_metadata(ds, variables_to_parse)
@@ -235,21 +260,26 @@ def _open_xarray_dataset(file_path: Path) -> Optional[xr.Dataset]:
     return None
 
 
-def _assign_decoded_times(ds: xr.Dataset, dim: str, name: str, values: np.ndarray) -> None:
-    """Assigns decoded time values as a new coordinate to the dataset.
+def _assign_decoded_times(ds: xr.Dataset, dim: str, name: str, values: np.ndarray) -> xr.Dataset:
+    """Returns a copy of the dataset with decoded time values as a coordinate.
 
     Args:
-        ds: The dataset to modify.
+        ds: The dataset to extend.
         dim: Dimension name.
         name: New coordinate name.
         values: Decoded time values.
+
+    Returns:
+        The dataset with the new coordinate, or the given dataset if the assignment fails.
     """
     try:
         time_da = xr.DataArray(values, dims=(dim,), coords={dim: values}, name=name)
-        ds.assign_coords({name: time_da})
+        ds_with_times = ds.assign_coords({name: time_da})
         logger.info(f"Assigned decoded time coordinate '{name}' with dim '{dim}'.")
+        return ds_with_times
     except Exception as e:
         logger.warning(f"Failed to assign decoded time coordinate: {e}")
+        return ds
 
 
 def _handle_missing_time_dimension(
@@ -281,7 +311,7 @@ def _handle_missing_time_dimension(
         file_metadata["time_decode_diagnostics"]["fallback_attempt"] = fb_diag
 
         if fb_decoded is not None:
-            _assign_decoded_times(ds, "time", "time_fallback", fb_decoded)
+            ds = _assign_decoded_times(ds, "time", "time_fallback", fb_decoded)
             return ds, file_metadata, "time", "time_fallback"
 
     return None, file_metadata, None, None
@@ -301,7 +331,8 @@ def _get_cdf_file_metadata(cdf_file: CDF, variables_to_parse: List[str]) -> Dict
     vars_to_process = variables_to_parse
 
     if not vars_to_process:
-        vars_to_process = cast(Dict[str, Any], cdf_file.cdf_info()).get("zVariables", [])
+        cdf_info = cdf_file.cdf_info()
+        vars_to_process = list(cdf_info.rVariables) + list(cdf_info.zVariables)
         logger.info(f"No variables specified. Discovering all {len(vars_to_process)} variables from CDF.")
 
     for var in vars_to_process:

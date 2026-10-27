@@ -1,6 +1,6 @@
 import logging
 import pathlib
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from pymongo.database import Database
@@ -16,7 +16,7 @@ from pipeline_service.util.naming import sanitize_collection_name
 from pipeline_service.util.time import generate_time_chunks
 from space_weather_analysis.clients.hapi import HapiClient
 from space_weather_analysis.util.error_handling import log_and_handle_unexpected_failure
-from space_weather_analysis.util.time_utils import parse_iso_time
+from space_weather_analysis.util.time_utils import ensure_aware, parse_iso_time
 from space_weather_analysis.util.types import CatalogEntryDict, TransformedDocuments
 
 logger = logging.getLogger(__name__)
@@ -102,15 +102,9 @@ class HapiPipeline(MongoLoader, BasePipeline):
             skipped_parameters_reported = False
 
             for j, (chunk_start, chunk_stop) in enumerate(time_chunks):
-                # Calculate progress: Base progress for completed datasets + progress within current dataset
-                if progress_callback:
-                    dataset_base_progress = i / total_datasets
-                    chunk_progress = j / total_chunks
-                    # Scale chunk progress to fit into the dataset's slice of total progress
-                    current_progress = dataset_base_progress + (chunk_progress / total_datasets)
-
-                    msg = f"Dataset {dataset_id}: Processing chunk {j + 1}/{total_chunks}"
-                    progress_callback(current_progress, msg)
+                self._report_chunk_progress(
+                    progress_callback, i, total_datasets, j, total_chunks, f"Dataset {dataset_id}: Processing chunk {j + 1}/{total_chunks}"
+                )
 
                 logger.info(f"Checking chunk {j + 1}/{total_chunks}: {chunk_start} to {chunk_stop}")
 
@@ -150,7 +144,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
             A tuple of (start_time, end_time) in UTC, or (None, None) if unresolved.
         """
         if start_time and end_time:
-            return self._ensure_time_range_is_aware(start_time, end_time)
+            return ensure_aware(start_time), ensure_aware(end_time)
 
         logger.info(f"Auto-detecting time range for {dataset_id}...")
 
@@ -327,19 +321,3 @@ class HapiPipeline(MongoLoader, BasePipeline):
 
         logger.info(f"Transformed {len(documents)} documents.")
         return documents
-
-    def _ensure_time_range_is_aware(self, start_time: datetime, end_time: datetime) -> Tuple[datetime, datetime]:
-        """Ensures both start and end times are timezone-aware in UTC.
-
-        Args:
-            start_time: The start time to validate.
-            end_time: The end time to validate.
-
-        Returns:
-            A tuple of timezone-aware datetime objects.
-        """
-        if start_time.tzinfo is None:
-            start_time = start_time.replace(tzinfo=timezone.utc)
-        if end_time.tzinfo is None:
-            end_time = end_time.replace(tzinfo=timezone.utc)
-        return start_time, end_time

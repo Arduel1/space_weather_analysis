@@ -1,7 +1,7 @@
 import logging
 import pathlib
 import pickle
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
 import gridfs
@@ -12,6 +12,7 @@ from sunpy.timeseries.timeseriesbase import GenericTimeSeries
 from pipeline_service.database.mongo_loader import MongoLoader
 from pipeline_service.metadata.generator import MetadataWriter
 from pipeline_service.metadata.models import VariableMetadata
+from pipeline_service.parsing.cdf import MAX_ARRAY_COLUMNS, cdf_scalar_attribute, cdf_text_attribute, clean_cdf_columns, time_stamp_location
 from pipeline_service.parsing.file_parser import parse_datafiles
 from pipeline_service.pipelines.base import BasePipeline, ProgressCallback
 from pipeline_service.util.documents import build_gridfs_reference_document, dataframe_to_documents
@@ -19,6 +20,7 @@ from pipeline_service.util.naming import sanitize_collection_name
 from pipeline_service.util.time import generate_time_chunks
 from space_weather_analysis.clients.cdaweb import CdawebClient
 from space_weather_analysis.util.netcdf_utils import parse_xarray_timestamp
+from space_weather_analysis.util.time_utils import ensure_aware
 
 logger = logging.getLogger(__name__)
 
@@ -29,20 +31,28 @@ class CdawebPipeline(MongoLoader, BasePipeline):
     This pipeline relies on the MongoDB 'master_catalog' collection
     to discover data sources (Observatory Groups) and processes data
     in time chunks to handle large datasets.
+
+    CDAWeb files follow the ISTP Metadata Guidelines (International Solar-Terrestrial
+    Physics, https://istp-metadata.readthedocs.io/), which define the attributes of each
+    variable, such as fill value (FILLVAL), valid range (VALIDMIN/VALIDMAX), unit (UNITS)
+    and description (CATDESC). The pipeline uses them to clean the data and to describe it.
     """
 
     CATALOG_COLLECTION = "master_catalog"
     SOURCE_ID = "FIDO_CDAWEB"
+    # Time span of one download and of one check for already stored documents
+    CHUNK_DURATION = timedelta(days=7)
 
-    def __init__(self, db: Database, base_data_path: pathlib.Path):
+    def __init__(self, db: Database, base_data_path: pathlib.Path, client: Optional[CdawebClient] = None):
         """Initializes the pipeline.
 
         Args:
             db: The MongoDB database instance.
             base_data_path: The root directory for data downloads.
+            client: The client downloading the data files; a new CdawebClient if None.
         """
         super().__init__(db)
-        self.client: CdawebClient = CdawebClient()
+        self.client: CdawebClient = client if client is not None else CdawebClient()
         self.base_data_dir: pathlib.Path = base_data_path
         self.metadata_writer: MetadataWriter = MetadataWriter(db)
         self.fs: gridfs.GridFS = gridfs.GridFS(self.db)
@@ -73,11 +83,8 @@ class CdawebPipeline(MongoLoader, BasePipeline):
             logger.error("Start time and end time are required for CDAWeb pipeline.")
             return
 
-        # Ensure timezone awareness
-        if start_time.tzinfo is None:
-            start_time = start_time.replace(tzinfo=timezone.utc)
-        if end_time.tzinfo is None:
-            end_time = end_time.replace(tzinfo=timezone.utc)
+        start_time = ensure_aware(start_time)
+        end_time = ensure_aware(end_time)
 
         logger.info("Starting CDAWeb Pipeline")
         logger.info(f"Time Range: {start_time} to {end_time}")
@@ -86,8 +93,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
             logger.warning("No datasets specified in 'datasets'.")
             return
 
-        chunk_delta = timedelta(days=7)
-        time_chunks = generate_time_chunks(start_time, end_time, chunk_delta)
+        time_chunks = generate_time_chunks(start_time, end_time, self.CHUNK_DURATION)
         total_chunks = len(time_chunks)
         time_field = "timestamp"
 
@@ -105,15 +111,12 @@ class CdawebPipeline(MongoLoader, BasePipeline):
             self._ensure_timeseries_collection(collection_name, time_field=time_field, meta_field="metadata")
 
             logger.info(f"Processing dataset {dataset_id} (group {group_name}) for {total_chunks} chunks...")
+            skipped_variables_reported = False
 
             for j, (chunk_start, chunk_stop) in enumerate(time_chunks):
-                if progress_callback:
-                    # Calculate granular progress
-                    dataset_base = i / total_datasets
-                    chunk_contribution = (j / total_chunks) / total_datasets
-                    progress = dataset_base + chunk_contribution
-                    msg = f"Downloading {dataset_id}: Chunk {j + 1}/{total_chunks}"
-                    progress_callback(progress, msg)
+                self._report_chunk_progress(
+                    progress_callback, i, total_datasets, j, total_chunks, f"Downloading {dataset_id}: Chunk {j + 1}/{total_chunks}"
+                )
 
                 logger.info(f"Checking chunk {j + 1}/{total_chunks}: {chunk_start} to {chunk_stop}")
 
@@ -124,7 +127,12 @@ class CdawebPipeline(MongoLoader, BasePipeline):
                     continue
 
                 logger.info("Processing chunk: No data found in DB.")
-                self._process_dataset(dataset_id, group_name, chunk_start, chunk_stop)
+                skipped_variables = self._process_dataset(dataset_id, group_name, chunk_start, chunk_stop)
+
+                # Reported once per dataset, as every chunk skips the same variables
+                if skipped_variables and not skipped_variables_reported:
+                    logger.warning(f"Dataset {dataset_id}: arrays with more than {MAX_ARRAY_COLUMNS} elements are not stored: {skipped_variables}")
+                    skipped_variables_reported = True
 
         logger.info("CDAWeb Pipeline finished.")
 
@@ -167,18 +175,22 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         group_name: str,
         start_time: datetime,
         end_time: datetime,
-    ) -> None:
+    ) -> List[str]:
         """Runs the full pipeline for a single dataset chunk.
 
         Args:
             dataset_id: The dataset ID to process.
             group_name: The group name (for download path).
-            start_time: The start time for the query chunk.
-            end_time: The end time for the query chunk.
+            start_time: The start time for the query chunk (inclusive).
+            end_time: The end time for the query chunk (exclusive).
+
+        Returns:
+            The names of the variables left out because they have too many components for columns.
         """
         logger.info(f"Processing Dataset Chunk: {dataset_id} ({start_time} to {end_time})")
 
         opened_datasets: List[xr.Dataset] = []
+        skipped_variables: List[str] = []
         try:
             # We construct the download path here to pass it to the client
             download_dir = self.base_data_dir / group_name / dataset_id
@@ -188,7 +200,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
 
             if not downloaded_files:
                 logger.warning(f"Skipping parse/metadata for {dataset_id}: No files downloaded.")
-                return
+                return skipped_variables
 
             # Convert Path objects to strings if parser expects strings
             file_paths = [str(p) for p in downloaded_files]
@@ -200,7 +212,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
 
             if data_object is not None:
                 if isinstance(data_object, GenericTimeSeries):
-                    self._handle_1d_data(data_object, collection_name, source_id)
+                    skipped_variables = self._handle_1d_data(data_object, collection_name, source_id, file_metadata)
                 elif isinstance(data_object, list):
                     self._load_nd_data_to_gridfs(data_object, collection_name, source_id, opened_datasets)
                 else:
@@ -209,7 +221,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
                 logger.info(f"No 1D or N-D data could be parsed for {dataset_id} in this chunk.")
 
             if file_metadata:
-                self._save_pipeline_metadata(dataset_id, group_name, file_metadata)
+                self._save_pipeline_metadata(dataset_id, group_name, file_metadata, skipped_variables)
 
         except Exception as e:
             logger.error(f"Pipeline step failed for dataset chunk {dataset_id}: {e}", exc_info=True)
@@ -221,27 +233,34 @@ class CdawebPipeline(MongoLoader, BasePipeline):
                 except Exception as e_close:
                     logger.warning(f"Failed to close xarray dataset: {e_close}")
             logger.info(f"Finished Dataset Chunk: {dataset_id}")
+        return skipped_variables
 
     def _handle_1d_data(
         self,
         data_object: GenericTimeSeries,
         collection_name: str,
         source_id: str,
-    ) -> None:
-        """Transforms and loads 1D TimeSeries data into MongoDB.
+        file_metadata: Dict[str, Any],
+    ) -> List[str]:
+        """Cleans, transforms and loads 1D TimeSeries data into MongoDB.
 
         Args:
             data_object: The parsed 1D timeseries.
             collection_name: The target MongoDB collection name.
             source_id: The source identifier string.
+            file_metadata: The attributes of each CDF variable, which define fill values and valid ranges.
+
+        Returns:
+            The names of the variables left out because they have too many components for columns.
         """
         logger.info(f"1D data for {collection_name} parsed. Transforming for MongoDB load...")
-        df_to_load = data_object.to_dataframe()
+        df_to_load, skipped_variables = clean_cdf_columns(data_object.to_dataframe(), file_metadata)
         logger.info(f"Transforming {len(df_to_load)} DataFrame rows to MongoDB documents...")
         documents = dataframe_to_documents(df_to_load, source_id)
 
         self._load_data(collection_name, documents)
         logger.info(f"Successfully loaded {len(documents)} documents into collection '{collection_name}'")
+        return skipped_variables
 
     def _load_nd_data_to_gridfs(
         self,
@@ -319,18 +338,16 @@ class CdawebPipeline(MongoLoader, BasePipeline):
                 logger.warning(f"Timestamp parse returned None for slice index={i}, time_coord='{time_coord}'. Skipping slice.")
                 continue
 
-            # Ensure timestamp is aware
-            if timestamp.tzinfo is None:
-                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            timestamp = ensure_aware(timestamp)
 
             data_payload: Dict[str, Any] = {}
             for var_name in ts_slice.data_vars:
                 try:
                     var_data = ts_slice[var_name]
                     data_payload[str(var_name)] = var_data.values.tolist()
-                except Exception:
-                    # Skip individual variables that fail to serialize
-                    pass
+                except Exception as e:
+                    # A variable that fails to serialize is left out of the payload, the others are kept
+                    logger.debug(f"Variable '{var_name}' at {timestamp} not serializable, left out of the payload: {e}")
 
             try:
                 payload_bytes = pickle.dumps(data_payload)
@@ -357,6 +374,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         dataset_id: str,
         group_name: str,
         file_metadata: Dict[str, Any],
+        skipped_variables: List[str],
     ) -> None:
         """Normalizes and saves the pipeline metadata to the database.
 
@@ -364,12 +382,14 @@ class CdawebPipeline(MongoLoader, BasePipeline):
             dataset_id: The dataset ID.
             group_name: The source group name.
             file_metadata: The metadata parsed from the file.
+            skipped_variables: The names of the variables not stored because they have too many components.
         """
-        # We pass an empty list for API meta as this specific flow relies on file metadata
-        variables = self._normalize_cdaweb_meta_to_variables([], file_metadata)
+        variables = self._normalize_cdaweb_meta_to_variables(file_metadata)
         source_info = {
             "Source Client": self.SOURCE_ID,
             "Source Group": group_name,
+            "Time Stamp Location": time_stamp_location(file_metadata),
+            "Parameters Not Stored": skipped_variables,
         }
         self.metadata_writer.save_metadata_to_db(
             dataset_id=dataset_id,
@@ -377,34 +397,27 @@ class CdawebPipeline(MongoLoader, BasePipeline):
             source_info=source_info,
         )
 
-    def _normalize_cdaweb_meta_to_variables(self, api_meta: List[Dict[str, Any]], file_meta: Dict[str, Any]) -> List[VariableMetadata]:
-        """Merges file and API metadata into VariableMetadata objects.
+    def _normalize_cdaweb_meta_to_variables(self, file_meta: Dict[str, Any]) -> List[VariableMetadata]:
+        """Converts the ISTP attributes of each file variable into VariableMetadata objects.
 
         Args:
-            api_meta: Metadata from an API source.
-            file_meta: Metadata parsed from a data file.
+            file_meta: Metadata parsed from a data file, the attributes of each variable keyed by its name.
 
         Returns:
-            A merged list of metadata objects.
+            One metadata object per variable, with description, units and fill value taken from the attributes.
         """
         variables: List[VariableMetadata] = []
-        api_meta_dict = {var["Name"]: var for var in api_meta if var.get("Name")}
-        all_var_names = set(api_meta_dict.keys()) | set(file_meta.keys())
-
-        for var_name in all_var_names:
-            if not var_name:
+        for var_name, file_attrs in file_meta.items():
+            if not var_name or not isinstance(file_attrs, dict):
                 continue
-
-            api_attrs = api_meta_dict.get(var_name, {})
-            file_attrs = file_meta.get(var_name, {})
 
             variables.append(
                 VariableMetadata(
                     name=var_name,
-                    description=api_attrs.get("LongDescription"),
-                    units=api_attrs.get("Units"),
-                    fill=api_attrs.get("Fill"),
-                    type=api_attrs.get("Type"),
+                    # FIELDNAM is the short name every ISTP variable carries, used when CATDESC is missing
+                    description=cdf_text_attribute(file_attrs, "CATDESC") or cdf_text_attribute(file_attrs, "FIELDNAM"),
+                    units=cdf_text_attribute(file_attrs, "UNITS"),
+                    fill=cdf_scalar_attribute(file_attrs.get("FILLVAL")),
                     file_attributes=file_attrs,
                 )
             )

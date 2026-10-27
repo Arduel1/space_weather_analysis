@@ -9,11 +9,11 @@ from sunpy.timeseries import GenericTimeSeries
 
 logger = logging.getLogger(__name__)
 
-# Some HAPI servers write the string "null" where the specification expects a JSON null.
-HAPI_NULL_STRING = "null"
-
 # Arrays with more elements are maps, images or spectra rather than single values over time, so they are not stored as columns.
 MAX_ARRAY_COLUMNS = 10
+
+# Some HAPI servers write the string "null" where the specification expects a JSON null.
+HAPI_NULL_STRING = "null"
 
 NUMERIC_PARAMETER_TYPES = ("double", "integer")
 TEXT_PARAMETER_TYPES = ("string", "isotime")
@@ -186,7 +186,7 @@ def _vector_column_names(param_name: str, labels: Any, vector_length: int) -> Li
         vector_length: The number of components.
 
     Returns:
-        One name '<param_name>_<label>' per label, or '<param_name>_<index>' per component if no usable labels are given.
+        One name `{param_name}_{label}` per label, or `{param_name}_{index}` per component if no usable labels are given.
     """
     if isinstance(labels, list) and len(labels) == vector_length:
         return [f"{param_name}_{label}" for label in labels]
@@ -194,7 +194,7 @@ def _vector_column_names(param_name: str, labels: Any, vector_length: int) -> Li
 
 
 def _indexed_column_name(param_name: str, element_index: tuple) -> str:
-    """Builds the column name '<param_name>_<i>_<j>...' of one array element.
+    """Builds the column name `{param_name}_{i}_{j}...` of one array element.
 
     Args:
         param_name: The name of the parameter.

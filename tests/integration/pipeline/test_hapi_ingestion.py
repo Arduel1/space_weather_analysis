@@ -156,7 +156,7 @@ def test_hapi_ingestion_stores_one_document_per_row_at_its_time(
 def test_hapi_values_and_array_columns_stored_as_given(
     db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset, stored_data: StoredData
 ) -> None:
-    """Vectors get one column per label or index, a 2-D array one column per <name>_<i>_<j>, isotime and string values stay strings."""
+    """Vectors get one column per label or index, a 2-D array one column per `{name}_{i}_{j}`, isotime and string values stay strings."""
     _ingest(db, tmp_path, [serve_dataset()])
 
     assert stored_data(DATASET_ID, REGULAR_TIME) == pytest.approx(
