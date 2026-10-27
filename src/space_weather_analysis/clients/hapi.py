@@ -8,7 +8,6 @@ from hapiclient.util import HAPIError
 from pymongo.database import Database
 
 from space_weather_analysis.clients.base import BaseClient
-from space_weather_analysis.util.error_handling import log_and_handle_expected_failure
 from space_weather_analysis.util.resilience import retry_interaction
 from space_weather_analysis.util.time_utils import calculate_time_intersection, parse_iso_time
 from space_weather_analysis.util.types import CatalogEntryDict, CatalogMap
@@ -27,6 +26,14 @@ class HapiClient(BaseClient):
     CATALOG_COLLECTION = "master_catalog"
     SOURCE_TYPE = "HAPI"
 
+    # Options for every hapi() call: no print output, no files in the hapiclient disk cache,
+    # and CSV transfer, which every HAPI server supports and which spares the /capabilities request.
+    HAPI_OPTIONS: Dict[str, Any] = {"logging": False, "cache": False, "format": "csv"}
+
+    # hapiclient appends this hint to the errors it raises itself (connection problems, error responses without a
+    # HAPI status); errors without it carry the status message of a server that answered according to HAPI.
+    HAPICLIENT_FAILURE_HINT = "hapi-server.org/servers"
+
     def __init__(self, db: Optional[Database] = None) -> None:
         """Initializes the client using a MongoDB database connection.
 
@@ -37,27 +44,23 @@ class HapiClient(BaseClient):
         self.catalog_map: CatalogMap = {}
 
         if self.db is not None:
-            try:
-                loaded_map = self._load_catalog_from_db()
-                if loaded_map:
-                    self.catalog_map = loaded_map
-                    logger.info(f"Loaded master catalog from DB with {len(self.catalog_map)} entries.")
-                else:
-                    logger.warning("Master catalog loaded but empty. Discovery may need to run first.")
-            except Exception as e:
-                logger.error(f"Failed to initialize catalog map: {e}", exc_info=True)
+            self.catalog_map = self._load_catalog_from_db(self.db)
+            if self.catalog_map:
+                logger.info(f"Loaded master catalog from DB with {len(self.catalog_map)} entries.")
+            else:
+                logger.warning("Master catalog loaded but empty. Discovery may need to run first.")
 
-    def _load_catalog_from_db(self) -> Dict[str, List[CatalogEntryDict]]:
+    def _load_catalog_from_db(self, db: Database) -> Dict[str, List[CatalogEntryDict]]:
         """Loads the master catalog from the MongoDB collection into a dictionary map.
 
-        Returns:
-            A dictionary mapping dataset_id to a list of source entries.
-        """
-        if self.db is None:
-            return {}
+        Args:
+            db: The MongoDB database holding the catalog collection.
 
+        Returns:
+            A dictionary mapping dataset_id to a list of source entries, or an empty dict if loading fails.
+        """
         try:
-            collection = self.db[self.CATALOG_COLLECTION]
+            collection = db[self.CATALOG_COLLECTION]
             catalog_data = collection.find({}, {"_id": 0})
 
             result: Dict[str, List[CatalogEntryDict]] = {}
@@ -87,8 +90,7 @@ class HapiClient(BaseClient):
             The list of datasets advertised by the server.
         """
         try:
-            # logging=False suppresses the internal print statements of hapiclient
-            response = hapi(server_url, logging=False)
+            response = hapi(server_url, **self.HAPI_OPTIONS)
             catalog = response.get("catalog", [])
             logger.info(f"Discovered {len(catalog)} datasets at {server_url}")
             return catalog
@@ -108,7 +110,7 @@ class HapiClient(BaseClient):
             The metadata dictionary or None on failure.
         """
         try:
-            meta = hapi(server_url, dataset_id, logging=False)
+            meta = hapi(server_url, dataset_id, **self.HAPI_OPTIONS)
 
             if not isinstance(meta, dict):
                 logger.warning(f"Unexpected metadata format from {server_url}: {type(meta)}")
@@ -181,29 +183,19 @@ class HapiClient(BaseClient):
 
     # --- Internal Logic ---
 
-    def _get_parameters_for_request(self, dataset_id: str, parameters: Optional[List[str]]) -> str:
+    def _get_parameters_for_request(self, parameters: Optional[List[str]]) -> str:
         """Constructs the parameter string for the HAPI request.
 
+        An empty string makes the server deliver all parameters of the dataset.
+
         Args:
-            dataset_id: The dataset ID.
-            parameters: A list of requested parameter names.
+            parameters: A list of requested parameter names, or None for all parameters.
 
         Returns:
             A comma-separated string of parameters.
         """
         if parameters:
             return ",".join(parameters)
-
-        logger.info(f"No parameters specified for {dataset_id}. Fetching metadata to auto-discover...")
-        meta_info = self.get_dataset_metadata(dataset_id)
-
-        if meta_info and "parameters" in meta_info:
-            params_to_use = [p["name"] for p in meta_info["parameters"] if isinstance(p, dict) and p.get("name") != "Time"]
-            if params_to_use:
-                logger.info(f"Auto-discovered parameters: {params_to_use}")
-                return ",".join(params_to_use)
-
-        logger.warning(f"Could not auto-discover parameters for {dataset_id}. Requesting all.")
         return ""
 
     def get_data_and_meta(
@@ -222,14 +214,14 @@ class HapiClient(BaseClient):
             parameters: Specific parameters to fetch.
 
         Returns:
-            (data, meta) on success, or (None, None) on failure.
+            (data, meta) on success, or (None, None) if no source delivered data.
         """
         entries = self.catalog_map.get(dataset_id)
         if not entries:
             logger.error(f"Cannot fetch data: Dataset {dataset_id} has no catalog entries.")
             return None, None
 
-        params_str = self._get_parameters_for_request(dataset_id, parameters)
+        params_str = self._get_parameters_for_request(parameters)
 
         for i, entry in enumerate(entries):
             source_id = entry.get("source_id", "Unknown")
@@ -240,7 +232,7 @@ class HapiClient(BaseClient):
             if data is not None and meta is not None:
                 return data, meta
 
-        logger.error(f"All sources failed for dataset '{dataset_id}'.")
+        logger.info(f"No source delivered data for dataset '{dataset_id}' between {config_start} and {config_end}.")
         return None, None
 
     @retry_interaction(max_retries=3, exceptions=(Exception,))
@@ -262,7 +254,7 @@ class HapiClient(BaseClient):
             params_str: Comma-separated parameters.
 
         Returns:
-            (data, meta) on success, or (None, None) on failure.
+            (data, meta) on success, or (None, None) if this server delivered no data.
         """
         server_url = entry.get("source_id")
         time_range = entry.get("time_range")
@@ -292,12 +284,11 @@ class HapiClient(BaseClient):
         logger.info(f"{self.SOURCE_TYPE} Request: {dataset_id} [{start_str} -> {stop_str}]")
 
         try:
-            # We call hapiclient directly here.
             # The decorator handles retries for network glitches.
-            data, meta = hapi(server_url, dataset_id, params_str, start_str, stop_str, logging=False)
+            data, meta = hapi(server_url, dataset_id, params_str, start_str, stop_str, **self.HAPI_OPTIONS)
 
             if data is None or len(data) == 0:
-                logger.warning(f"Server {server_url} returned no data for {dataset_id}.")
+                logger.info(f"Server {server_url} returned no data for {dataset_id} [{start_str} -> {stop_str}].")
                 return None, None
 
             logger.info(f"Successfully fetched {len(data)} records from {server_url}")
@@ -305,10 +296,12 @@ class HapiClient(BaseClient):
             return data, meta
 
         except HAPIError as e:
-            # HAPI Errors (like 404s or Bad Request) usually shouldn't be retried indefinitely
-            # but usually indicate permanent issues with the query for that server.
-            # We treat them as expected failures for this specific mirror.
-            log_and_handle_expected_failure(f"HAPI request for {dataset_id}", f"server {server_url}", e, logger)
+            # hapiclient raises HAPIError for connection problems and for every non-200 HTTP status, which servers
+            # also use to report that no data exists for the request; another source may still have the data.
+            if self.HAPICLIENT_FAILURE_HINT in str(e):
+                logger.warning(f"Request to {server_url} failed for {dataset_id} [{start_str} -> {stop_str}]: {e}")
+            else:
+                logger.info(f"Server {server_url} delivered no data for {dataset_id} [{start_str} -> {stop_str}]: {e}")
             return None, None
 
         except Exception as e:

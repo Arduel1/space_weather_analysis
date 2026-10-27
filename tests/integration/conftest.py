@@ -68,12 +68,10 @@ def db(mongo_client: MongoClient) -> Generator[Database, None, None]:
 
 
 def _clean_database(database: Database) -> None:
-    """Drops all collections except 'master_catalog' and 'system.*'."""
+    """Drops all collections except 'system.*', including the master catalog, so each test starts empty."""
     if database.name != TEST_DB_NAME:
         raise RuntimeError(f"Refusing to clean database '{database.name}': only '{TEST_DB_NAME}' may be cleaned.")
 
-    preserved_collections = {"master_catalog"}
-
     for collection_name in database.list_collection_names():
-        if collection_name not in preserved_collections and not collection_name.startswith("system."):
+        if not collection_name.startswith("system."):
             database[collection_name].drop()
