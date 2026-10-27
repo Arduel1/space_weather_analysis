@@ -1,12 +1,13 @@
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Hashable, Mapping, Sequence
 
-import pandas as pd
 from pymongo.database import Database
 
 from pipeline_service.database.mongo_loader import MongoLoader
+from pipeline_service.util.documents import rows_to_documents
+from space_weather_analysis.util.types import TransformedDocuments
 
 logger = logging.getLogger(__name__)
 
@@ -48,24 +49,18 @@ class BaseETLProcessor(MongoLoader, ABC):
         pass
 
     @staticmethod
-    def _build_documents(timestamps: List[datetime], rows: List[Dict[str, Any]], metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _build_documents(timestamps: Sequence[datetime], rows: Sequence[Mapping[Hashable, Any]], source_identifier: str) -> TransformedDocuments:
         """Combines timestamps and data rows into time series documents.
-
-        Missing values (NaN, NA, None) are left out of a document's data instead of being stored.
 
         Args:
             timestamps: Time of each row.
             rows: Field values of each row, in the same order as timestamps.
-            metadata: Metadata stored with every document.
+            source_identifier: String identifying the data source.
 
         Returns:
             One document per row with the fields timestamp, metadata and data.
         """
-        documents = []
-        for timestamp, row in zip(timestamps, rows, strict=True):
-            present_fields = {field: value for field, value in row.items() if not pd.isna(value)}
-            documents.append({"timestamp": timestamp, "metadata": metadata, "data": present_fields})
-        return documents
+        return rows_to_documents(timestamps, rows, source_identifier)
 
     @abstractmethod
     def run(self) -> None:

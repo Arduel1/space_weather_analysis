@@ -11,7 +11,7 @@ from space_weather_analysis.clients.base import BaseClient
 from space_weather_analysis.util.error_handling import log_and_handle_expected_failure
 from space_weather_analysis.util.resilience import retry_interaction
 from space_weather_analysis.util.time_utils import calculate_time_intersection, parse_iso_time
-from space_weather_analysis.util.types import CatalogEntryDict
+from space_weather_analysis.util.types import CatalogEntryDict, CatalogMap
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class HapiClient(BaseClient):
             db: The MongoDB database instance.
         """
         self.db = db
-        self.catalog_map: Dict[str, List[CatalogEntryDict]] = {}
+        self.catalog_map: CatalogMap = {}
 
         if self.db is not None:
             try:
@@ -273,6 +273,9 @@ class HapiClient(BaseClient):
 
         server_start = parse_iso_time(time_range["start_time"])
         server_end = parse_iso_time(time_range["end_time"])
+        if server_start is None or server_end is None:
+            logger.warning(f"Skipping {server_url}: unparsable time range {time_range}.")
+            return None, None
 
         valid_range = calculate_time_intersection(config_start, config_end, server_start, server_end)
 

@@ -17,7 +17,7 @@ def log_xarray_dataset_summary(ds: xr.Dataset, file_path_obj: Optional[pathlib.P
     source_name = file_path_obj.name if file_path_obj else "InMemoryDataset"
 
     logger.info(f"--- XArray Dataset Summary: {source_name} ---")
-    logger.info(f"Dimensions: {dict(ds.dims)}")
+    logger.info(f"Dimensions: {dict(ds.sizes)}")
 
     coords = list(ds.coords)
     logger.info(f"Coordinates ({len(coords)}): {coords}")

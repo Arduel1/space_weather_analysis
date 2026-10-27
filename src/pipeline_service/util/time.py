@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta
-from typing import List, Tuple
+from typing import List
+
+from space_weather_analysis.util.types import TimeRange
 
 
-def generate_time_chunks(start_time: datetime, stop_time: datetime, chunk_delta: timedelta) -> List[Tuple[datetime, datetime]]:
+def generate_time_chunks(start_time: datetime, stop_time: datetime, chunk_delta: timedelta) -> List[TimeRange]:
     """Splits a time range into smaller chunks.
 
     Args:

@@ -1,16 +1,16 @@
 import logging
 import pathlib
 from datetime import datetime, timedelta
-from typing import Callable, List, Optional
+from typing import List, Optional
 
 from pymongo.database import Database
 
-from src.pipeline_service.database.mongo_loader import MongoLoader
-from src.pipeline_service.pipelines.base import BasePipeline
-from src.pipeline_service.util.documents import dataframe_to_documents
-from src.pipeline_service.util.naming import sanitize_collection_name
-from src.pipeline_service.util.time import generate_time_chunks
-from src.space_weather_analysis.clients.gfz import GfzClient
+from pipeline_service.database.mongo_loader import MongoLoader
+from pipeline_service.pipelines.base import BasePipeline, ProgressCallback
+from pipeline_service.util.documents import dataframe_to_documents
+from pipeline_service.util.naming import sanitize_collection_name
+from pipeline_service.util.time import generate_time_chunks
+from space_weather_analysis.clients.gfz import GfzClient
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class GfzPipeline(MongoLoader, BasePipeline):
         datasets: List[str],
         start_time: Optional[datetime],
         end_time: Optional[datetime],
-        progress_callback: Optional[Callable[[float, str], None]] = None,
+        progress_callback: Optional[ProgressCallback] = None,
     ) -> None:
         """Executes the download process for the requested GFZ datasets.
 

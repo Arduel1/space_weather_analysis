@@ -1,10 +1,12 @@
 from datetime import datetime
-from typing import Any, Dict, Hashable, List, Optional
+from typing import Any, Dict, Hashable, Iterable, List, Mapping, Optional
 
 import pandas as pd
 
+from space_weather_analysis.util.types import DocumentDict, TransformedDocuments
 
-def dataframe_to_documents(df: pd.DataFrame, source_identifier: str, timestamp_column: Optional[str] = None) -> List[Dict[str, Any]]:
+
+def dataframe_to_documents(df: pd.DataFrame, source_identifier: str, timestamp_column: Optional[str] = None) -> TransformedDocuments:
     """Converts a pandas DataFrame to a list of standardized MongoDB documents.
 
     This function provides vectorized conversion of DataFrame rows into
@@ -37,35 +39,46 @@ def dataframe_to_documents(df: pd.DataFrame, source_identifier: str, timestamp_c
         data_df = df
 
     data_payloads = data_df.to_dict("records")
-    metadata = {"source": source_identifier}
 
-    # Using list comprehension for efficiency
-    documents = [
-        {
-            "timestamp": ts,
-            "metadata": metadata,
-            "data": {str(k): v for k, v in data.items() if not pd.isna(v)},
-        }
-        for ts, data in zip(timestamps, data_payloads, strict=False)
-    ]
+    return rows_to_documents(timestamps, data_payloads, source_identifier)
 
+
+def rows_to_documents(timestamps: Iterable[datetime], rows: Iterable[Mapping[Hashable, Any]], source_identifier: str) -> TransformedDocuments:
+    """Combines timestamps and data rows into time series documents.
+
+    Each document is built by build_timeseries_document.
+
+    Args:
+        timestamps: Time of each row.
+        rows: Field values of each row, in the same order as timestamps.
+        source_identifier: String identifying the data source.
+
+    Returns:
+        One document per row with the fields timestamp, metadata and data.
+
+    Raises:
+        ValueError: If timestamps and rows differ in length.
+    """
+    documents = []
+    for timestamp, row in zip(timestamps, rows, strict=True):
+        documents.append(build_timeseries_document(timestamp, row, source_identifier))
     return documents
 
 
 def build_timeseries_document(
     timestamp: datetime,
-    data_dict: Dict[Hashable, Any],
+    data_dict: Mapping[Hashable, Any],
     source_identifier: str,
     additional_metadata: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+) -> DocumentDict:
     """Builds a standardized time-series document for MongoDB insertion.
 
     The standard structure places timestamp and metadata at the root level,
     with actual measurements nested under a 'data' field.
 
     Args:
-        timestamp: The timestamp for this data point (must be timezone-aware).
-        data_dict: Dictionary of measurement values (excludes NaN values).
+        timestamp: The timestamp of this data point.
+        data_dict: Measurement values; missing values (NaN, NA, None) are left out of the document.
         source_identifier: String identifying the data source.
         additional_metadata: Optional additional metadata fields.
 
@@ -87,7 +100,7 @@ def build_gridfs_reference_document(
     gridfs_id: Any,
     source_identifier: str,
     additional_metadata: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+) -> DocumentDict:
     """Builds a document that references data stored in GridFS.
 
     For multi-dimensional data too large to store directly in documents,
@@ -114,7 +127,7 @@ def build_gridfs_reference_document(
     }
 
 
-def build_metadata_document(dataset_id: str, source_info: Dict[str, Any], variables: List[Dict[str, Any]]) -> Dict[str, Any]:
+def build_metadata_document(dataset_id: str, source_info: Dict[str, Any], variables: List[Dict[str, Any]]) -> DocumentDict:
     """Builds a standardized metadata document for dataset description.
 
     Metadata documents use the dataset_id as their MongoDB _id to enable

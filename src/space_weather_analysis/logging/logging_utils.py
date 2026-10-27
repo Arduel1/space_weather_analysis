@@ -8,8 +8,8 @@ import xarray as xr
 logger = logging.getLogger(__name__)
 
 
-def log_xarray_dataset_summary(ds: xr.Dataset, file_path_obj: Optional[Path] = None) -> None:
-    """Logs a compact, safe summary of an xarray Dataset without loading large data arrays.
+def log_xarray_time_diagnostics(ds: xr.Dataset, file_path_obj: Optional[Path] = None) -> None:
+    """Logs the details of every coordinate and variable that matter for detecting the time axis.
 
     This function inspects dimensions, coordinates, variables, and attributes
     to provide diagnostic information useful for debugging parsing issues. It is
@@ -25,7 +25,7 @@ def log_xarray_dataset_summary(ds: xr.Dataset, file_path_obj: Optional[Path] = N
         prefix = f"{file_path_obj.name} - "
 
     try:
-        logger.info(f"{prefix}Dataset summary: dims={dict(ds.dims)}")
+        logger.info(f"{prefix}Dataset summary: dims={dict(ds.sizes)}")
 
         # Log coordinates summary
         coord_names = list(ds.coords)

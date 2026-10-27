@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from pymongo.database import Database
 
-from src.pipeline_service.pipelines.factory import PipelineFactory
+from pipeline_service.pipelines.factory import PipelineFactory
 
 logger = logging.getLogger(__name__)
 

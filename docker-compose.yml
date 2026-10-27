@@ -9,7 +9,7 @@ services:
       - .env
     volumes:
       - ./data:/app/data
-    command: ["python", "-m", "src.catalog_collector.main"]
+    command: ["python", "-m", "catalog_collector.main"]
     networks:
       - space-weather-net
 
@@ -25,7 +25,7 @@ services:
       - .env
     volumes:
       - ./data:/app/data # Persist downloads
-    command: ["python", "-m", "src.pipeline_service.main"]
+    command: ["python", "-m", "pipeline_service.main"]
     networks:
       - space-weather-net
 

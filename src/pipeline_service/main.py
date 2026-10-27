@@ -5,11 +5,11 @@ from typing import Any, Dict
 
 from pydantic import ValidationError
 
-from src.pipeline_service.orchestrator import PipelineOrchestrator
-from src.space_weather_analysis.config.errors import format_settings_error
-from src.space_weather_analysis.config.mongo import MongoSettings
-from src.space_weather_analysis.database.connection import MongoConnection
-from src.space_weather_analysis.logging.config import setup_logging
+from pipeline_service.orchestrator import PipelineOrchestrator
+from space_weather_analysis.config.errors import format_settings_error
+from space_weather_analysis.config.mongo import MongoSettings
+from space_weather_analysis.database.connection import MongoConnection
+from space_weather_analysis.logging.config import setup_logging
 
 logger = logging.getLogger(__name__)
 
@@ -104,12 +104,11 @@ def main() -> None:
         logger.info("Pipeline Service stopped by user.")
     except Exception as e:
         logger.critical(f"Pipeline Service encountered a fatal error: {e}", exc_info=True)
-        connection.close()
         sys.exit(1)
     finally:
         # Cleanup resources
         connection.close()
-        logger.info("Pipeline Service finished successfully.")
+        logger.info("Pipeline Service shut down.")
 
 
 if __name__ == "__main__":

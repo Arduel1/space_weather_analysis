@@ -1,9 +1,9 @@
 import logging
-from typing import Any, Dict, Generator, Optional, Tuple
+from typing import Generator
 
-from src.catalog_collector.discoverers.base import AbstractDiscoverer
-from src.space_weather_analysis.clients.gfz import GfzClient
-from src.space_weather_analysis.util.types import CatalogEntryDict
+from catalog_collector.discoverers.base import AbstractDiscoverer
+from space_weather_analysis.clients.gfz import GfzClient
+from space_weather_analysis.util.types import DiscoveryYield
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ class GfzDiscoverer(AbstractDiscoverer):
         """Initializes the discoverer with a GFZ client instance."""
         self.client = GfzClient()
 
-    def discover(self) -> Generator[Tuple[str, CatalogEntryDict, Optional[Dict[str, Any]]], None, None]:
+    def discover(self) -> Generator[DiscoveryYield, None, None]:
         """Retrieves dataset definitions from the GFZ client.
 
         Yields:

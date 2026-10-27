@@ -1,10 +1,10 @@
 import logging
 import pathlib
-from typing import Any, Dict, Generator, List, Tuple
+from typing import Any, Dict, Generator, List
 
-from src.catalog_collector.discoverers.base import AbstractDiscoverer
-from src.space_weather_analysis.clients.hapi import HapiClient
-from src.space_weather_analysis.util.types import CatalogEntryDict
+from catalog_collector.discoverers.base import AbstractDiscoverer
+from space_weather_analysis.clients.hapi import HapiClient
+from space_weather_analysis.util.types import CatalogEntryDict, DiscoveryYield
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ class HapiDiscoverer(AbstractDiscoverer):
         self,
         server_url: str,
         dataset: Dict[str, Any],
-    ) -> Generator[Tuple[str, CatalogEntryDict, Dict[str, Any]], None, None]:
+    ) -> Generator[DiscoveryYield, None, None]:
         """Retrieves the metadata for a single dataset as a catalog entry tuple.
 
         Args:
@@ -111,7 +111,7 @@ class HapiDiscoverer(AbstractDiscoverer):
         else:
             logger.warning(f"Dataset {dataset_id} on {server_url} has no time range. Skipping.")
 
-    def _discover_datasets_for_server(self, server_url: str) -> Generator[Tuple[str, CatalogEntryDict, Dict[str, Any]], None, None]:
+    def _discover_datasets_for_server(self, server_url: str) -> Generator[DiscoveryYield, None, None]:
         """Retrieves the full dataset catalog from a single server.
 
         Args:
@@ -143,7 +143,7 @@ class HapiDiscoverer(AbstractDiscoverer):
                 next_id = catalog[index].get("id", "Unknown")
                 logger.info(f"Finished '{dataset_id}'. Next up: '{next_id}'")
 
-    def discover(self) -> Generator[Tuple[str, CatalogEntryDict, Dict[str, Any]], None, None]:
+    def discover(self) -> Generator[DiscoveryYield, None, None]:
         """Implements the discovery process for HAPI sources.
 
         Iterates through the list of servers, queries each for its

@@ -6,7 +6,15 @@ import numpy as np
 import pandas as pd
 from netCDF4 import num2date
 
+from space_weather_analysis.util.types import TimeRange
+
 logger = logging.getLogger(__name__)
+
+# Weights of the share of valid dates and the share of in-range dates in a transform's score.
+VALIDITY_WEIGHT = 0.6
+IN_RANGE_WEIGHT = 0.4
+# Lowest score a transform needs to be accepted.
+MIN_ACCEPTED_SCORE = 0.01
 
 
 # --- Basic Time Utilities ---
@@ -52,7 +60,7 @@ def calculate_time_intersection(
     range1_end: datetime,
     range2_start: datetime,
     range2_end: datetime,
-) -> Optional[Tuple[datetime, datetime]]:
+) -> Optional[TimeRange]:
     """Calculates the overlapping period between two time ranges.
 
     All inputs are converted to timezone-aware (UTC) datetimes before calculation
@@ -178,32 +186,20 @@ def _score_dtindex(dtindex: pd.DatetimeIndex, min_year: Optional[int], max_year:
     if total == 0:
         return {"non_na_frac": 0.0, "in_range_frac": 0.0, "valid_count": 0}
 
-    non_na = (~dtindex.isna()).sum()
-    if non_na == 0:
-        return {"non_na_frac": 0.0, "in_range_frac": 0.0, "valid_count": 0}
+    is_valid = ~dtindex.isna()
+    valid_count = int(is_valid.sum())
 
-    # Start with mask of valid dates (not NaT)
-    mask = ~dtindex.isna()
-
-    if min_year is None and max_year is None:
-        in_range_count = mask.sum()
-    else:
-        # Apply year constraints only if specified
-        if min_year is not None:
-            # NaT entries are already excluded by the mask above
-            year_mask = dtindex.year >= min_year
-            mask &= year_mask
-
-        if max_year is not None:
-            year_mask = dtindex.year <= max_year
-            mask &= year_mask
-
-        in_range_count = mask.sum()
+    # NaT entries are excluded by is_valid, the year limits apply only if given.
+    in_range = is_valid.copy()
+    if min_year is not None:
+        in_range &= dtindex.year >= min_year
+    if max_year is not None:
+        in_range &= dtindex.year <= max_year
 
     return {
-        "non_na_frac": float(non_na) / total,
-        "in_range_frac": float(in_range_count) / total,
-        "valid_count": int(non_na),
+        "non_na_frac": float(valid_count) / total,
+        "in_range_frac": float(in_range.sum()) / total,
+        "valid_count": valid_count,
     }
 
 
@@ -233,11 +229,11 @@ def _select_best_transform(
 
         # STRICT RANGE ENFORCEMENT: If we have valid dates but NONE are in the specified range,
         # completely reject this transform to avoid false positives
-        if stats["non_na_frac"] > 0 and stats["in_range_frac"] == 0.0:
+        if stats["in_range_frac"] == 0.0:
             continue
 
         # Calculate weighted score (validity slightly more important than range)
-        score_val = (stats["non_na_frac"] * 0.6) + (stats["in_range_frac"] * 0.4)
+        score_val = (stats["non_na_frac"] * VALIDITY_WEIGHT) + (stats["in_range_frac"] * IN_RANGE_WEIGHT)
 
         if score_val > best_score:
             best_score = score_val
@@ -246,7 +242,7 @@ def _select_best_transform(
     diagnostics["best_score"] = best_score
 
     # Accept if we found a reasonably good transform
-    if best_choice is not None and best_score > 0.01:
+    if best_choice is not None and best_score > MIN_ACCEPTED_SCORE:
         name, dtindex, stats, score_val = best_choice
         diagnostics["accepted"] = True
         diagnostics["selected_transform"] = name

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Generator, Optional, Tuple
+from typing import Generator
 
-from src.space_weather_analysis.util.types import CatalogEntryDict
+from space_weather_analysis.util.types import DiscoveryYield
 
 
 class AbstractDiscoverer(ABC):
@@ -12,7 +12,7 @@ class AbstractDiscoverer(ABC):
     """
 
     @abstractmethod
-    def discover(self) -> Generator[Tuple[str, CatalogEntryDict, Optional[Dict[str, Any]]], None, None]:
+    def discover(self) -> Generator[DiscoveryYield, None, None]:
         """Runs the discovery process for the specific source.
 
         This method should yield its findings one by one as a generator

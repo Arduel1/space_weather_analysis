@@ -2,10 +2,9 @@ import logging
 import pathlib
 import pickle
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, cast
+from typing import Any, Dict, Generator, List, Optional, Tuple
 
 import gridfs
-import pandas as pd
 import xarray as xr
 from pymongo.database import Database
 from sunpy.timeseries.timeseriesbase import GenericTimeSeries
@@ -14,7 +13,8 @@ from pipeline_service.database.mongo_loader import MongoLoader
 from pipeline_service.metadata.generator import MetadataWriter
 from pipeline_service.metadata.models import VariableMetadata
 from pipeline_service.parsing.file_parser import parse_datafiles
-from pipeline_service.pipelines.base import BasePipeline
+from pipeline_service.pipelines.base import BasePipeline, ProgressCallback
+from pipeline_service.util.documents import build_gridfs_reference_document, dataframe_to_documents
 from pipeline_service.util.naming import sanitize_collection_name
 from pipeline_service.util.time import generate_time_chunks
 from space_weather_analysis.clients.cdaweb import CdawebClient
@@ -57,7 +57,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         datasets: List[str],
         start_time: Optional[datetime],
         end_time: Optional[datetime],
-        progress_callback: Optional[Callable[[float, str], None]] = None,
+        progress_callback: Optional[ProgressCallback] = None,
     ) -> None:
         """Runs the complete data pipeline orchestration.
 
@@ -237,36 +237,11 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         """
         logger.info(f"1D data for {collection_name} parsed. Transforming for MongoDB load...")
         df_to_load = data_object.to_dataframe()
-        documents = self._transform_dataframe_to_docs(df_to_load, source_id)
+        logger.info(f"Transforming {len(df_to_load)} DataFrame rows to MongoDB documents...")
+        documents = dataframe_to_documents(df_to_load, source_id)
 
         self._load_data(collection_name, documents)
         logger.info(f"Successfully loaded {len(documents)} documents into collection '{collection_name}'")
-
-    def _transform_dataframe_to_docs(self, df: pd.DataFrame, source_info: str) -> List[Dict[str, Any]]:
-        """Converts a 1D TimeSeries DataFrame into a list of MongoDB documents.
-
-        Args:
-            df: The DataFrame (from a TimeSeries) to transform.
-            source_info: A string identifying the data source.
-
-        Returns:
-            A list of formatted MongoDB documents.
-        """
-        logger.info(f"Transforming {len(df)} DataFrame rows to MongoDB documents...")
-
-        data_payloads = df.to_dict("records")
-        timestamps = cast(pd.DatetimeIndex, df.index).to_pydatetime()
-        metadata = {"source": source_info}
-
-        documents = [
-            {
-                "timestamp": ts_py,
-                "metadata": metadata,
-                "data": {str(k): v for k, v in data.items() if not pd.isna(v)},
-            }
-            for ts_py, data in zip(timestamps, data_payloads, strict=False)
-        ]
-        return documents
 
     def _load_nd_data_to_gridfs(
         self,
@@ -337,9 +312,6 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         for i in range(len(ds[time_dim])):
             ts_slice = ds.isel({time_dim: i})
 
-            # Debugging logs for time coordinate presence omitted for brevity in final implementation
-            # but logic is preserved below
-
             # Use the external helper to parse timestamp
             timestamp = parse_xarray_timestamp(ts_slice, time_coord, i, allow_fallback=False)
 
@@ -378,11 +350,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
                 )
                 continue
 
-            yield {
-                "timestamp": timestamp,
-                "metadata": {"source": source_info},
-                "data_gridfs_id": gridfs_id,
-            }
+            yield build_gridfs_reference_document(timestamp, gridfs_id, source_info)
 
     def _save_pipeline_metadata(
         self,

@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from pymongo.database import Database
 from sunpy.timeseries import GenericTimeSeries
@@ -9,13 +9,14 @@ from pipeline_service.database.mongo_loader import MongoLoader
 from pipeline_service.metadata.generator import MetadataWriter
 from pipeline_service.metadata.models import VariableMetadata
 from pipeline_service.parsing.hapi import convert_hapi_to_timeseries
-from pipeline_service.pipelines.base import BasePipeline
+from pipeline_service.pipelines.base import BasePipeline, ProgressCallback
 from pipeline_service.util.documents import dataframe_to_documents
 from pipeline_service.util.naming import sanitize_collection_name
 from pipeline_service.util.time import generate_time_chunks
 from space_weather_analysis.clients.hapi import HapiClient
 from space_weather_analysis.util.error_handling import log_and_handle_unexpected_failure
 from space_weather_analysis.util.time_utils import parse_iso_time
+from space_weather_analysis.util.types import TransformedDocuments
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +49,8 @@ class HapiPipeline(MongoLoader, BasePipeline):
         datasets: List[str],
         start_time: Optional[datetime],
         end_time: Optional[datetime],
+        progress_callback: Optional[ProgressCallback] = None,
         chunk_delta: timedelta = timedelta(days=7),
-        progress_callback: Optional[Callable[[float, str], None]] = None,
     ) -> None:
         """Runs the full streaming pipeline for a list of datasets.
 
@@ -61,8 +62,8 @@ class HapiPipeline(MongoLoader, BasePipeline):
             datasets: A list of dataset IDs to fetch.
             start_time: The start time for the data query (or None for auto).
             end_time: The end time for the data query (or None for auto).
-            chunk_delta: The duration of each processing chunk. Defaults to 7 days.
             progress_callback: Optional callback to report progress (0.0 to 1.0) and status message.
+            chunk_delta: The duration of each processing chunk. Defaults to 7 days.
         """
         logger.info(f"Starting Generic {self.SOURCE_ID} Pipeline")
 
@@ -292,7 +293,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
             )
         return variables
 
-    def _transform_timeseries_to_docs(self, ts: GenericTimeSeries, source_info: str) -> List[Dict[str, Any]]:
+    def _transform_timeseries_to_docs(self, ts: GenericTimeSeries, source_info: str) -> TransformedDocuments:
         """Converts a TimeSeries object into standardized MongoDB documents.
 
         Args:

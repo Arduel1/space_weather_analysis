@@ -1,11 +1,12 @@
 import logging
 import pathlib
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import pandas as pd
 from pymongo.database import Database
 
 from pipeline_service.pipelines.processors.base import BaseETLProcessor
+from space_weather_analysis.util.types import TransformedDocuments
 
 logger = logging.getLogger(__name__)
 
@@ -16,21 +17,20 @@ class CmeETL(BaseETLProcessor):
     COLLECTION_NAME = "cme_catalog"
     DEFAULT_BATCH_SIZE = 5000
 
-    _COLUMN_NAMES = [
-        "date",
-        "time",
+    _NUMERIC_COLUMNS = [
         "central_pa",
         "width",
         "linear_speed",
-        "spd_initial",
-        "spd_final",
-        "spd_20r",
+        "speed_initial",
+        "speed_final",
+        "speed_at_20r",
         "accel",
         "mass",
         "kinetic_energy",
         "mpa",
-        "remarks",
     ]
+    # Column order of the catalog file; the numeric columns sit between time and remarks.
+    _COLUMN_NAMES = ["date", "time", *_NUMERIC_COLUMNS, "remarks"]
     # Dash runs that the catalog writes in place of an unknown value.
     _PLACEHOLDERS = {"----", "------", "-------"}
     # Columns in which a trailing '*' marks an uncertain value, mapped to the flag field storing that marker.
@@ -81,7 +81,7 @@ class CmeETL(BaseETLProcessor):
             logger.error(f"Error reading CME file: {e}", exc_info=True)
             return None
 
-    def _transform(self, raw_data: Optional[pd.DataFrame]) -> List[Dict[str, Any]]:
+    def _transform(self, raw_data: Optional[pd.DataFrame]) -> TransformedDocuments:
         """Transforms the raw CME DataFrame into MongoDB documents.
 
         Args:
@@ -101,36 +101,22 @@ class CmeETL(BaseETLProcessor):
             raw_data[flag] = is_marked.map({True: True, False: None})
             raw_data[column] = raw_data[column].str.removesuffix("*")
 
-        try:
-            raw_data["timestamp"] = pd.to_datetime(
-                raw_data["date"].astype(str) + " " + raw_data["time"].astype(str),
-                format="%Y/%m/%d %H:%M:%S",
-                errors="coerce",
-            )
-            raw_data.dropna(subset=["timestamp"], inplace=True)
-        except Exception as e:
-            logger.error(f"Error creating timestamp for CMEs: {e}", exc_info=True)
-            return []
+        raw_data["timestamp"] = pd.to_datetime(
+            raw_data["date"].astype(str) + " " + raw_data["time"].astype(str),
+            format="%Y/%m/%d %H:%M:%S",
+            errors="coerce",
+        )
+        has_valid_timestamp = raw_data["timestamp"].notna()
+        if not has_valid_timestamp.all():
+            logger.warning(f"Skipped {(~has_valid_timestamp).sum()} rows without a valid timestamp.")
+        raw_data.dropna(subset=["timestamp"], inplace=True)
 
         # Feature engineering
         raw_data["is_halo"] = raw_data["central_pa"].str.contains("Halo", na=False)
         # A halo CME has no central position angle; is_halo carries that information.
         raw_data["central_pa"] = raw_data["central_pa"].mask(raw_data["is_halo"])
 
-        numeric_cols = [
-            "central_pa",
-            "width",
-            "linear_speed",
-            "spd_initial",
-            "spd_final",
-            "spd_20r",
-            "accel",
-            "mass",
-            "kinetic_energy",
-            "mpa",
-        ]
-
-        for col in numeric_cols:
+        for col in self._NUMERIC_COLUMNS:
             is_placeholder = raw_data[col].isin(self._PLACEHOLDERS)
             numeric = pd.to_numeric(raw_data[col].mask(is_placeholder), errors="coerce")
             # Values that are neither numbers nor placeholders are invalid and omitted like missing ones.
@@ -139,26 +125,8 @@ class CmeETL(BaseETLProcessor):
                 logger.warning(f"Omitted {invalid_count} invalid values in field {col}.")
             raw_data[col] = numeric
 
-        raw_data.rename(
-            columns={
-                "spd_initial": "speed_initial",
-                "spd_final": "speed_final",
-                "spd_20r": "speed_at_20r",
-            },
-            inplace=True,
-        )
-
         data_columns = [
-            "central_pa",
-            "width",
-            "linear_speed",
-            "speed_initial",
-            "speed_final",
-            "speed_at_20r",
-            "accel",
-            "mass",
-            "kinetic_energy",
-            "mpa",
+            *self._NUMERIC_COLUMNS,
             "is_halo",
             *self._MARKER_FLAGS.values(),
             "remarks",
@@ -166,9 +134,8 @@ class CmeETL(BaseETLProcessor):
 
         data_payloads = raw_data[data_columns].to_dict("records")
         timestamps = raw_data["timestamp"].to_list()
-        metadata = {"source": "SOHO/LASCO_CDAW_V2.0"}
 
-        documents = self._build_documents(timestamps, data_payloads, metadata)
+        documents = self._build_documents(timestamps, data_payloads, "SOHO/LASCO_CDAW_V2.0")
 
         logger.info(f"Transformed {len(documents)} CME documents.")
         return documents

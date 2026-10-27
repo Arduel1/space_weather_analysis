@@ -3,9 +3,9 @@ import logging
 import pathlib
 from typing import Dict, List, Set, Tuple
 
-from src.catalog_collector.discoverers.base import AbstractDiscoverer
-from src.catalog_collector.loader import CatalogLoader
-from src.space_weather_analysis.util.types import CatalogEntryDict
+from catalog_collector.discoverers.base import AbstractDiscoverer
+from catalog_collector.loader import CatalogLoader
+from space_weather_analysis.util.types import CatalogEntryDict
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +47,7 @@ class CatalogBuilder:
         Returns:
             str: The canonical (case-preserved) dataset ID.
         """
-        lowercase_id = dataset_id.lower()
-        if lowercase_id not in self.lowercase_id_map:
-            self.lowercase_id_map[lowercase_id] = dataset_id
-            return dataset_id
-        else:
-            return self.lowercase_id_map[lowercase_id]
+        return self.lowercase_id_map.setdefault(dataset_id.lower(), dataset_id)
 
     def _update_catalog(
         self,
@@ -167,6 +162,22 @@ class CatalogBuilder:
 
         logger.info("--- Universal Catalog Build Finished ---")
 
+    @staticmethod
+    def _was_found(dataset_id: str, source: CatalogEntryDict, found_signatures: Set[Tuple[str, str, str]]) -> bool:
+        """Checks whether a catalog source was discovered in the current run.
+
+        Args:
+            dataset_id: The dataset the source belongs to.
+            source: The catalog entry of the source.
+            found_signatures: Signatures (dataset_id, source_id, type) discovered in the current run.
+
+        Returns:
+            True if the source has a source_id and type and its signature was discovered.
+        """
+        source_id = source.get("source_id")
+        source_type = source.get("type")
+        return bool(source_id and source_type and (dataset_id, source_id, source_type) in found_signatures)
+
     def _prune_catalog(self, found_signatures: Set[Tuple[str, str, str]]) -> None:
         """Removes entries from the catalog that were not found in the current run."""
         logger.info("--- Pruning Stale Entries ---")
@@ -180,9 +191,7 @@ class CatalogBuilder:
             original_count = len(sources)
 
             # Keep only sources that were found in this run
-            kept_sources = [
-                s for s in sources if s.get("source_id") and s.get("type") and (dataset_id, s["source_id"], s["type"]) in found_signatures
-            ]
+            kept_sources = [source for source in sources if self._was_found(dataset_id, source, found_signatures)]
 
             if not kept_sources:
                 # No sources left, delete dataset entirely

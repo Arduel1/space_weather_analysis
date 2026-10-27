@@ -1,11 +1,11 @@
 import logging
 import pathlib
 from datetime import datetime
-from typing import Callable, List, Optional
+from typing import List, Optional
 
 from pymongo.database import Database
 
-from pipeline_service.pipelines.base import BasePipeline
+from pipeline_service.pipelines.base import BasePipeline, ProgressCallback
 from pipeline_service.pipelines.processors.cme import CmeETL
 from pipeline_service.pipelines.processors.sunspots import SilsoETL
 
@@ -34,7 +34,7 @@ class LocalPipeline(BasePipeline):
         datasets: List[str],
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
-        progress_callback: Optional[Callable[[float, str], None]] = None,
+        progress_callback: Optional[ProgressCallback] = None,
     ) -> None:
         """Triggers specific local processors based on the requested dataset ID.
 
@@ -57,13 +57,11 @@ class LocalPipeline(BasePipeline):
             try:
                 if dataset_id == "silso_sunspot_daily":
                     file_path = self.base_data_path / "SN_d_tot_V2.0.csv"
-                    processor = SilsoETL(self.db, file_path)
-                    processor.run()
+                    SilsoETL(self.db, file_path).run()
 
                 elif dataset_id == "cme_catalog":
                     file_path = self.base_data_path / "cme_catalog.txt"
-                    processor = CmeETL(self.db, file_path)
-                    processor.run()
+                    CmeETL(self.db, file_path).run()
 
                 else:
                     logger.warning(f"Unknown local dataset requested: {dataset_id}")

@@ -106,9 +106,6 @@ class MongoLoader:
             total_inserted = 0
             # Use utility generator for memory-efficient processing
             for i, batch in enumerate(batch_generator(documents, effective_batch_size), start=1):
-                if not batch:
-                    continue
-
                 # ordered=False allows continuing insertion even if one document fails
                 collection.insert_many(batch, ordered=False)
                 total_inserted += len(batch)

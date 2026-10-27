@@ -5,6 +5,7 @@ import numpy as np
 from pymongo.database import Database
 
 from pipeline_service.metadata.models import VariableMetadata
+from pipeline_service.util.documents import build_metadata_document
 
 logger = logging.getLogger(__name__)
 
@@ -118,11 +119,7 @@ class MetadataWriter:
                 variable_docs.append(var_doc)
 
             # Construct Final Document
-            metadata_document = {
-                "_id": dataset_id,
-                "source_info": clean_source_info,
-                "variables": variable_docs,
-            }
+            metadata_document = build_metadata_document(dataset_id, clean_source_info, variable_docs)
 
             # Upsert (Insert or Update)
             self.collection.update_one({"_id": dataset_id}, {"$set": metadata_document}, upsert=True)

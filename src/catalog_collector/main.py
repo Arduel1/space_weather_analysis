@@ -5,16 +5,16 @@ from typing import List
 
 from pydantic import ValidationError
 
-from src.catalog_collector.builder import CatalogBuilder
-from src.catalog_collector.discoverers.base import AbstractDiscoverer
-from src.catalog_collector.discoverers.cdaweb import CdawebDiscoverer
-from src.catalog_collector.discoverers.gfz import GfzDiscoverer
-from src.catalog_collector.discoverers.hapi import HapiDiscoverer
-from src.catalog_collector.loader import CatalogLoader
-from src.space_weather_analysis.config.errors import format_settings_error
-from src.space_weather_analysis.config.mongo import MongoSettings
-from src.space_weather_analysis.database.connection import MongoConnection
-from src.space_weather_analysis.logging.config import setup_logging
+from catalog_collector.builder import CatalogBuilder
+from catalog_collector.discoverers.base import AbstractDiscoverer
+from catalog_collector.discoverers.cdaweb import CdawebDiscoverer
+from catalog_collector.discoverers.gfz import GfzDiscoverer
+from catalog_collector.discoverers.hapi import HapiDiscoverer
+from catalog_collector.loader import CatalogLoader
+from space_weather_analysis.config.errors import format_settings_error
+from space_weather_analysis.config.mongo import MongoSettings
+from space_weather_analysis.database.connection import MongoConnection
+from space_weather_analysis.logging.config import setup_logging
 
 # Setup logging configuration for the service
 setup_logging(service_name="CatalogCollector")
@@ -75,11 +75,11 @@ def main() -> None:
 
     except Exception as e:
         logger.critical(f"Catalog Collector execution failed: {e}", exc_info=True)
-        connection.close()
         sys.exit(1)
+    finally:
+        # Clean up resources before exiting
+        connection.close()
 
-    # Clean up resources before exiting
-    connection.close()
     logger.info("Catalog Collector Service execution finished successfully.")
 
 

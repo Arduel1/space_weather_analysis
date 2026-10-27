@@ -145,6 +145,7 @@ def find_time_dimension(ds: xr.Dataset) -> Tuple[Optional[str], Optional[str]]:
         nc_best, nc_conf = _scan_netcdf_backend(ds)
         if nc_conf > max_confidence:
             best_var = nc_best
+            max_confidence = TimeConfidence(nc_conf)
 
     if best_var:
         logger.info(f"Identified likely time variable: '{best_var}' (Confidence: {max_confidence})")
@@ -334,13 +335,12 @@ def _evaluate_variable_confidence(name: str, da: Any, attributes: Optional[Dict[
     Returns:
         TimeConfidence: The confidence level.
     """
-    if attributes is None:
-        attributes = getattr(da, "attrs", {}) or {}
+    attrs: Dict[str, Any] = attributes if attributes is not None else (getattr(da, "attrs", {}) or {})
 
-    units = str(attributes.get("units", "")).lower()
-    standard_name = str(attributes.get("standard_name", "")).lower()
-    axis = str(attributes.get("axis", "")).upper()
-    long_name = str(attributes.get("long_name", "")).lower()
+    units = str(attrs.get("units", "")).lower()
+    standard_name = str(attrs.get("standard_name", "")).lower()
+    axis = str(attrs.get("axis", "")).upper()
+    long_name = str(attrs.get("long_name", "")).lower()
     var_name = name.lower()
 
     # CF-Convention Standard (Certain)
@@ -348,7 +348,7 @@ def _evaluate_variable_confidence(name: str, da: Any, attributes: Optional[Dict[
         return TimeConfidence.CERTAIN
 
     # Explicit Metadata (High Probability)
-    if standard_name == "time" or axis == "T" or calendar_is_present(attributes):
+    if standard_name == "time" or axis == "T" or calendar_is_present(attrs):
         return TimeConfidence.HIGH
 
     # Name Heuristics (Low Probability)

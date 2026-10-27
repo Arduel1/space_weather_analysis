@@ -1,11 +1,12 @@
 import logging
 import pathlib
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
 import pandas as pd
 from pymongo.database import Database
 
 from pipeline_service.pipelines.processors.base import BaseETLProcessor
+from space_weather_analysis.util.types import TransformedDocuments
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ class SilsoETL(BaseETLProcessor):
             logger.error(f"Error reading SILSO file: {e}", exc_info=True)
             return None
 
-    def _transform(self, raw_data: Optional[pd.DataFrame]) -> List[Dict[str, Any]]:
+    def _transform(self, raw_data: Optional[pd.DataFrame]) -> TransformedDocuments:
         """Transforms the raw sunspot DataFrame into MongoDB documents.
 
         Args:
@@ -104,7 +105,10 @@ class SilsoETL(BaseETLProcessor):
         )
 
         # A field counts as invalid if the file has a value for it that is neither valid nor a documented placeholder.
-        given = raw_data.loc[has_valid_date].rename(columns={"indicator": "is_provisional"})[data.columns].notna()
+        raw_rows = raw_data.loc[has_valid_date]
+        # Renamed so the file column indicator lines up with the output field derived from it.
+        raw_fields = raw_rows.rename(columns={"indicator": "is_provisional"})[data.columns]
+        given = raw_fields.notna()
         invalid = data.isna() & given
         invalid.loc[is_missing, self._FIELDS_UNSET_ON_MISSING_DAY] = False
         for column, count in invalid.sum().items():
@@ -113,9 +117,8 @@ class SilsoETL(BaseETLProcessor):
 
         data_payloads = data.to_dict("records")
         timestamps = timestamps_all[has_valid_date].to_list()
-        metadata = {"source": "SILSO_V2.0"}
 
-        documents = self._build_documents(timestamps, data_payloads, metadata)
+        documents = self._build_documents(timestamps, data_payloads, "SILSO_V2.0")
 
         logger.info(f"Transformed {len(documents)} documents.")
         return documents

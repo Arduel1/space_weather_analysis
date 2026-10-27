@@ -216,22 +216,19 @@ elif app_mode == "Cycle Correlation Analysis":
             df_sunspot = loader.get_timeseries_data(target_sunspot, start_time=start_dt, end_time=end_dt)
             df_cme = loader.get_timeseries_data(target_cme, start_time=start_dt, end_time=end_dt)
 
-            df_xray = pd.DataFrame()
-            if target_xray in available:
-                df_xray = loader.get_timeseries_data(target_xray, start_time=start_dt, end_time=end_dt)
+            def load_if_available(data_loader: DataLoader, collection_name: str) -> pd.DataFrame:
+                """Loads a dataset in the selected time range, or returns an empty DataFrame if it is not available."""
+                if collection_name not in available:
+                    return pd.DataFrame()
+                return data_loader.get_timeseries_data(collection_name, start_time=start_dt, end_time=end_dt)
 
-            df_part = pd.DataFrame()
-            if target_part in available:
-                df_part = loader.get_timeseries_data(target_part, start_time=start_dt, end_time=end_dt)
-
-            df_kp = pd.DataFrame()
-            if target_kp in available:
-                df_kp = loader.get_timeseries_data(target_kp, start_time=start_dt, end_time=end_dt)
+            df_xray = load_if_available(loader, target_xray)
+            df_part = load_if_available(loader, target_part)
+            df_kp = load_if_available(loader, target_kp)
 
         if not df_sunspot.empty and not df_cme.empty:
             plot_solar_cycle_correlation(df_cme, df_sunspot)
 
-            # (Rest of correlation logic...)
             if not df_xray.empty:
                 st.markdown("---")
                 plot_xray_flux(df_xray, target_xray, key_suffix="corr", kp_df=df_kp)
@@ -329,8 +326,8 @@ elif app_mode == "Data Downloader":
                 progress_bar = st.progress(0)
                 eta_placeholder = st.empty()
 
-                complete = False
-                while not complete:
+                # Polls the job until it reaches a final status.
+                while True:
                     job = loader.get_job_status(job_id)
                     status = job.get("status", "UNKNOWN")
                     message = job.get("message", "")
@@ -367,15 +364,14 @@ elif app_mode == "Data Downloader":
                         progress_bar.progress(1.0)
                         st.success("Download Complete!")
                         eta_placeholder.empty()
-                        complete = True
                     elif status == "FAILED":
                         st.error(f"Job Failed: {job.get('error', 'Unknown error')}")
-                        complete = True
-                        break
-                    else:
-                        time.sleep(2)
 
-                if complete and job.get("status") == "COMPLETED":
+                    if status in ("COMPLETED", "FAILED"):
+                        break
+                    time.sleep(2)
+
+                if status == "COMPLETED":
                     st.markdown("### Preview Data")
                     params = job.get("parameters", {})
                     # Reload with fresh data

@@ -5,9 +5,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pymongo import ReplaceOne
 from pymongo import errors as pymongo_errors
+from pymongo.collection import Collection
 from pymongo.database import Database
 
-from src.space_weather_analysis.util.types import CatalogEntryDict, MasterCatalogItem
+from space_weather_analysis.util.types import CatalogEntryDict, MasterCatalogItem
 
 logger = logging.getLogger(__name__)
 
@@ -99,17 +100,29 @@ class CatalogLoader:
             return
 
         try:
-            # Execute in batches
-            for i in range(0, len(ops), self.DEFAULT_BATCH_SIZE):
-                batch = ops[i : i + self.DEFAULT_BATCH_SIZE]
-                res = collection.bulk_write(batch)
-                logger.info(f"Batch {i}: Matched {res.matched_count}, Upserted {res.upserted_count}")
+            self._bulk_write_in_batches(collection, ops, "Batch")
         except pymongo_errors.BulkWriteError as bwe:
             logger.error(f"Bulk write error: {bwe.details}")
         except Exception as e:
             logger.error(f"DB Load failed: {e}", exc_info=True)
 
         logger.info("--- Catalog Load Finished ---")
+
+    def _bulk_write_in_batches(self, collection: Collection, ops: List[ReplaceOne], log_label: str) -> None:
+        """Executes replace operations in batches of DEFAULT_BATCH_SIZE.
+
+        Args:
+            collection: The target MongoDB collection.
+            ops: The replace operations to execute.
+            log_label: Prefix of the log line written per batch.
+
+        Raises:
+            BulkWriteError: If a batch fails to write.
+        """
+        for batch_number, start in enumerate(range(0, len(ops), self.DEFAULT_BATCH_SIZE), start=1):
+            batch = ops[start : start + self.DEFAULT_BATCH_SIZE]
+            result = collection.bulk_write(batch)
+            logger.info(f"{log_label} {batch_number}: Matched {result.matched_count}, Upserted {result.upserted_count}")
 
     def load_metadata_to_db(self) -> None:
         """Loads the metadata catalog from file to MongoDB."""
@@ -154,10 +167,7 @@ class CatalogLoader:
                     doc = {"dataset_id": dataset_id, "metadata": meta_content}
                     ops.append(ReplaceOne({"dataset_id": dataset_id}, doc, upsert=True))
 
-            for i in range(0, len(ops), self.DEFAULT_BATCH_SIZE):
-                batch = ops[i : i + self.DEFAULT_BATCH_SIZE]
-                res = collection.bulk_write(batch)
-                logger.info(f"Metadata Batch {i}: Matched {res.matched_count}, Upserted {res.upserted_count}")
+            self._bulk_write_in_batches(collection, ops, "Metadata Batch")
 
         except Exception as e:
             logger.error(f"Failed to load metadata file: {e}", exc_info=True)

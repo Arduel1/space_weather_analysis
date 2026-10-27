@@ -100,8 +100,20 @@ warn_unused_configs = true
 disallow_untyped_defs = true
 check_untyped_defs = true
 no_implicit_optional = true
+# Resolves imports from src/ the same way PYTHONPATH and pytest do.
+mypy_path = "src"
 explicit_package_bases = true
 show_error_codes = true
 # Lenient settings to avoid blocking development:
 ignore_missing_imports = true
 warn_redundant_casts = true
+
+# Pyright is the engine behind Pylance and serves editor features; mypy is the type checker.
+[tool.pyright]
+include = ["src", "tests"]
+extraPaths = ["src"]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
+# Type checking stays with mypy: Pyright does not know pydantic-settings fills fields from the environment.
+typeCheckingMode = "off"

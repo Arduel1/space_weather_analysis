@@ -13,7 +13,9 @@ from sunpy.util import expand_list
 from sunpy.util.datatype_factory_base import NoMatchError
 
 from pipeline_service.util.logging import log_xarray_dataset_summary
+from space_weather_analysis.logging.logging_utils import log_xarray_time_diagnostics
 from space_weather_analysis.util.netcdf_utils import decode_time_variable_from_file, fallback_decode_time, find_time_dimension
+from space_weather_analysis.util.types import ParsedFileData
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +25,7 @@ def parse_datafiles(
     start_time: datetime,
     end_time: datetime,
     variables_to_parse: List[str],
-) -> Tuple[
-    Optional[Union[GenericTimeSeries, List[Tuple[xr.Dataset, str, str]]]],
-    Dict[str, Any],
-]:
+) -> Tuple[ParsedFileData, Dict[str, Any]]:
     """Parses downloaded files (CDF, NC) and extracts metadata.
 
     This function serves as the main entry point for file processing. It attempts
@@ -267,6 +266,7 @@ def _handle_missing_time_dimension(
         Tuple: (Dataset, Metadata, TimeDim, TimeCoord) with failure or fallback results.
     """
     logger.error("No time dim/coord identified from file metadata.")
+    log_xarray_time_diagnostics(ds)
 
     file_metadata = _get_xarray_file_metadata(ds, variables)
     file_metadata.setdefault(

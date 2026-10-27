@@ -1,9 +1,9 @@
 import logging
-from typing import Any, Dict, Generator, Optional, Tuple
+from typing import Generator
 
-from src.catalog_collector.discoverers.base import AbstractDiscoverer
-from src.space_weather_analysis.clients.cdaweb import CdawebClient
-from src.space_weather_analysis.util.types import CatalogEntryDict
+from catalog_collector.discoverers.base import AbstractDiscoverer
+from space_weather_analysis.clients.cdaweb import CdawebClient
+from space_weather_analysis.util.types import DiscoveryYield
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ class CdawebDiscoverer(AbstractDiscoverer):
         """Initializes the discoverer with a shared CdawebClient."""
         self.client = CdawebClient()
 
-    def _discover_datasets_for_group(self, group_name: str) -> Generator[Tuple[str, CatalogEntryDict, Optional[Dict[str, Any]]], None, None]:
+    def _discover_datasets_for_group(self, group_name: str) -> Generator[DiscoveryYield, None, None]:
         """Retrieves and iterates over all datasets for a single group.
 
         Args:
@@ -38,7 +38,8 @@ class CdawebDiscoverer(AbstractDiscoverer):
             for dataset_row in datasets_table:
                 # Use the client's helper to parse the raw row into a standardized entry
                 entry = self.client.parse_dataset_row(dataset_row, group_name)
-                if entry:
+                # parse_dataset_row sets dataset_id on every entry it returns; the check lets type checkers see that.
+                if entry and "dataset_id" in entry:
                     # Metadata retrieval for CDAWeb is handled in the Data Pipeline or separate process
                     yield str(entry["dataset_id"]), entry, None
 
@@ -48,7 +49,7 @@ class CdawebDiscoverer(AbstractDiscoverer):
                 exc_info=True,
             )
 
-    def discover(self) -> Generator[Tuple[str, CatalogEntryDict, Optional[Dict[str, Any]]], None, None]:
+    def discover(self) -> Generator[DiscoveryYield, None, None]:
         """Implements the discovery process for data sources.
 
         Iterates through all observatory groups, queries each for its

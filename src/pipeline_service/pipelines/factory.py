@@ -3,11 +3,11 @@ import pathlib
 
 from pymongo.database import Database
 
+from pipeline_service.pipelines.base import BasePipeline
+from pipeline_service.pipelines.cdaweb import CdawebPipeline
+from pipeline_service.pipelines.gfz import GfzPipeline
+from pipeline_service.pipelines.hapi import HapiPipeline
 from pipeline_service.pipelines.local import LocalPipeline
-from src.pipeline_service.pipelines.base import BasePipeline
-from src.pipeline_service.pipelines.cdaweb import CdawebPipeline
-from src.pipeline_service.pipelines.gfz import GfzPipeline
-from src.pipeline_service.pipelines.hapi import HapiPipeline
 
 logger = logging.getLogger(__name__)
 
