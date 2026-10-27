@@ -1,16 +1,21 @@
 import logging
+import math
 import pathlib
-from datetime import datetime, timedelta
-from typing import List, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
 
+import pandas as pd
 from pymongo.database import Database
 
 from pipeline_service.database.mongo_loader import MongoLoader
+from pipeline_service.metadata.generator import MetadataWriter
+from pipeline_service.metadata.models import VariableMetadata
 from pipeline_service.pipelines.base import BasePipeline, ProgressCallback
 from pipeline_service.util.documents import dataframe_to_documents
 from pipeline_service.util.naming import sanitize_collection_name
 from pipeline_service.util.time import generate_time_chunks
 from space_weather_analysis.clients.gfz import GfzClient
+from space_weather_analysis.util.time_utils import ensure_aware
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +24,21 @@ class GfzPipeline(MongoLoader, BasePipeline):
     """Pipeline implementation for GFZ Potsdam data ingestion.
 
     This pipeline handles the downloading of geomagnetic indices from GFZ
-    and stores them in MongoDB.
+    and stores them in MongoDB. Each chunk is fetched again until it holds
+    a value for every interval and none of them is preliminary.
     """
+
+    # Time range covered by one API request
+    CHUNK_DURATION = timedelta(days=30)
+
+    # Interval length per index, used to tell whether a stored chunk is complete
+    INDEX_CADENCES: Dict[str, timedelta] = {"Kp": timedelta(hours=3)}
+
+    INDEX_DESCRIPTIONS: Dict[str, str] = {"Kp": "Planetary geomagnetic Kp index, 0 to 9 in steps of one third"}
+
+    PRELIMINARY_STATUS = "pre"
+
+    TIME_FIELD = "timestamp"
 
     def __init__(self, db: Database, base_data_path: pathlib.Path):
         """Initializes the GFZ pipeline.
@@ -30,9 +48,9 @@ class GfzPipeline(MongoLoader, BasePipeline):
             base_data_path: Root directory for storing downloaded files.
         """
         super().__init__(db)
-        self.db = db
         self.base_data_path = base_data_path
         self.client = GfzClient()
+        self.metadata_writer = MetadataWriter(db)
 
     def run(
         self,
@@ -45,46 +63,150 @@ class GfzPipeline(MongoLoader, BasePipeline):
 
         Args:
             datasets: List of GFZ index names.
-            start_time: Start of the data range.
-            end_time: End of the data range.
+            start_time: Start of the data range (inclusive); a naive value is read as UTC.
+            end_time: End of the data range (exclusive); a naive value is read as UTC.
             progress_callback: Optional callback to report progress.
         """
         if not start_time or not end_time:
             logger.error("Start and end time are required for GFZ pipeline.")
             return
 
+        start_time = ensure_aware(start_time)
+        end_time = ensure_aware(end_time)
         total_datasets = len(datasets)
 
         for i, dataset_id in enumerate(datasets):
             logger.info(f"Processing GFZ dataset: {dataset_id}")
 
             # Use chunks to provide granular progress
-            chunk_delta = timedelta(days=30)
-            time_chunks = generate_time_chunks(start_time, end_time, chunk_delta)
+            time_chunks = generate_time_chunks(start_time, end_time, self.CHUNK_DURATION)
             total_chunks = len(time_chunks)
 
             collection_name = sanitize_collection_name(dataset_id)
-            self._ensure_timeseries_collection(collection_name, time_field="timestamp", meta_field="metadata")
+            self._ensure_timeseries_collection(collection_name, time_field=self.TIME_FIELD, meta_field="metadata")
 
-            try:
-                for j, (chunk_start, chunk_stop) in enumerate(time_chunks):
-                    if progress_callback:
-                        dataset_base_progress = i / total_datasets
-                        chunk_progress = j / total_chunks
-                        current_progress = dataset_base_progress + (chunk_progress / total_datasets)
-                        msg = f"Dataset {dataset_id}: Processing chunk {j + 1}/{total_chunks}"
-                        progress_callback(current_progress, msg)
+            # Response of the last chunk with data, the source of the dataset metadata
+            latest_response: Optional[pd.DataFrame] = None
 
-                    df = self.client.get_data(dataset_id, chunk_start, chunk_stop)
+            for j, (chunk_start, chunk_stop) in enumerate(time_chunks):
+                if progress_callback:
+                    dataset_base_progress = i / total_datasets
+                    chunk_progress = j / total_chunks
+                    current_progress = dataset_base_progress + (chunk_progress / total_datasets)
+                    msg = f"Dataset {dataset_id}: Processing chunk {j + 1}/{total_chunks}"
+                    progress_callback(current_progress, msg)
 
-                    if df.empty:
-                        logger.debug(f"No data returned for {dataset_id} in chunk {chunk_start}-{chunk_stop}")
-                        continue
+                # A failing chunk is logged and the remaining chunks still run
+                try:
+                    chunk_response = self._process_chunk(dataset_id, collection_name, chunk_start, chunk_stop)
+                except Exception as e:
+                    logger.error(f"Failed to process {dataset_id} chunk {chunk_start}-{chunk_stop}: {e}", exc_info=True)
+                    continue
 
-                    documents = dataframe_to_documents(df, f"GFZ_POTSDAM/{dataset_id}")
+                if chunk_response is not None:
+                    latest_response = chunk_response
 
-                    if documents:
-                        self._load_data(collection_name, documents)
+            if latest_response is not None:
+                self._save_metadata(dataset_id, latest_response)
 
-            except Exception as e:
-                logger.error(f"Failed to process {dataset_id}: {e}", exc_info=True)
+    def _process_chunk(self, dataset_id: str, collection_name: str, chunk_start: datetime, chunk_stop: datetime) -> Optional[pd.DataFrame]:
+        """Fetches one chunk and replaces its stored documents, unless the stored chunk is complete and final.
+
+        Stored documents stay untouched if the fetch delivers no rows.
+
+        Args:
+            dataset_id: The GFZ index name.
+            collection_name: The collection holding the index.
+            chunk_start: Start of the chunk (inclusive).
+            chunk_stop: End of the chunk (exclusive).
+
+        Returns:
+            The fetched response, or None if the chunk was skipped or delivered no rows inside the chunk.
+        """
+        if self._is_chunk_complete_and_final(dataset_id, collection_name, chunk_start, chunk_stop):
+            logger.info(f"Skipping {dataset_id} chunk {chunk_start}-{chunk_stop}: stored values are complete and definitive.")
+            return None
+
+        df = self.client.get_data(dataset_id, chunk_start, chunk_stop)
+
+        if df.empty:
+            logger.info(f"No data returned for {dataset_id} in chunk {chunk_start}-{chunk_stop}; stored documents are kept.")
+            return None
+
+        # The API includes the value at chunk_stop, which belongs to the next chunk
+        chunk_rows = df[(df.index >= chunk_start) & (df.index < chunk_stop)]
+        if chunk_rows.empty:
+            logger.info(f"No data inside chunk {chunk_start}-{chunk_stop} for {dataset_id}; stored documents are kept.")
+            return None
+
+        documents = dataframe_to_documents(chunk_rows, f"GFZ_POTSDAM/{dataset_id}")
+        self._replace_time_range(collection_name, self.TIME_FIELD, chunk_start, chunk_stop, documents)
+        return df
+
+    def _is_chunk_complete_and_final(self, dataset_id: str, collection_name: str, chunk_start: datetime, chunk_stop: datetime) -> bool:
+        """Tells whether the stored chunk holds one document per interval and no preliminary value.
+
+        Args:
+            dataset_id: The GFZ index name.
+            collection_name: The collection holding the index.
+            chunk_start: Start of the chunk (inclusive).
+            chunk_stop: End of the chunk (exclusive).
+
+        Returns:
+            True if the chunk needs no request; always False for an index without a known cadence.
+        """
+        cadence = self.INDEX_CADENCES.get(dataset_id)
+        if cadence is None:
+            return False
+
+        chunk_filter: Dict[str, Any] = {self.TIME_FIELD: {"$gte": chunk_start, "$lt": chunk_stop}}
+        collection = self.db[collection_name]
+
+        stored_count = collection.count_documents(chunk_filter)
+        if stored_count != count_grid_times(chunk_start, chunk_stop, cadence):
+            return False
+
+        preliminary_count = collection.count_documents({**chunk_filter, "data.status": self.PRELIMINARY_STATUS})
+        return preliminary_count == 0
+
+    def _save_metadata(self, dataset_id: str, response: pd.DataFrame) -> None:
+        """Saves the dataset metadata of an index, with license and source from the response meta.
+
+        Args:
+            dataset_id: The GFZ index name.
+            response: A fetched response of the index, carrying the response meta in attrs["meta"].
+        """
+        meta: Dict[str, Any] = response.attrs.get("meta", {})
+        description = self.INDEX_DESCRIPTIONS.get(dataset_id, f"GFZ geomagnetic index {dataset_id}")
+
+        variables = [VariableMetadata(name=dataset_id, description=description, units=None)]
+        if "status" in response.columns:
+            variables.append(VariableMetadata(name="status", description="Value status: 'def' definitive, 'pre' preliminary", units=None))
+
+        source_info = {
+            "Source": meta.get("source"),
+            "License": meta.get("license"),
+            # GFZ timestamps mark the start of each interval
+            "Time Stamp Location": "begin",
+        }
+        self.metadata_writer.save_metadata_to_db(dataset_id=dataset_id, variables=variables, source_info=source_info)
+
+
+def count_grid_times(start: datetime, stop: datetime, cadence: timedelta) -> int:
+    """Counts the interval start times in [start, stop) on a grid anchored at 00:00 UTC.
+
+    Args:
+        start: Start of the range (inclusive), timezone-aware.
+        stop: End of the range (exclusive), timezone-aware.
+        cadence: Grid spacing; it must divide one day.
+
+    Returns:
+        The number of grid times inside the range.
+    """
+    day_start = start.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    # The first grid time at or after start
+    first_grid_time = day_start + math.ceil((start - day_start) / cadence) * cadence
+    if first_grid_time >= stop:
+        return 0
+    # Grid times first_grid_time, first_grid_time + cadence, ... before stop
+    return math.ceil((stop - first_grid_time) / cadence)

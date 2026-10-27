@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 import pandas as pd
@@ -21,8 +21,12 @@ class GfzClient(BaseClient):
     into the broader data collection architecture.
     """
 
-    BASE_URL = "https://kp.gfz-potsdam.de/app/json/"
+    BASE_URL = "https://kp.gfz.de/app/json/"
     SOURCE_TYPE = "GFZ_POTSDAM"
+
+    # Index names the GFZ web service accepts; any other name is answered with HTTP 500.
+    # Taken from getKpindex.py by I. Wehner, GFZ (CC BY 4.0): https://kp.gfz.de/app/webservice/python
+    ALLOWED_INDICES = frozenset({"Kp", "ap", "Ap", "Cp", "C9", "Hp30", "Hp60", "ap30", "ap60", "SN", "Fobs", "Fadj"})
 
     def __init__(self) -> None:
         """Initializes the client with a resilient session strategy."""
@@ -50,7 +54,7 @@ class GfzClient(BaseClient):
                 "dataset_id": "Kp",
                 "source_id": "GFZ",
                 "description": "Planetary K-index (3-hourly) from GFZ Potsdam.",
-                "time_range": {"start_time": "1932-01-01", "end_time": datetime.utcnow().strftime("%Y-%m-%d")},
+                "time_range": {"start_time": "1932-01-01", "end_time": datetime.now(timezone.utc).strftime("%Y-%m-%d")},
             }
         ]
 
@@ -66,18 +70,27 @@ class GfzClient(BaseClient):
         return {"id": dataset_id, "source": self.SOURCE_TYPE, "units": "Index (0-9)", "description": "Global geomagnetic storm index."}
 
     def get_data(self, dataset_id: str, start_time: datetime, end_time: datetime, **kwargs: Any) -> pd.DataFrame:
-        """Fetches Kp index data for the specified time range.
+        """Fetches index data for the specified time range.
+
+        The API includes values at end_time, and each timestamp marks the start of its interval in UTC.
 
         Args:
             dataset_id (str): The GFZ index name to fetch.
-            start_time (datetime): Start of the window.
-            end_time (datetime): End of the window.
+            start_time (datetime): Start of the window (inclusive).
+            end_time (datetime): End of the window (inclusive).
             **kwargs: Optional 'status' value forwarded as the API query parameter; other keys are ignored.
 
         Returns:
-            pd.DataFrame: DataFrame containing 'datetime' and the index values.
+            pd.DataFrame: DataFrame indexed by 'datetime' with the index values, missing values as NaN,
+                          and a 'status' column ('def' definitive, 'pre' preliminary) if the response has one.
+                          The 'meta' object of the response is available in DataFrame.attrs["meta"].
                           Returns empty DataFrame on failure.
         """
+        # Checked before the request, as the service answers unknown names with HTTP 500, which the session retries
+        if dataset_id not in self.ALLOWED_INDICES:
+            logger.error(f"Unknown GFZ index '{dataset_id}'; allowed are {sorted(self.ALLOWED_INDICES)}.")
+            return pd.DataFrame()
+
         # Ensure correct string format for the API
         fmt = "%Y-%m-%dT%H:%M:%SZ"
         start_str = start_time.strftime(fmt)
@@ -98,17 +111,25 @@ class GfzClient(BaseClient):
             data = response.json()
 
             # The API returns a dictionary with lists. We confirm the keys exist.
+            if not isinstance(data, dict):
+                logger.warning(f"Response for {dataset_id} is not a JSON object.")
+                return pd.DataFrame()
             if "datetime" not in data or dataset_id not in data:
                 logger.warning(f"Response missing expected keys: {data.keys()}")
                 return pd.DataFrame()
 
-            df = pd.DataFrame({"datetime": pd.to_datetime(data["datetime"]), dataset_id: data[dataset_id]})
+            columns: Dict[str, Any] = {"datetime": pd.to_datetime(data["datetime"], utc=True), dataset_id: data[dataset_id]}
+            # GFZ sends the status only for some indices
+            if "status" in data:
+                columns["status"] = data["status"]
+            df = pd.DataFrame(columns)
 
-            # Ensure numeric conversion for the index column
-            df[dataset_id] = pd.to_numeric(df[dataset_id], errors="coerce")
+            df[dataset_id] = parse_index_values(df[dataset_id])
 
             # Set index to datetime for easier joining/plotting later
             df.set_index("datetime", inplace=True)
+
+            df.attrs["meta"] = data.get("meta", {})
 
             return df
 
@@ -116,8 +137,24 @@ class GfzClient(BaseClient):
             logger.error(f"Network error fetching GFZ data: {e}")
             return pd.DataFrame()
         except ValueError as e:
-            logger.error(f"Error parsing JSON response: {e}")
+            logger.error(f"Error parsing GFZ response: {e}")
             return pd.DataFrame()
         except Exception as e:
             logger.error(f"Unexpected error in GfzClient: {e}", exc_info=True)
             return pd.DataFrame()
+
+
+def parse_index_values(values: pd.Series) -> pd.Series:
+    """Converts raw GFZ index values to floats with missing values as NaN.
+
+    GFZ marks a missing value with -1 or null; every GFZ index is non-negative,
+    so -1 is never a valid value.
+
+    Args:
+        values: The raw index values of the response.
+
+    Returns:
+        The values as floats, with -1, null and non-numeric entries as NaN.
+    """
+    numeric_values = pd.to_numeric(values, errors="coerce").astype(float)
+    return numeric_values.mask(numeric_values == -1)

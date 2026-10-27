@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pymongo.database import Database
@@ -123,3 +124,34 @@ class MongoLoader:
                 f"Error loading data to MongoDB collection {collection_name}: {e}",
                 exc_info=True,
             )
+
+    def _replace_time_range(
+        self,
+        collection_name: str,
+        time_field: str,
+        start: datetime,
+        stop: datetime,
+        documents: List[Dict[str, Any]],
+    ) -> None:
+        """Replaces the stored documents of a time range with the given documents.
+
+        Deletes every document with start <= time_field < stop, then inserts the
+        documents via _load_data. The two steps are not atomic. Time series
+        collections accept this delete filter from MongoDB 7.0 on.
+
+        Args:
+            collection_name: The name of the collection.
+            time_field: The name of the field containing the timestamp.
+            start: Start of the time range (inclusive).
+            stop: End of the time range (exclusive).
+            documents: The new documents; their times must lie inside the range.
+        """
+        try:
+            deleted = self.db[collection_name].delete_many({time_field: {"$gte": start, "$lt": stop}})
+            logger.info(f"Deleted {deleted.deleted_count} documents from {collection_name} between {start} and {stop} for replacement.")
+        except Exception as e:
+            # Without the delete the insert would duplicate the kept documents
+            logger.error(f"Error deleting documents from {collection_name} between {start} and {stop}: {e}", exc_info=True)
+            return
+
+        self._load_data(collection_name, documents)
