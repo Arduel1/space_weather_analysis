@@ -6,8 +6,7 @@ from typing import Any, Hashable, Mapping, Sequence
 from pymongo.database import Database
 
 from pipeline_service.database.mongo_loader import MongoLoader
-from pipeline_service.util.documents import rows_to_documents
-from space_weather_analysis.util.types import TransformedDocuments
+from pipeline_service.util.documents import TransformedDocuments, rows_to_documents
 
 logger = logging.getLogger(__name__)
 

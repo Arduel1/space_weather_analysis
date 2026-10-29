@@ -20,6 +20,7 @@ from pipeline_service.parsing.cdf import (
     time_stamp_location,
 )
 from pipeline_service.parsing.file_parser import parse_datafiles
+from pipeline_service.parsing.netcdf import parse_xarray_timestamp
 from pipeline_service.pipelines.base import BasePipeline, ProgressCallback
 from pipeline_service.util.documents import build_gridfs_reference_document, dataframe_to_documents
 from pipeline_service.util.time import generate_time_chunks
@@ -38,7 +39,6 @@ from space_weather_analysis.metadata.models import (
 from space_weather_analysis.metadata.normalize import normalize_units
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
 from space_weather_analysis.util.naming import sanitize_collection_name
-from space_weather_analysis.util.netcdf_utils import parse_xarray_timestamp
 from space_weather_analysis.util.time_utils import ensure_aware
 
 logger = logging.getLogger(__name__)

@@ -1,9 +1,8 @@
 import logging
 from typing import Generator
 
-from catalog_collector.discoverers.base import AbstractDiscoverer
+from catalog_collector.discoverers.base import AbstractDiscoverer, DiscoveryYield
 from space_weather_analysis.clients.cdaweb import CdawebClient
-from space_weather_analysis.util.types import DiscoveryYield
 
 logger = logging.getLogger(__name__)
 

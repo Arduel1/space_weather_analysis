@@ -9,7 +9,7 @@ from sunpy.timeseries import GenericTimeSeries
 from pipeline_service.database.mongo_loader import MongoLoader
 from pipeline_service.parsing.hapi import convert_hapi_to_timeseries
 from pipeline_service.pipelines.base import BasePipeline, ProgressCallback
-from pipeline_service.util.documents import dataframe_to_documents
+from pipeline_service.util.documents import TransformedDocuments, dataframe_to_documents
 from pipeline_service.util.time import generate_time_chunks
 from space_weather_analysis.catalog.models import CatalogEntryDict
 from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
@@ -20,7 +20,6 @@ from space_weather_analysis.util.error_handling import log_and_handle_unexpected
 from space_weather_analysis.util.hapi_parameters import MAX_ARRAY_COLUMNS, parameters_too_large_for_columns
 from space_weather_analysis.util.naming import sanitize_collection_name
 from space_weather_analysis.util.time_utils import ensure_aware, parse_iso_time
-from space_weather_analysis.util.types import TransformedDocuments
 
 logger = logging.getLogger(__name__)
 

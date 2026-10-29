@@ -13,13 +13,21 @@ from sunpy.timeseries import GenericTimeSeries, TimeSeries
 from sunpy.util import expand_list
 from sunpy.util.datatype_factory_base import NoMatchError
 
-from pipeline_service.util.logging import log_xarray_dataset_summary
-from space_weather_analysis.logging.logging_utils import log_xarray_time_diagnostics
-from space_weather_analysis.util.netcdf_utils import decode_time_variable_from_file, fallback_decode_time, find_time_dimension
+from pipeline_service.parsing.diagnostics import log_xarray_dataset_summary, log_xarray_time_diagnostics
+from pipeline_service.parsing.netcdf import decode_time_variable_from_file, fallback_decode_time, find_time_dimension
 from space_weather_analysis.util.time_utils import ensure_aware
-from space_weather_analysis.util.types import ParsedFileData
 
 logger = logging.getLogger(__name__)
+
+type ParsedFileData = Optional[GenericTimeSeries | List[Tuple[xr.Dataset, str, str]]]
+"""
+Parsed file data structure.
+Returns:
+    - `GenericTimeSeries`: For 1D data (CSV, simple CDF).
+    - `List[Tuple[xr.Dataset, str, str]]`: For N-D data (NetCDF, complex CDF).
+      Tuple structure: (dataset_object, time_dimension_name, time_coordinate_name).
+    - `None`: If parsing fails.
+"""
 
 
 def parse_datafiles(

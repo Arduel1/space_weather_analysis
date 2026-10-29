@@ -1,9 +1,16 @@
 from datetime import datetime
-from typing import Any, Dict, Hashable, Iterable, Mapping, Optional
+from typing import Any, Dict, Hashable, Iterable, List, Mapping, Optional, TypeAlias
 
 import pandas as pd
 
-from space_weather_analysis.util.types import DocumentDict, TransformedDocuments
+DocumentDict: TypeAlias = Dict[str, Any]
+"""
+A dictionary representing a MongoDB document.
+Keys are strings (field names), values can be any BSON-compatible type.
+"""
+
+TransformedDocuments: TypeAlias = List[DocumentDict]
+"""A list of formatted dictionaries ready for MongoDB insertion."""
 
 
 def dataframe_to_documents(df: pd.DataFrame, source_identifier: str, timestamp_column: Optional[str] = None) -> TransformedDocuments:

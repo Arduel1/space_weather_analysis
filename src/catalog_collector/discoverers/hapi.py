@@ -2,10 +2,9 @@ import logging
 import pathlib
 from typing import Any, Dict, Generator, List
 
-from catalog_collector.discoverers.base import AbstractDiscoverer
+from catalog_collector.discoverers.base import AbstractDiscoverer, DiscoveryYield
 from space_weather_analysis.catalog.models import CatalogEntryDict
 from space_weather_analysis.clients.hapi import HapiClient
-from space_weather_analysis.util.types import DiscoveryYield
 
 logger = logging.getLogger(__name__)
 

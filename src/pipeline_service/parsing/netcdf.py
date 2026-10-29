@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from space_weather_analysis.util.time_utils import (
+from pipeline_service.parsing.time_decoding import (
     attempt_numeric_time_conversions,
     convert_cftime_object,
     ensure_datetime_type,
@@ -260,7 +260,7 @@ def fallback_decode_time(
 
     diagnostics["fallback_invoked"] = True
 
-    # Find candidates (uses the new logic in netcdf_utils)
+    # Find candidates
     candidates = find_heuristic_time_candidates(ds, time_dim)
     diagnostics["candidates"] = candidates
 

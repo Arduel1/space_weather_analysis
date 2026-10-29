@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from space_weather_analysis.util.netcdf_utils import (
+from pipeline_service.parsing.netcdf import (
     TimeConfidence,
     _evaluate_variable_confidence,
     _is_datetime_type,
@@ -57,8 +57,8 @@ class TestFallbackDecodeTime:
 
     @pytest.fixture
     def mock_attempt_conversion(self) -> Generator[MagicMock, None, None]:
-        """Patches attempt_numeric_time_conversions in netcdf_utils."""
-        with patch("space_weather_analysis.util.netcdf_utils.attempt_numeric_time_conversions") as mock:
+        """Patches attempt_numeric_time_conversions in the netcdf module."""
+        with patch("pipeline_service.parsing.netcdf.attempt_numeric_time_conversions") as mock:
             yield mock
 
     def test_decodes_full_array_correctly(self, mock_attempt_conversion: MagicMock) -> None:

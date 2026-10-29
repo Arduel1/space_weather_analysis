@@ -6,7 +6,7 @@ import pandas as pd
 from pymongo.database import Database
 
 from pipeline_service.pipelines.processors.base import BaseETLProcessor
-from space_weather_analysis.util.types import TransformedDocuments
+from pipeline_service.util.documents import TransformedDocuments
 
 logger = logging.getLogger(__name__)
 

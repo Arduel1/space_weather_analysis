@@ -1,7 +1,13 @@
 from abc import ABC, abstractmethod
-from typing import Generator
+from typing import Any, Dict, Generator, Optional, Tuple, TypeAlias
 
-from space_weather_analysis.util.types import DiscoveryYield
+from space_weather_analysis.catalog.models import CatalogEntryDict
+
+DiscoveryYield: TypeAlias = Tuple[str, CatalogEntryDict, Optional[Dict[str, Any]]]
+"""
+The output unit of discovery processes.
+Structure: (dataset_id, catalog_entry_dictionary, dataset_metadata or None).
+"""
 
 
 class AbstractDiscoverer(ABC):
