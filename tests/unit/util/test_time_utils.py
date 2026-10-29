@@ -13,6 +13,7 @@ from space_weather_analysis.util.time_utils import (
     convert_cftime_object,
     ensure_aware,
     ensure_datetime_type,
+    format_iso_duration,
     parse_iso_time,
     parse_numeric_fallback,
     parse_numeric_with_units,
@@ -88,6 +89,27 @@ class TestParseIsoTime:
             mock_logger.error.assert_called_once()
             args, _ = mock_logger.error.call_args
             assert "Failed to parse" in args[0]
+
+
+class TestFormatIsoDuration:
+    @pytest.mark.parametrize(
+        ("duration", "expected"),
+        [
+            (timedelta(hours=3), "PT3H"),
+            (timedelta(days=1), "P1D"),
+            (timedelta(days=1, minutes=30), "P1DT30M"),
+            (timedelta(seconds=90), "PT1M30S"),
+            (timedelta(seconds=1, microseconds=500000), "PT1.5S"),
+        ],
+    )
+    def test_duration_written_without_zero_parts(self, duration: timedelta, expected: str) -> None:
+        """A duration is written as ISO 8601 duration without the parts that are zero."""
+        assert format_iso_duration(duration) == expected
+
+    def test_non_positive_duration_is_rejected(self) -> None:
+        """A zero duration raises ValueError."""
+        with pytest.raises(ValueError):
+            format_iso_duration(timedelta(0))
 
 
 class TestCalculateTimeIntersection:

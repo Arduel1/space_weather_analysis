@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, cast
 
 import numpy as np
@@ -53,6 +53,41 @@ def parse_iso_time(time_str: str) -> Optional[datetime]:
     except Exception:
         logger.error(f"Failed to parse time string: {time_str}", exc_info=True)
         return None
+
+
+def format_iso_duration(duration: timedelta) -> str:
+    """Formats a positive duration as an ISO 8601 duration.
+
+    ISO 8601 writes durations as `P{days}DT{hours}H{minutes}M{seconds}S`; parts that are zero are left out.
+
+    Args:
+        duration: The duration, at least one microsecond.
+
+    Returns:
+        The ISO 8601 duration text, with fractional seconds if the duration has microseconds.
+
+    Raises:
+        ValueError: If the duration is zero or negative.
+    """
+    if duration <= timedelta(0):
+        raise ValueError(f"Duration must be positive, got {duration}.")
+
+    hours, remainder_seconds = divmod(duration.seconds, 3600)
+    minutes, seconds = divmod(remainder_seconds, 60)
+    date_part = f"{duration.days}D" if duration.days else ""
+
+    time_part = ""
+    if hours:
+        time_part += f"{hours}H"
+    if minutes:
+        time_part += f"{minutes}M"
+    if duration.microseconds:
+        fraction = f"{duration.microseconds:06d}".rstrip("0")
+        time_part += f"{seconds}.{fraction}S"
+    elif seconds:
+        time_part += f"{seconds}S"
+
+    return f"P{date_part}T{time_part}" if time_part else f"P{date_part}"
 
 
 def calculate_time_intersection(

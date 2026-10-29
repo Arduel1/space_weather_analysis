@@ -2,8 +2,8 @@ from datetime import datetime, timedelta, timezone
 from typing import List
 
 from pipeline_service.util.batching import batch_generator
-from pipeline_service.util.naming import sanitize_collection_name
 from pipeline_service.util.time import generate_time_chunks
+from space_weather_analysis.util.naming import sanitize_collection_name
 
 
 def test_batch_generator_empty_list() -> None:
