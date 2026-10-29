@@ -1,17 +1,23 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from bson.objectid import ObjectId
 from pymongo.database import Database
 
+from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
+from space_weather_analysis.jobs.repository import JobRepository, MongoJobRepository
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
 
 logger = logging.getLogger(__name__)
 
 # Collections holding catalog, metadata and jobs rather than time series
-EXCLUDED_COLLECTIONS = (MongoMetadataRepository.RECORD_COLLECTION, MongoMetadataRepository.RAW_COLLECTION, "master_catalog", "jobs")
+EXCLUDED_COLLECTIONS = (
+    MongoMetadataRepository.RECORD_COLLECTION,
+    MongoMetadataRepository.RAW_COLLECTION,
+    MongoCatalogRepository.COLLECTION,
+    MongoJobRepository.COLLECTION,
+)
 
 
 class DataLoader:
@@ -32,6 +38,8 @@ class DataLoader:
         """
         self.db: Optional[Database] = db
         self.metadata_repository: Optional[MetadataRepository] = MongoMetadataRepository(db) if db is not None else None
+        self.catalog_repository: Optional[CatalogRepository] = MongoCatalogRepository(db) if db is not None else None
+        self.job_repository: Optional[JobRepository] = MongoJobRepository(db) if db is not None else None
         if self.db is None:
             logger.error("Could not establish database connection for Streamlit app.")
 
@@ -164,13 +172,15 @@ class DataLoader:
         """Retrieves the entire master catalog to list available datasets.
 
         Returns:
-            List[Dict[str, Any]]: A list of catalog entries containing dataset IDs and source info.
+            List[Dict[str, Any]]: The catalog items with dataset ID and sources, sorted by dataset ID.
         """
-        if self.db is None:
+        if self.catalog_repository is None:
             return []
         try:
-            # Return all entries, excluding the internal _id field
-            return list(self.db["master_catalog"].find({}, {"_id": 0}))
+            catalog: List[Dict[str, Any]] = [
+                {"dataset_id": item["dataset_id"], "sources": item["sources"]} for item in self.catalog_repository.get_all()
+            ]
+            return catalog
         except Exception as e:
             logger.error(f"Error fetching master catalog: {e}")
             return []
@@ -193,25 +203,12 @@ class DataLoader:
         Returns:
             Optional[str]: The string representation of the new job ID, or None if failed.
         """
-        if self.db is None:
+        if self.job_repository is None:
             return None
 
-        job_doc = {
-            # Source ID is deliberately omitted here; determined by pipeline logic.
-            "parameters": {
-                "datasets": [dataset_id],
-                "start_time": start_time,
-                "end_time": end_time,
-            },
-            "status": "PENDING",
-            "created_at": datetime.now(timezone.utc),
-            "progress": 0.0,
-            "message": "Job created",
-        }
-
         try:
-            result = self.db["jobs"].insert_one(job_doc)
-            return str(result.inserted_id)
+            # Source ID is deliberately omitted here; determined by pipeline logic.
+            return self.job_repository.create([dataset_id], start_time, end_time)
         except Exception as e:
             logger.error(f"Error creating job: {e}")
             return None
@@ -223,13 +220,15 @@ class DataLoader:
             job_id: The unique identifier of the job (as a string).
 
         Returns:
-            Dict[str, Any]: The job document including status and any error messages.
+            Dict[str, Any]: The job fields including status and any error messages, or an empty
+            dict if the job is not found.
         """
-        if self.db is None:
+        if self.job_repository is None:
             return {}
 
         try:
-            return self.db["jobs"].find_one({"_id": ObjectId(job_id)}) or {}
+            job = self.job_repository.get(job_id)
+            return job.model_dump() if job else {}
         except Exception as e:
             logger.error(f"Error fetching job status: {e}")
             return {}

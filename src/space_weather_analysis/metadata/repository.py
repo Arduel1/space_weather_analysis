@@ -1,4 +1,3 @@
-import logging
 import math
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -8,9 +7,8 @@ import numpy as np
 from pymongo import ASCENDING, ReplaceOne
 from pymongo.database import Database
 
+from space_weather_analysis.database.bulk import bulk_write_in_batches
 from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSourceKind, RawMetadataRecord
-
-logger = logging.getLogger(__name__)
 
 
 def sanitize_for_bson(value: Any) -> Any:
@@ -169,7 +167,6 @@ class MongoMetadataRepository(MetadataRepository):
         Args:
             db: The MongoDB database instance.
         """
-        self.db = db
         self.records = db[self.RECORD_COLLECTION]
         self.raw_records = db[self.RAW_COLLECTION]
         self._indexes_ensured = False
@@ -198,7 +195,7 @@ class MongoMetadataRepository(MetadataRepository):
         """
         self._ensure_indexes()
         operations = [ReplaceOne({"_id": record.dataset_id}, sanitize_for_bson(record.to_document()), upsert=True) for record in records]
-        self._bulk_write_in_batches(self.RECORD_COLLECTION, operations)
+        bulk_write_in_batches(self.records, operations, self.BATCH_SIZE)
 
     def get(self, dataset_id: str) -> Optional[DatasetMetadata]:
         """Reads the record of one dataset.
@@ -249,7 +246,7 @@ class MongoMetadataRepository(MetadataRepository):
             # The payload is sanitized directly, as model_dump would convert objects without BSON type into iterators
             document = {**key, "url": raw_record.url, "retrieved_at": raw_record.retrieved_at, "payload": sanitize_for_bson(raw_record.payload)}
             operations.append(ReplaceOne(key, document, upsert=True))
-        self._bulk_write_in_batches(self.RAW_COLLECTION, operations)
+        bulk_write_in_batches(self.raw_records, operations, self.BATCH_SIZE)
 
     def get_raw(self, dataset_id: str, kind: MetadataSourceKind) -> Optional[RawMetadataRecord]:
         """Reads the raw provider metadata of one dataset and source kind.
@@ -284,19 +281,3 @@ class MongoMetadataRepository(MetadataRepository):
         """
         result = self.records.delete_many({"collection": {"$exists": False}})
         return result.deleted_count
-
-    def _bulk_write_in_batches(self, collection_name: str, operations: List[ReplaceOne]) -> None:
-        """Executes replace operations in batches of BATCH_SIZE.
-
-        Args:
-            collection_name: The name of the target collection.
-            operations: The replace operations to execute.
-
-        Raises:
-            pymongo.errors.BulkWriteError: If a batch fails to write.
-        """
-        collection = self.db[collection_name]
-        for batch_start in range(0, len(operations), self.BATCH_SIZE):
-            batch = operations[batch_start : batch_start + self.BATCH_SIZE]
-            result = collection.bulk_write(batch, ordered=False)
-            logger.debug(f"Metadata write to '{collection_name}': matched {result.matched_count}, upserted {result.upserted_count}")

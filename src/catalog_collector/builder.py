@@ -5,7 +5,7 @@ from typing import Dict, List, Set, Tuple
 
 from catalog_collector.discoverers.base import AbstractDiscoverer
 from catalog_collector.loader import CatalogLoader
-from space_weather_analysis.util.types import CatalogEntryDict
+from space_weather_analysis.catalog.models import CatalogEntryDict
 
 logger = logging.getLogger(__name__)
 

@@ -7,8 +7,8 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from space_weather_analysis.catalog.models import CatalogEntryDict
 from space_weather_analysis.clients.base import BaseClient
-from space_weather_analysis.util.types import CatalogEntryDict
 
 logger = logging.getLogger(__name__)
 

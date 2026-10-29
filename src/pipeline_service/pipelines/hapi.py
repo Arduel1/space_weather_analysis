@@ -11,6 +11,8 @@ from pipeline_service.parsing.hapi import convert_hapi_to_timeseries
 from pipeline_service.pipelines.base import BasePipeline, ProgressCallback
 from pipeline_service.util.documents import dataframe_to_documents
 from pipeline_service.util.time import generate_time_chunks
+from space_weather_analysis.catalog.models import CatalogEntryDict
+from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
 from space_weather_analysis.clients.hapi import HapiClient
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
@@ -18,7 +20,7 @@ from space_weather_analysis.util.error_handling import log_and_handle_unexpected
 from space_weather_analysis.util.hapi_parameters import MAX_ARRAY_COLUMNS, parameters_too_large_for_columns
 from space_weather_analysis.util.naming import sanitize_collection_name
 from space_weather_analysis.util.time_utils import ensure_aware, parse_iso_time
-from space_weather_analysis.util.types import CatalogEntryDict, TransformedDocuments
+from space_weather_analysis.util.types import TransformedDocuments
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +30,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
 
     This pipeline handles the complete workflow from fetching data via the HAPI
     protocol to storing it in MongoDB time-series collections. It leverages the
-    common HapiClient which maintains a catalog of available servers and datasets.
+    common HapiClient, which receives the HAPI sources of every dataset from the master catalog.
     """
 
     # Identifying string for source tracking in metadata
@@ -63,7 +65,10 @@ class HapiPipeline(MongoLoader, BasePipeline):
                 as HAPI data goes directly into MongoDB without files.
         """
         super().__init__(db)
-        self.client = HapiClient(db)
+        catalog_repository: CatalogRepository = MongoCatalogRepository(db)
+        hapi_sources = catalog_repository.get_source_map(self.SOURCE_ID)
+        logger.info(f"Loaded the HAPI sources of {len(hapi_sources)} datasets from the master catalog.")
+        self.client = HapiClient(hapi_sources)
         self.metadata_repository: MetadataRepository = MongoMetadataRepository(db)
 
     def run(
@@ -90,7 +95,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
         logger.info(f"Starting Generic {self.SOURCE_ID} Pipeline")
 
         if not self.client.catalog_map:
-            logger.error("Client has no catalog map loaded from DB. Aborting pipeline.")
+            logger.error("The master catalog lists no dataset with a HAPI source. Aborting pipeline.")
             return
 
         total_datasets = len(datasets)
@@ -176,7 +181,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
 
         logger.info(f"Auto-detecting time range for {dataset_id}...")
 
-        # Access catalog map from common client
+        # The HAPI sources the client received from the master catalog
         entries = self.client.catalog_map.get(dataset_id)
         if not entries:
             logger.warning(f"No catalog entries found for {dataset_id}. Cannot auto-detect range.")

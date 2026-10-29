@@ -1,29 +1,27 @@
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple, cast
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from hapiclient import hapi
 from hapiclient.util import HAPIError
-from pymongo.database import Database
 
+from space_weather_analysis.catalog.models import CatalogEntryDict, CatalogMap
 from space_weather_analysis.clients.base import BaseClient
 from space_weather_analysis.util.resilience import retry_interaction
 from space_weather_analysis.util.time_utils import calculate_time_intersection, parse_iso_time
-from space_weather_analysis.util.types import CatalogEntryDict, CatalogMap
 
 logger = logging.getLogger(__name__)
 
 
 class HapiClient(BaseClient):
-    """Generic client that streams data from HAPI services found via the MongoDB master catalog.
+    """Generic client that streams data from the HAPI servers listed in a catalog map.
 
     This client abstracts the HAPI protocol details and implements server
-    fallback logic using the catalog's source list. It handles metadata
+    fallback logic using the source list of each dataset. It handles metadata
     retrieval and data streaming for specified time ranges.
     """
 
-    CATALOG_COLLECTION = "master_catalog"
     SOURCE_TYPE = "HAPI"
 
     # Options for every hapi() call: no print output, no files in the hapiclient disk cache,
@@ -34,48 +32,14 @@ class HapiClient(BaseClient):
     # HAPI status); errors without it carry the status message of a server that answered according to HAPI.
     HAPICLIENT_FAILURE_HINT = "hapi-server.org/servers"
 
-    def __init__(self, db: Optional[Database] = None) -> None:
-        """Initializes the client using a MongoDB database connection.
+    def __init__(self, catalog_map: Optional[CatalogMap] = None) -> None:
+        """Initializes the client with the HAPI sources it may request data from.
 
         Args:
-            db: The MongoDB database instance.
+            catalog_map: The HAPI sources of each dataset, keyed by dataset ID; None for a client
+                that only uses the methods taking a server URL.
         """
-        self.db = db
-        self.catalog_map: CatalogMap = {}
-
-        if self.db is not None:
-            self.catalog_map = self._load_catalog_from_db(self.db)
-            if self.catalog_map:
-                logger.info(f"Loaded master catalog from DB with {len(self.catalog_map)} entries.")
-            else:
-                logger.warning("Master catalog loaded but empty. Discovery may need to run first.")
-
-    def _load_catalog_from_db(self, db: Database) -> Dict[str, List[CatalogEntryDict]]:
-        """Loads the master catalog from the MongoDB collection into a dictionary map.
-
-        Args:
-            db: The MongoDB database holding the catalog collection.
-
-        Returns:
-            A dictionary mapping dataset_id to a list of source entries, or an empty dict if loading fails.
-        """
-        try:
-            collection = db[self.CATALOG_COLLECTION]
-            catalog_data = collection.find({}, {"_id": 0})
-
-            result: Dict[str, List[CatalogEntryDict]] = {}
-            for doc in catalog_data:
-                dataset_id = doc.get("dataset_id")
-                sources = doc.get("sources", [])
-
-                if dataset_id and isinstance(dataset_id, str):
-                    result[dataset_id] = cast(List[CatalogEntryDict], sources)
-
-            return result
-
-        except Exception as e:
-            logger.error(f"Failed to load master catalog from MongoDB: {e}", exc_info=True)
-            return {}
+        self.catalog_map: CatalogMap = catalog_map if catalog_map is not None else {}
 
     # --- Discovery Methods ---
 
@@ -129,7 +93,7 @@ class HapiClient(BaseClient):
     # --- BaseClient Interface Implementation ---
 
     def get_catalog_entries(self) -> List[Dict[str, Any]]:
-        """Returns all datasets known to this client (from local DB map).
+        """Returns all datasets known to this client from its catalog map.
 
         Returns:
             A list of dataset entries suitable for the generic interface.

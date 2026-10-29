@@ -23,6 +23,7 @@ from pipeline_service.parsing.file_parser import parse_datafiles
 from pipeline_service.pipelines.base import BasePipeline, ProgressCallback
 from pipeline_service.util.documents import build_gridfs_reference_document, dataframe_to_documents
 from pipeline_service.util.time import generate_time_chunks
+from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
 from space_weather_analysis.clients.cdaweb import CdawebClient
 from space_weather_analysis.metadata.models import (
     DatasetMetadata,
@@ -46,7 +47,7 @@ logger = logging.getLogger(__name__)
 class CdawebPipeline(MongoLoader, BasePipeline):
     """Fetches, downloads, parses and documents CDAWeb data via SunPy/Fido.
 
-    This pipeline relies on the MongoDB 'master_catalog' collection
+    This pipeline relies on the master catalog
     to discover data sources (Observatory Groups) and processes data
     in time chunks to handle large datasets.
 
@@ -56,7 +57,6 @@ class CdawebPipeline(MongoLoader, BasePipeline):
     and description (CATDESC). The pipeline uses them to clean the data and to describe it.
     """
 
-    CATALOG_COLLECTION = "master_catalog"
     SOURCE_ID = "FIDO_CDAWEB"
     # Time span of one download and of one check for already stored documents
     CHUNK_DURATION = timedelta(days=7)
@@ -75,6 +75,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         self.client: CdawebClient = client if client is not None else CdawebClient()
         self.base_data_dir: pathlib.Path = base_data_path
         self.metadata_repository: MetadataRepository = MongoMetadataRepository(db)
+        self.catalog_repository: CatalogRepository = MongoCatalogRepository(db)
         self.fs: gridfs.GridFS = gridfs.GridFS(self.db)
 
         if not self.base_data_dir.exists():
@@ -120,7 +121,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         total_datasets = len(datasets)
 
         for i, dataset_id in enumerate(datasets):
-            group_name = self._get_fido_source_from_db(dataset_id)
+            group_name = self._find_fido_group(dataset_id)
             if not group_name:
                 logger.error(f"Skipping {dataset_id}: Could not find its {self.SOURCE_ID} group in catalog.")
                 continue
@@ -156,8 +157,8 @@ class CdawebPipeline(MongoLoader, BasePipeline):
 
         logger.info("CDAWeb Pipeline finished.")
 
-    def _get_fido_source_from_db(self, dataset_id: str) -> Optional[str]:
-        """Queries the master_catalog to find the source_id.
+    def _find_fido_group(self, dataset_id: str) -> Optional[str]:
+        """Reads the source_id of the first FIDO_CDAWEB source of a dataset from the master catalog.
 
         Args:
             dataset_id: The dataset ID to query.
@@ -167,16 +168,13 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         """
         logger.info(f"Querying catalog for {self.SOURCE_ID} source for: {dataset_id}")
         try:
-            collection = self.db[self.CATALOG_COLLECTION]
-            doc = collection.find_one({"dataset_id": dataset_id})
+            item = self.catalog_repository.get(dataset_id)
 
-            if not doc:
-                logger.error(f"Dataset '{dataset_id}' not found in {self.CATALOG_COLLECTION}")
+            if not item:
+                logger.error(f"Dataset '{dataset_id}' not found in the master catalog")
                 return None
 
-            sources = doc.get("sources", [])
-
-            for source in sources:
+            for source in item["sources"]:
                 if source.get("type") == self.SOURCE_ID:
                     source_id = source.get("source_id")
                     if source_id:

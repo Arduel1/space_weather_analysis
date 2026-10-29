@@ -5,16 +5,15 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from pydantic import ValidationError
-from pymongo import ReplaceOne
 from pymongo import errors as pymongo_errors
-from pymongo.collection import Collection
 from pymongo.database import Database
 
+from space_weather_analysis.catalog.models import CatalogEntryDict, MasterCatalogItem
+from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
 from space_weather_analysis.metadata.models import DatasetMetadata, RawMetadataRecord
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
 from space_weather_analysis.util.naming import sanitize_collection_name
-from space_weather_analysis.util.types import CatalogEntryDict, MasterCatalogItem
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +26,6 @@ class CatalogLoader:
     discovery results.
     """
 
-    COLLECTION_NAME = "master_catalog"
-    DEFAULT_BATCH_SIZE = 1000
     HAPI_SOURCE_TYPE = "HAPI"
 
     def __init__(
@@ -44,10 +41,10 @@ class CatalogLoader:
             file_path (pathlib.Path): Path to the catalog JSON file.
             metadata_path (Optional[pathlib.Path]): Path to the metadata JSON file.
         """
-        self.db = db
         self.file_path = file_path
         self.metadata_path = metadata_path
         self.metadata_repository: MetadataRepository = MongoMetadataRepository(db)
+        self.catalog_repository: CatalogRepository = MongoCatalogRepository(db)
 
     def _load_json(self) -> Optional[List[MasterCatalogItem]]:
         """Reads and parses the catalog JSON file.
@@ -86,50 +83,18 @@ class CatalogLoader:
             return
         logger.info(f"Found {len(items)} datasets in catalog file.")
 
-        collection = self.db[self.COLLECTION_NAME]
-
-        # Ensure index
-        try:
-            collection.create_index("dataset_id", unique=True, background=True)
-        except Exception as e:
-            logger.warning(f"Could not create index: {e}")
-
-        # Prepare bulk operations
-        ops = []
+        # We sort sources to ensure deterministic comparison/storage if needed
         for item in items:
-            # We sort sources to ensure deterministic comparison/storage if needed
-            if "sources" in item:
-                item["sources"].sort(key=self._get_sortable_key)
-
-            ops.append(ReplaceOne({"dataset_id": item["dataset_id"]}, item, upsert=True))
-
-        if not ops:
-            return
+            item["sources"].sort(key=self._get_sortable_key)
 
         try:
-            self._bulk_write_in_batches(collection, ops, "Batch")
+            self.catalog_repository.save_many(items)
         except pymongo_errors.BulkWriteError as bwe:
             logger.error(f"Bulk write error: {bwe.details}")
         except Exception as e:
             logger.error(f"DB Load failed: {e}", exc_info=True)
 
         logger.info("--- Catalog Load Finished ---")
-
-    def _bulk_write_in_batches(self, collection: Collection, ops: List[ReplaceOne], log_label: str) -> None:
-        """Executes replace operations in batches of DEFAULT_BATCH_SIZE.
-
-        Args:
-            collection: The target MongoDB collection.
-            ops: The replace operations to execute.
-            log_label: Prefix of the log line written per batch.
-
-        Raises:
-            BulkWriteError: If a batch fails to write.
-        """
-        for batch_number, start in enumerate(range(0, len(ops), self.DEFAULT_BATCH_SIZE), start=1):
-            batch = ops[start : start + self.DEFAULT_BATCH_SIZE]
-            result = collection.bulk_write(batch)
-            logger.info(f"{log_label} {batch_number}: Matched {result.matched_count}, Upserted {result.upserted_count}")
 
     def load_metadata_to_db(self) -> None:
         """Loads the HAPI /info snapshot file into the metadata repository.
@@ -184,10 +149,10 @@ class CatalogLoader:
             The base URL of the first HAPI source, keyed by dataset ID; datasets without HAPI source are left out.
         """
         hapi_servers: Dict[str, str] = {}
-        for item in self.db[self.COLLECTION_NAME].find({"sources.type": self.HAPI_SOURCE_TYPE}, {"_id": 0, "dataset_id": 1, "sources": 1}):
-            for source in item.get("sources", []):
-                if source.get("type") == self.HAPI_SOURCE_TYPE and source.get("source_id"):
-                    hapi_servers[item["dataset_id"]] = source["source_id"]
+        for dataset_id, sources in self.catalog_repository.get_source_map(self.HAPI_SOURCE_TYPE).items():
+            for source in sources:
+                if source.get("source_id"):
+                    hapi_servers[dataset_id] = source["source_id"]
                     break
         return hapi_servers
 
@@ -225,26 +190,19 @@ class CatalogLoader:
 
     def upsert_dataset(self, dataset_id: str, sources: List[CatalogEntryDict]) -> None:
         """Upserts a single dataset entry into MongoDB."""
-        collection = self.db[self.COLLECTION_NAME]
-
         # Sort sources to ensure deterministic storage
         sorted_sources = sorted(sources, key=self._get_sortable_key)
 
-        item = {"dataset_id": dataset_id, "sources": sorted_sources}
-
         try:
-            result = collection.replace_one({"dataset_id": dataset_id}, item, upsert=True)
-            action = "Created" if result.upserted_id else "Updated"
-            logger.info(f"DB {action}: {dataset_id} (Sources: {len(sorted_sources)})")
+            self.catalog_repository.save({"dataset_id": dataset_id, "sources": sorted_sources})
+            logger.info(f"DB Saved: {dataset_id} (Sources: {len(sorted_sources)})")
         except Exception as e:
             logger.error(f"Failed to upsert dataset {dataset_id}: {e}")
 
     def delete_dataset(self, dataset_id: str) -> None:
         """Deletes a dataset from the MongoDB collection."""
-        collection = self.db[self.COLLECTION_NAME]
         try:
-            result = collection.delete_one({"dataset_id": dataset_id})
-            if result.deleted_count > 0:
+            if self.catalog_repository.delete(dataset_id):
                 logger.info(f"DB Deleted: {dataset_id}")
             else:
                 logger.info(f"DB Delete skipped (not found): {dataset_id}")

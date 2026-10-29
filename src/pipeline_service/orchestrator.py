@@ -1,12 +1,15 @@
 import logging
 import pathlib
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pymongo.database import Database
 
 from pipeline_service.pipelines.factory import PipelineFactory
+from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
+from space_weather_analysis.jobs.models import Job
+from space_weather_analysis.jobs.repository import JobRepository, MongoJobRepository
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +23,6 @@ class PipelineOrchestrator:
     to specific pipeline implementations created via a factory.
     """
 
-    JOBS_COLLECTION = "jobs"
-    CATALOG_COLLECTION = "master_catalog"
     POLLING_INTERVAL_SECONDS = 10
     # Define a default directory for data storage relative to the project root
     DATA_BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent / "data"
@@ -33,6 +34,8 @@ class PipelineOrchestrator:
             db (Database): The MongoDB database instance used for job management.
         """
         self.db = db
+        self.job_repository: JobRepository = MongoJobRepository(db)
+        self.catalog_repository: CatalogRepository = MongoCatalogRepository(db)
         # Ensure the download directory exists
         if not self.DATA_BASE_DIR.exists():
             self.DATA_BASE_DIR.mkdir(parents=True, exist_ok=True)
@@ -67,7 +70,7 @@ class PipelineOrchestrator:
 
         while True:
             try:
-                job = self._fetch_next_pending_job()
+                job = self.job_repository.claim_next_pending()
 
                 if job:
                     self._process_job(job)
@@ -78,30 +81,6 @@ class PipelineOrchestrator:
             except Exception as e:
                 logger.error(f"Unexpected error in daemon loop: {e}", exc_info=True)
                 time.sleep(self.POLLING_INTERVAL_SECONDS)
-
-    def _fetch_next_pending_job(self) -> Optional[Dict[str, Any]]:
-        """Retrieves and locks the next pending job from the database.
-
-        This method looks for a document with specific status criteria and
-        atomically updates it to prevent other instances from picking up the
-        same job.
-
-        Returns:
-            Optional[Dict[str, Any]]: The job document if found and locked,
-            otherwise None.
-        """
-        collection = self.db[self.JOBS_COLLECTION]
-
-        return collection.find_one_and_update(
-            {"status": "PENDING"},
-            {
-                "$set": {
-                    "status": "RUNNING",
-                    "started_at": datetime.now(timezone.utc),
-                }
-            },
-            return_document=True,
-        )
 
     def _resolve_source_type(self, datasets: List[str]) -> Optional[str]:
         """Determines the correct pipeline source type for a given list of datasets.
@@ -118,62 +97,37 @@ class PipelineOrchestrator:
             return None
 
         dataset_id = datasets[0]
-        catalog_entry = self.db[self.CATALOG_COLLECTION].find_one({"dataset_id": dataset_id})
-        if not catalog_entry:
-            logger.error(f"Dataset {dataset_id} not found in master catalog.")
-            return None
-
-        sources = catalog_entry.get("sources", [])
+        sources = self.catalog_repository.get_sources(dataset_id)
         if not sources:
-            logger.error(f"No sources defined for dataset {dataset_id}.")
+            logger.error(f"Dataset {dataset_id} not found in master catalog or no sources defined for it.")
             return None
 
         return sources[0].get("type")
 
-    def _process_job(self, job: Dict[str, Any]) -> None:
+    def _process_job(self, job: Job) -> None:
         """Executes the logic for a single retrieved job.
 
         Args:
-            job (Dict[str, Any]): The job document containing execution details.
+            job (Job): The claimed job containing execution details.
         """
-        job_id = job.get("_id")
-        params = job.get("parameters", {})
-        datasets = params.get("datasets", [])
+        datasets = job.parameters.datasets
 
-        source_type = job.get("source_id")
+        source_type = job.source_id
         if not source_type:
-            logger.info(f"Resolving source type for job {job_id}...")
+            logger.info(f"Resolving source type for job {job.id}...")
             source_type = self._resolve_source_type(datasets)
 
-        logger.info(f"Processing job {job_id} for source type {source_type}")
+        logger.info(f"Processing job {job.id} for source type {source_type}")
 
         try:
-            start_time = params.get("start_time")
-            end_time = params.get("end_time")
+            self._execute_pipeline(source_type, datasets, job.parameters.start_time, job.parameters.end_time, job_id=job.id)
 
-            self._execute_pipeline(source_type, datasets, start_time, end_time, job_id=job_id)
-
-            self._update_job_status(job_id, "COMPLETED")
-            logger.info(f"Job {job_id} completed successfully.")
+            self.job_repository.finish(job.id, "COMPLETED")
+            logger.info(f"Job {job.id} completed successfully.")
 
         except Exception as e:
-            logger.error(f"Job {job_id} failed: {e}", exc_info=True)
-            self._update_job_status(job_id, "FAILED", str(e))
-
-    def _update_job_status(self, job_id: Any, status: str, error_message: Optional[str] = None) -> None:
-        """Updates the final status of a job in the database.
-
-        Args:
-            job_id (Any): The unique identifier of the job.
-            status (str): The final status string, 'COMPLETED' or 'FAILED'.
-            error_message (Optional[str]): An optional error description if failed.
-        """
-        update_doc = {"status": status, "completed_at": datetime.now(timezone.utc)}
-
-        if error_message:
-            update_doc["error"] = error_message
-
-        self.db[self.JOBS_COLLECTION].update_one({"_id": job_id}, {"$set": update_doc})
+            logger.error(f"Job {job.id} failed: {e}", exc_info=True)
+            self.job_repository.finish(job.id, "FAILED", str(e))
 
     def _execute_pipeline(
         self,
@@ -181,7 +135,7 @@ class PipelineOrchestrator:
         datasets: List[str],
         start_time: Optional[datetime],
         end_time: Optional[datetime],
-        job_id: Optional[Any],
+        job_id: Optional[str],
     ) -> None:
         """Delegates the execution to a specific pipeline instance.
 
@@ -190,8 +144,8 @@ class PipelineOrchestrator:
             datasets (List[str]): The list of dataset IDs to process.
             start_time (Optional[datetime]): The start of the time range.
             end_time (Optional[datetime]): The end of the time range.
-            job_id (Optional[Any]): The database ID of the job. If set, progress updates are
-                written to this job's document in the jobs collection; otherwise they are logged.
+            job_id (Optional[str]): The ID of the job. If set, progress updates are
+                recorded in the job repository; otherwise they are logged.
 
         Raises:
             ValueError: If the source_id is missing or not supported.
@@ -201,20 +155,11 @@ class PipelineOrchestrator:
 
         pipeline = self.pipeline_factory.get_pipeline(source_id)
 
-        # Define the progress callback that writes to MongoDB
+        # Records the progress of database jobs and logs that of manual jobs
         def progress_callback(progress: float, message: str) -> None:
             if job_id:
                 try:
-                    self.db[self.JOBS_COLLECTION].update_one(
-                        {"_id": job_id},
-                        {
-                            "$set": {
-                                "progress": progress,
-                                "message": message,
-                                "updated_at": datetime.now(timezone.utc),
-                            }
-                        },
-                    )
+                    self.job_repository.update_progress(job_id, progress, message)
                 except Exception as e:
                     logger.warning(f"Failed to update progress for job {job_id}: {e}")
             else:

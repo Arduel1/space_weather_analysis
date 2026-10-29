@@ -3,8 +3,9 @@ import pathlib
 from typing import Any, Dict, Generator, List
 
 from catalog_collector.discoverers.base import AbstractDiscoverer
+from space_weather_analysis.catalog.models import CatalogEntryDict
 from space_weather_analysis.clients.hapi import HapiClient
-from space_weather_analysis.util.types import CatalogEntryDict, DiscoveryYield
+from space_weather_analysis.util.types import DiscoveryYield
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class HapiDiscoverer(AbstractDiscoverer):
         self.server_list_path = server_list_path
         self.include_test_servers = include_test_servers
         # We initialize the client without a DB connection as we only use direct fetch methods
-        self.client = HapiClient(db=None)
+        self.client = HapiClient()
 
     def _read_server_list(self) -> List[str]:
         """Reads and filters the list of server URLs from the text file.

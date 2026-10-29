@@ -12,9 +12,9 @@ from sunpy.net.cdaweb import attrs as cdaweb_attrs
 from sunpy.net.cdaweb.helpers import get_datasets, get_observatory_groups
 from sunpy.net.fido_factory import UnifiedResponse
 
+from space_weather_analysis.catalog.models import CatalogEntryDict
 from space_weather_analysis.clients.base import BaseClient
 from space_weather_analysis.util.resilience import retry_interaction
-from space_weather_analysis.util.types import CatalogEntryDict
 
 logger = logging.getLogger(__name__)
 
