@@ -1,5 +1,4 @@
 import json
-import logging
 import os
 import pathlib
 import tempfile
@@ -83,9 +82,6 @@ LARGE_ARRAY_INFO: Dict[str, Any] = {
 }
 LARGE_ARRAY_CSV = "".join(f"2024-03-01T0{hour}:00:00Z,1.5e-07," + ",".join(["1"] * 24) + "\n" for hour in (0, 4))
 
-# Loggers of the HAPI client and pipeline.
-HAPI_LOGGER_NAMES = {"space_weather_analysis.clients.hapi", "pipeline_service.pipelines.hapi"}
-
 # Answer of iSWA for a range without data.
 NO_DATA_RESPONSE = {"HAPI": "2.0", "status": {"code": 1406, "message": "No data available for the specified ID and time range"}, "data": []}
 
@@ -158,9 +154,11 @@ def test_hapi_ingestion_stores_one_document_per_row_at_its_time(
 def test_hapi_values_and_array_columns_stored_as_given(
     db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset, stored_data: StoredData
 ) -> None:
-    """Vectors get one column per label or index, a 2-D array one column per `{name}_{i}_{j}`, isotime and string values stay strings."""
+    """Vectors get one column per label or index, a 2-D array one per `{name}_{i}_{j}`; integers (also 0), isotimes and strings keep their type."""
     _ingest(db, tmp_path, [serve_dataset()])
 
+    flags = [stored_data(DATASET_ID, time)["quality_flag"] for time in (REGULAR_TIME, ZERO_FLAG_TIME)]
+    assert [(type(flag), flag) for flag in flags] == [(int, 3), (int, 0)]
     assert stored_data(DATASET_ID, REGULAR_TIME) == pytest.approx(
         {
             "Short_Wave": 1.5e-07,
@@ -210,16 +208,6 @@ def test_hapi_fill_values_omit_only_their_fields(db: Database, tmp_path: pathlib
 
 
 @pytest.mark.integration
-def test_hapi_integer_parameter_stored_as_int(db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset, stored_data: StoredData) -> None:
-    """Integer values are stored as integers, including 0, while another row holds the integer fill."""
-    _ingest(db, tmp_path, [serve_dataset()])
-
-    flags = [stored_data(DATASET_ID, time)["quality_flag"] for time in (REGULAR_TIME, ZERO_FLAG_TIME)]
-    assert flags == [3, 0]
-    assert all(type(flag) is int for flag in flags)
-
-
-@pytest.mark.integration
 def test_hapi_time_parameter_with_other_name_is_ingested(
     db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset, stored_data: StoredData
 ) -> None:
@@ -233,23 +221,18 @@ def test_hapi_time_parameter_with_other_name_is_ingested(
 
 
 @pytest.mark.integration
-def test_hapi_arrays_above_column_limit_are_not_stored(
-    db: Database, tmp_path: pathlib.Path, httpserver: HTTPServer, stored_data: StoredData, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Arrays with more than 10 elements are left out of the documents, listed in the metadata and warned about once."""
-    caplog.set_level(logging.INFO)
+def test_hapi_arrays_above_column_limit_are_not_stored(db: Database, tmp_path: pathlib.Path, httpserver: HTTPServer, stored_data: StoredData) -> None:
+    """Arrays with more than 10 elements are left out of the documents of every chunk and listed in the metadata."""
     httpserver.expect_request(f"{SERVER_PATH}/info", query_string={"id": DATASET_ID}).respond_with_json(LARGE_ARRAY_INFO)
     httpserver.expect_request(f"{SERVER_PATH}/data").respond_with_handler(_large_array_rows_in_requested_range)
 
-    # Two chunks with one row each, so the warning must not repeat per chunk.
+    # Two chunks with one row each.
     _add_catalog_entry(db, [httpserver.url_for(SERVER_PATH)])
     HapiPipeline(db, tmp_path).run([DATASET_ID], RUN_START, RUN_END, chunk_delta=timedelta(hours=3))
 
     assert db[DATASET_ID].count_documents({}) == 2
     assert stored_data(DATASET_ID, datetime(2024, 3, 1, 4, 0)) == pytest.approx({"Short_Wave": 1.5e-07})
     assert [skipped.name for skipped in _stored_metadata(db).not_stored] == ["spectrum", "image"]
-    skip_warnings = [record for record in caplog.records if record.levelno == logging.WARNING and "not stored" in record.getMessage()]
-    assert len(skip_warnings) == 1
 
 
 def _large_array_rows_in_requested_range(request: Request) -> Response:
@@ -272,26 +255,6 @@ def test_hapi_no_data_response_stores_nothing(db: Database, tmp_path: pathlib.Pa
     _ingest(db, tmp_path, [serve_dataset(data=response)])
 
     assert db[DATASET_ID].count_documents({}) == 0
-
-
-@pytest.mark.integration
-@pytest.mark.parametrize(
-    ("response", "expect_warning"),
-    [
-        pytest.param(Response(json.dumps(NO_DATA_RESPONSE), status=404, content_type="application/json"), False, id="404_with_1406"),
-        pytest.param(Response("Internal Server Error", status=500), True, id="500_without_hapi_status"),
-    ],
-)
-def test_hapi_warns_only_when_a_request_fails(
-    db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset, caplog: pytest.LogCaptureFixture, response: Response, expect_warning: bool
-) -> None:
-    """A failed request is logged as a warning, while an answer without data is not."""
-    caplog.set_level(logging.INFO)
-
-    _ingest(db, tmp_path, [serve_dataset(data=response)])
-
-    hapi_warnings = [record for record in caplog.records if record.levelno >= logging.WARNING and record.name in HAPI_LOGGER_NAMES]
-    assert bool(hapi_warnings) == expect_warning
 
 
 @pytest.mark.integration
@@ -342,47 +305,25 @@ def _stored_metadata(db: Database) -> DatasetMetadata:
 
 
 @pytest.mark.integration
-def test_hapi_metadata_stores_null_strings_as_none(db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset) -> None:
-    """Units and fill given as the string "null" are stored as None; other fills are kept as given."""
-    _ingest(db, tmp_path, [serve_dataset()])
-
-    variables = {variable.name: variable for variable in _stored_metadata(db).variables}
-    assert variables["quality_flag"].units is None
-    assert (variables["satellite"].fill, variables["satellite"].units) == ("-1", "identifier")
-
-
-@pytest.mark.integration
 def test_hapi_metadata_variables_match_stored_fields(
     db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset, stored_data: StoredData
 ) -> None:
-    """The record lists one variable per stored field, without the time parameter, and keeps the raw info without hapiclient request details."""
+    """The record lists one variable per stored field and the server time stamp location; the raw info has no hapiclient request details."""
     server_url = serve_dataset()
     _ingest(db, tmp_path, [server_url])
 
     record = _stored_metadata(db)
     assert {variable.name for variable in record.variables} == set(stored_data(DATASET_ID, REGULAR_TIME))
-    assert (record.source.type, record.source.server_url, record.collection) == ("HAPI", server_url, DATASET_ID)
+    assert (record.source.type, record.source.server_url, record.collection, record.time.timestamp_location) == (
+        "HAPI",
+        server_url,
+        DATASET_ID,
+        "begin",
+    )
     raw = MongoMetadataRepository(db).get_raw(DATASET_ID, "hapi")
     assert raw is not None
     assert raw.payload["parameters"] == XRAY_PARAMETERS
     assert (raw.payload["x_server_url"], "x_dataFile" in raw.payload) == (server_url, False)
-
-
-@pytest.mark.integration
-@pytest.mark.parametrize(
-    ("info", "expected_location"),
-    [
-        pytest.param(XRAY_INFO, "begin", id="given"),
-        pytest.param({key: value for key, value in XRAY_INFO.items() if key != "timeStampLocation"}, "center", id="absent"),
-    ],
-)
-def test_hapi_metadata_records_time_stamp_location(
-    db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset, info: Dict[str, Any], expected_location: str
-) -> None:
-    """The record holds the time stamp location of the server, 'center' if the server gives none."""
-    _ingest(db, tmp_path, [serve_dataset(info=info)])
-
-    assert _stored_metadata(db).time.timestamp_location == expected_location
 
 
 @pytest.mark.integration

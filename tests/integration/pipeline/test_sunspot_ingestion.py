@@ -75,20 +75,10 @@ def test_sunspot_is_provisional_set_from_indicator(db: Database, sunspot_dir: pa
 
 @pytest.mark.integration
 def test_sunspot_number_absent_when_value_is_minus_one(db: Database, sunspot_dir: pathlib.Path, stored_data: StoredData) -> None:
-    """A sunspot number of -1 is omitted from the document."""
+    """A sunspot number of -1 omits the number, std_dev and num_observations, while decimal year and indicator flag are kept."""
     LocalPipeline(db, sunspot_dir).run([SUNSPOT_COLLECTION])
 
-    data = stored_data(SUNSPOT_COLLECTION, MISSING_DAY)
-    assert "sunspot_number" not in data
-
-
-@pytest.mark.integration
-def test_sunspot_std_dev_and_observations_absent_when_number_is_missing(db: Database, sunspot_dir: pathlib.Path, stored_data: StoredData) -> None:
-    """A day without a sunspot number also omits std_dev and num_observations."""
-    LocalPipeline(db, sunspot_dir).run([SUNSPOT_COLLECTION])
-
-    data = stored_data(SUNSPOT_COLLECTION, MISSING_DAY)
-    assert [field for field in ("std_dev", "num_observations") if field in data] == []
+    assert stored_data(SUNSPOT_COLLECTION, MISSING_DAY) == pytest.approx({"decimal_year": 2001.201, "is_provisional": False})
 
 
 @pytest.mark.integration
@@ -116,18 +106,6 @@ def test_sunspot_row_skipped_when_date_is_invalid(
     LocalPipeline(db, data_dir).run([SUNSPOT_COLLECTION])
 
     assert [timestamp for timestamp, _ in stored_timestamps_and_metadata(SUNSPOT_COLLECTION)] == STORED_DAYS
-
-
-@pytest.mark.integration
-def test_sunspot_ingestion_creates_timeseries_collection(db: Database, sunspot_dir: pathlib.Path) -> None:
-    """The collection is a time series with time field 'timestamp' and meta field 'metadata'."""
-    LocalPipeline(db, sunspot_dir).run([SUNSPOT_COLLECTION])
-
-    infos = list(db.list_collections(filter={"name": SUNSPOT_COLLECTION}))
-    assert len(infos) == 1
-    assert infos[0]["type"] == "timeseries"
-    assert infos[0]["options"]["timeseries"]["timeField"] == "timestamp"
-    assert infos[0]["options"]["timeseries"]["metaField"] == "metadata"
 
 
 @pytest.mark.integration

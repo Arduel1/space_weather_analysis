@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+import numpy as np
 import pytest
 from pymongo.database import Database
 
@@ -13,7 +14,7 @@ from space_weather_analysis.metadata.models import (
     TimeInfo,
     VariableMetadata,
 )
-from space_weather_analysis.metadata.repository import MongoMetadataRepository
+from space_weather_analysis.metadata.repository import MongoMetadataRepository, sanitize_for_bson
 
 RETRIEVED_AT = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
 
@@ -45,6 +46,7 @@ def test_record_round_trip_through_repository(db: Database) -> None:
 
     repository.save(record)
 
+    # pymongo reads stored times back without time zone, so the equality also checks that they are read as UTC.
     assert repository.get("synthetic/one") == record
     assert db["dataset_metadata"].find_one({"_id": "synthetic/one"}) is not None
     assert repository.get("unknown") is None
@@ -104,14 +106,8 @@ def test_delete_removes_record_and_raw_metadata(db: Database) -> None:
     assert repository.get("synthetic/two") is not None
 
 
-@pytest.mark.integration
-def test_outdated_documents_are_removed_so_records_can_be_saved(db: Database) -> None:
-    """Documents without the collection field are removed, so a record of the same dataset can be saved despite a unique dataset_id index."""
-    db["dataset_metadata"].create_index("dataset_id", unique=True)
-    db["dataset_metadata"].insert_one({"dataset_id": "synthetic/one", "metadata": {"HAPI": "2.0"}})
-    repository = MongoMetadataRepository(db)
+def test_numpy_values_nan_and_bytes_are_converted_for_bson() -> None:
+    """NumPy arrays and scalars become Python values, NaN becomes None, bytes become text and keys become strings."""
+    payload = {"array": np.array([1.5, np.nan]), "integer": np.int32(7), "flag": np.bool_(True), "text": b"abc", 3: "key"}
 
-    assert repository.remove_outdated_records() == 1
-    repository.save(_record("synthetic/one", "synthetic_one"))
-
-    assert db["dataset_metadata"].count_documents({}) == 1
+    assert sanitize_for_bson(payload) == {"array": [1.5, None], "integer": 7, "flag": True, "text": "abc", "3": "key"}

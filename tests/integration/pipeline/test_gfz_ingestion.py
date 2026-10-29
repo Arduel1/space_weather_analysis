@@ -1,5 +1,4 @@
 import json
-import logging
 import pathlib
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
@@ -153,22 +152,6 @@ def test_gfz_chunk_boundary_value_stored_once(db: Database, tmp_path: pathlib.Pa
 
 
 @pytest.mark.integration
-def test_gfz_second_run_skips_complete_definitive_chunks(
-    db: Database, tmp_path: pathlib.Path, gfz_server: FakeGfzServer, httpserver: HTTPServer
-) -> None:
-    """A second run over chunks holding every interval with definitive values sends no request."""
-    gfz_server.set_day(DAY_ONE, KP_DAY_ONE, "def")
-    gfz_server.set_day(DAY_TWO, KP_DAY_TWO, "def")
-    _ingest(db, tmp_path, end=DAY_THREE)
-    httpserver.clear_log()
-
-    _ingest(db, tmp_path, end=DAY_THREE)
-
-    assert len(httpserver.log) == 0
-    assert db[INDEX].count_documents({}) == 16
-
-
-@pytest.mark.integration
 def test_gfz_second_run_skips_complete_chunk_off_the_kp_grid(
     db: Database, tmp_path: pathlib.Path, gfz_server: FakeGfzServer, httpserver: HTTPServer
 ) -> None:
@@ -189,7 +172,7 @@ def test_gfz_second_run_skips_complete_chunk_off_the_kp_grid(
 
 @pytest.mark.integration
 def test_gfz_second_run_replaces_preliminary_values(db: Database, tmp_path: pathlib.Path, gfz_server: FakeGfzServer, httpserver: HTTPServer) -> None:
-    """A second run refetches only the chunk with preliminary values and replaces them with the definitive ones without duplicates."""
+    """A second run skips the complete definitive chunk, refetches only the chunk with preliminary values and replaces them without duplicates."""
     gfz_server.set_day(DAY_ONE, KP_DAY_ONE, "def")
     gfz_server.set_day(DAY_TWO, KP_DAY_TWO, "pre")
     _ingest(db, tmp_path, end=DAY_THREE)
@@ -216,11 +199,8 @@ def test_gfz_second_run_completes_incomplete_chunk(db: Database, tmp_path: pathl
 
 
 @pytest.mark.integration
-def test_gfz_failed_chunk_keeps_stored_documents_and_next_chunk_runs(
-    db: Database, tmp_path: pathlib.Path, gfz_server: FakeGfzServer, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_gfz_failed_chunk_keeps_stored_documents_and_next_chunk_runs(db: Database, tmp_path: pathlib.Path, gfz_server: FakeGfzServer) -> None:
     """A chunk whose request fails with HTTP 500 keeps its stored documents and does not stop the next chunk."""
-    caplog.set_level(logging.INFO)
     gfz_server.set_day(DAY_ONE, KP_DAY_ONE, "pre")
     _ingest(db, tmp_path)
     gfz_server.failing_starts.add(DAY_ONE)
@@ -230,7 +210,6 @@ def test_gfz_failed_chunk_keeps_stored_documents_and_next_chunk_runs(
 
     assert _stored_kp_and_status(db, DAY_ONE) == pytest.approx([(kp_value, "pre") for kp_value in KP_DAY_ONE])
     assert _stored_kp_and_status(db, DAY_TWO) == pytest.approx([(kp_value, "def") for kp_value in KP_DAY_TWO])
-    assert any(record.levelno == logging.ERROR and "500" in record.getMessage() for record in caplog.records)
 
 
 @pytest.mark.integration

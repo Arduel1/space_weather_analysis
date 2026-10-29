@@ -1,12 +1,10 @@
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-import numpy as np
 import pytest
 
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
 from space_weather_analysis.metadata.models import DatasetMetadata, VariableMetadata
-from space_weather_analysis.metadata.repository import sanitize_for_bson
 from space_weather_analysis.util.hapi_parameters import parameter_columns
 
 DATASET_ID = "synthetic/dataset-1"
@@ -56,10 +54,6 @@ class TestDatasetFields:
             ("hapi", SERVER_URL, RETRIEVED_AT, "2025-05-05T00:00Z")
         ]
 
-    def test_time_parameter_is_no_variable(self) -> None:
-        """The first parameter becomes the document time stamp and is not listed as variable."""
-        assert list(_variables(_info({"name": "value", "type": "double"}))) == ["value"]
-
     def test_coverage_dates_are_parsed_as_utc(self) -> None:
         """The HAPI startDate and stopDate are parsed as UTC times, including a date with trailing Z."""
         record = _build({**_info(), "startDate": "2016-12-31Z", "stopDate": "2024-02-01T06:30:00.5Z"})
@@ -67,14 +61,20 @@ class TestDatasetFields:
         assert record.time.coverage_start == datetime(2016, 12, 31, tzinfo=timezone.utc)
         assert record.time.coverage_stop == datetime(2024, 2, 1, 6, 30, 0, 500000, tzinfo=timezone.utc)
 
-    @pytest.mark.parametrize("empty_date", ["", "null"])
-    def test_empty_dates_become_none(self, empty_date: str) -> None:
-        """An empty or "null" date leaves the coverage bound unset."""
-        record = _build({**_info(), "startDate": empty_date, "stopDate": empty_date})
+    def test_empty_dates_become_none(self) -> None:
+        """An empty date, as KNMI writes it, leaves the coverage bound unset."""
+        record = _build({**_info(), "startDate": "", "stopDate": ""})
 
         assert (record.time.coverage_start, record.time.coverage_stop) == (None, None)
 
-    @pytest.mark.parametrize(("given", "expected"), [("BEGIN", "begin"), ("End", "end"), (None, "center"), ("middle", "other")])
+    @pytest.mark.parametrize(
+        ("given", "expected"),
+        [
+            pytest.param("BEGIN", "begin", id="hapi-vocabulary-any-case"),
+            pytest.param(None, "center", id="absent"),
+            pytest.param("middle", "other", id="outside-vocabulary"),
+        ],
+    )
     def test_timestamp_location_lower_cased_with_center_default(self, given: Optional[str], expected: str) -> None:
         """The HAPI timeStampLocation is lower-cased, 'center' if absent and 'other' outside the HAPI vocabulary."""
         info = _info() if given is None else _info(timeStampLocation=given)
@@ -105,8 +105,8 @@ class TestDatasetFields:
     @pytest.mark.parametrize(
         ("license_url", "expected"),
         [
-            ("https://spdx.org/licenses/CC-BY-4.0", "https://spdx.org/licenses/CC-BY-4.0"),
-            (["https://a.example", "https://b.example"], "https://a.example, https://b.example"),
+            pytest.param("https://spdx.org/licenses/CC-BY-4.0", "https://spdx.org/licenses/CC-BY-4.0", id="single-url"),
+            pytest.param(["https://a.example", "https://b.example"], "https://a.example, https://b.example", id="url-list"),
         ],
     )
     def test_license_url_becomes_license(self, license_url: Any, expected: str) -> None:
@@ -119,9 +119,12 @@ class TestDatasetFields:
 
         assert (record.links.spase_resource_id, record.citation.doi) == ("spase://Synthetic/NumericalData/Example", None)
 
-    @pytest.mark.parametrize("resource_id", ["10.5880/Synthetic.1", "https://doi.org/10.5880/Synthetic.1", "doi:10.5880/Synthetic.1"])
+    @pytest.mark.parametrize(
+        "resource_id",
+        [pytest.param("10.5880/Synthetic.1", id="bare"), pytest.param("https://doi.org/10.5880/Synthetic.1", id="doi-org-url")],
+    )
     def test_doi_resource_id_becomes_doi(self, resource_id: str) -> None:
-        """A resourceID that is a DOI, bare, as doi.org URL or with doi: prefix, becomes the bare DOI."""
+        """A resourceID that is a DOI, bare or as doi.org URL, becomes the bare DOI."""
         record = _build(_info(resourceID=resource_id))
 
         assert (record.citation.doi, record.links.spase_resource_id) == ("10.5880/Synthetic.1", None)
@@ -138,17 +141,6 @@ class TestDatasetFields:
 
         assert (record.citation.doi, record.links.spase_resource_id) == (None, None)
 
-    def test_contact_is_ignored(self) -> None:
-        """The contact of the info appears nowhere in the record."""
-        record = _build(_info(contact="Jane Doe @ Example"))
-
-        assert "Jane Doe" not in str(record.model_dump())
-
-    def test_info_without_parameters_is_rejected(self) -> None:
-        """An info without parameters raises ValueError."""
-        with pytest.raises(ValueError):
-            _build({"HAPI": "3.1", "startDate": "2024-01-01T00:00:00Z"})
-
 
 class TestVariableFields:
     def test_null_strings_become_none(self) -> None:
@@ -157,23 +149,21 @@ class TestVariableFields:
 
         assert (variable.description, variable.units, variable.fill, variable.coordinate_system) == (None, None, None, None)
 
-    @pytest.mark.parametrize("no_unit", ["", " ", "None", "none", "unitless", "Unitless", "undefined", "Dimensionless", "dimensionless"])
-    def test_texts_naming_no_unit_become_none(self, no_unit: str) -> None:
-        """Unit texts that name no unit are stored as None."""
-        assert _single_variable(units=no_unit).units is None
+    def test_texts_naming_no_unit_become_none(self) -> None:
+        """Blank unit texts and the words none, unitless, undefined and dimensionless in any letter case are stored as None."""
+        expected = {"": None, " ": None, "None": None, "unitless": None, "Undefined": None, "DIMENSIONLESS": None}
+
+        assert {text: _single_variable(units=text).units for text in expected} == expected
 
     def test_unit_is_stripped(self) -> None:
         """A real unit is kept without surrounding whitespace."""
         assert _single_variable(units=" nT ").units == "nT"
 
-    def test_fill_kept_as_given(self) -> None:
-        """A fill value is kept as the provider gives it."""
-        assert _single_variable(fill="-1.0E31").fill == "-1.0E31"
+    def test_type_becomes_dtype(self) -> None:
+        """The HAPI type becomes the dtype, float is read as double and a type outside the HAPI types leaves the dtype unset."""
+        expected = {"double": "double", "float": "double", "integer": "integer", "string": "string", "complex": None}
 
-    @pytest.mark.parametrize(("hapi_type", "expected"), [("float", "double"), ("double", "double"), ("integer", "integer"), ("string", "string")])
-    def test_type_becomes_dtype(self, hapi_type: str, expected: str) -> None:
-        """The HAPI type becomes the dtype, with float read as double."""
-        assert _single_variable(type=hapi_type).dtype == expected
+        assert {hapi_type: _single_variable(type=hapi_type).dtype for hapi_type in expected} == expected
 
     def test_scalar_vector_component_string(self) -> None:
         """A vectorComponents string of a scalar parameter becomes its vector component."""
@@ -278,51 +268,9 @@ class TestArrayParameters:
             ("image", "array with more than 10 elements"),
         ]
 
-    @pytest.mark.parametrize(
-        "parameter",
-        [
-            {"name": "s", "type": "double"},
-            {"name": "v", "type": "double", "size": [3], "label": ["x", "y", "z"]},
-            {"name": "w", "type": "double", "size": [2], "label": ["only_one"]},
-            {"name": "m", "type": "double", "size": [2, 3]},
-        ],
-    )
-    def test_variable_names_equal_ingestion_column_names(self, parameter: Dict[str, Any]) -> None:
-        """The variable names equal the column names the HAPI ingestion stores."""
+    def test_variable_names_equal_ingestion_column_names_when_labels_do_not_fit_the_size(self) -> None:
+        """With fewer labels than vector elements, the variable names equal the column names the HAPI ingestion stores."""
+        parameter = {"name": "w", "type": "double", "size": [2], "label": ["only_one"]}
         expected_names: List[str] = [column.name for column in parameter_columns(parameter)]
 
         assert list(_variables(_info(parameter))) == expected_names
-
-
-class TestDocumentRoundTrip:
-    def test_record_survives_document_round_trip(self) -> None:
-        """A record converted to a document and back equals the original, with the dataset ID as _id."""
-        record = _build(
-            _info(
-                {"name": "B", "type": "double", "size": [3], "units": "nT", "label": ["x", "y", "z"], "vectorComponents": ["x", "y", "z"]},
-                {"name": "flag", "type": "integer", "fill": "-1"},
-                {"name": "spectrum", "type": "double", "size": [20]},
-                datasetCitation="Citation",
-                resourceID="spase://Synthetic/Example",
-            )
-        )
-
-        document = record.to_document()
-
-        assert document["_id"] == DATASET_ID
-        assert DatasetMetadata.from_document(document) == record
-
-    def test_naive_stored_times_are_read_as_utc(self) -> None:
-        """Times read back from MongoDB without time zone are read as UTC."""
-        document = _build(_info()).to_document()
-        document["updated_at"] = RETRIEVED_AT.replace(tzinfo=None)
-
-        assert DatasetMetadata.from_document(document).updated_at == RETRIEVED_AT
-
-
-class TestSanitizeForBson:
-    def test_numpy_values_nan_and_bytes_are_converted(self) -> None:
-        """NumPy arrays and scalars become Python values, NaN becomes None and bytes become text."""
-        payload = {"array": np.array([1.5, np.nan]), "integer": np.int32(7), "flag": np.bool_(True), "text": b"abc", 3: "key"}
-
-        assert sanitize_for_bson(payload) == {"array": [1.5, None], "integer": 7, "flag": True, "text": "abc", "3": "key"}

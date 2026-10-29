@@ -48,3 +48,21 @@ def test_unknown_dataset_id_creates_nothing_without_raising(db: Database, full_d
     LocalPipeline(db, full_data_dir).run(["not_a_local_dataset"])
 
     assert set(db.list_collection_names()) == collections_before
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "collection",
+    [pytest.param(SUNSPOT_COLLECTION, id="sunspot_processor"), pytest.param(CME_COLLECTION, id="cme_processor")],
+)
+def test_local_dataset_creates_timeseries_collection(
+    db: Database, tmp_path: pathlib.Path, write_dataset_input: WriteDatasetInput, collection: str
+) -> None:
+    """Each local processor creates its collection as time series with time field 'timestamp' and meta field 'metadata'."""
+    write_dataset_input(tmp_path, collection)
+
+    LocalPipeline(db, tmp_path).run([collection])
+
+    collection_info = db.list_collections(filter={"name": collection}).next()
+    timeseries_options = collection_info["options"]["timeseries"]
+    assert (collection_info["type"], timeseries_options["timeField"], timeseries_options["metaField"]) == ("timeseries", "timestamp", "metadata")

@@ -21,7 +21,8 @@ PLACEHOLDER_EVENT_TIME = datetime(2003, 5, 12, 9, 3, 51)
 EVENT_TIMES = [REGULAR_EVENT_TIME, HALO_EVENT_TIME, PLACEHOLDER_EVENT_TIME]
 
 NUMERIC_FIELDS = ["width", "linear_speed", "speed_initial", "speed_final", "speed_at_20r", "accel", "mass", "kinetic_energy", "mpa"]
-CENTRAL_PA_FIELDS = ["central_pa"]
+# A halo event has no numeric central position angle, so central_pa is omitted for it.
+HALO_FIELDS = ["is_halo", "central_pa"]
 # Set by a trailing '*': acceleration from only three measurements, mass or kinetic energy with large uncertainties.
 MARKER_FIELDS = ["accel_unreliable", "mass_uncertain", "kinetic_energy_uncertain"]
 # Fields given as dashes (unknown value) in the placeholder event, covering every dash length.
@@ -86,22 +87,12 @@ def test_cme_numeric_columns_stored_as_numbers(db: Database, cme_dir: pathlib.Pa
 
 @pytest.mark.integration
 def test_cme_is_halo_set_from_central_position_angle(db: Database, cme_dir: pathlib.Path, stored_data: StoredData) -> None:
-    """is_halo is true for central position angle 'Halo' and false for a numeric angle, despite 'Partial Halo' remarks."""
+    """Angle 'Halo' gives is_halo true without central_pa; a numeric angle gives is_halo false and central_pa despite 'Partial Halo' remarks."""
     LocalPipeline(db, cme_dir).run([CME_COLLECTION])
 
-    stored = {time: stored_data(CME_COLLECTION, time)["is_halo"] for time in (HALO_EVENT_TIME, REGULAR_EVENT_TIME)}
-    assert stored == {HALO_EVENT_TIME: True, REGULAR_EVENT_TIME: False}
-    assert all(isinstance(value, bool) for value in stored.values())
-
-
-@pytest.mark.integration
-def test_cme_central_pa_numeric_for_non_halo_and_absent_for_halo(db: Database, cme_dir: pathlib.Path, stored_data: StoredData) -> None:
-    """central_pa is a number for a non-halo event and absent for a halo event."""
-    LocalPipeline(db, cme_dir).run([CME_COLLECTION])
-
-    stored = _fields_of_events(stored_data, [REGULAR_EVENT_TIME, HALO_EVENT_TIME], CENTRAL_PA_FIELDS)
-    assert stored == {REGULAR_EVENT_TIME: {"central_pa": 211}, HALO_EVENT_TIME: {}}
-    assert not isinstance(stored[REGULAR_EVENT_TIME]["central_pa"], str)
+    stored = _fields_of_events(stored_data, [REGULAR_EVENT_TIME, HALO_EVENT_TIME], HALO_FIELDS)
+    assert stored == {REGULAR_EVENT_TIME: {"is_halo": False, "central_pa": 211}, HALO_EVENT_TIME: {"is_halo": True}}
+    assert all(isinstance(fields["is_halo"], bool) for fields in stored.values())
 
 
 @pytest.mark.integration
@@ -129,20 +120,13 @@ def test_cme_marker_flags_set_only_for_marked_values(db: Database, cme_dir: path
 
 @pytest.mark.integration
 def test_cme_remarks_stored_exactly_as_given(db: Database, cme_dir: pathlib.Path, stored_data: StoredData) -> None:
-    """Remarks are stored verbatim, including semicolons and repeated spaces."""
+    """Remarks are stored verbatim, including semicolons and repeated spaces, and an event without remarks has no remarks field."""
     LocalPipeline(db, cme_dir).run([CME_COLLECTION])
 
-    data = stored_data(CME_COLLECTION, REGULAR_EVENT_TIME)
-    assert data["remarks"] == "Poor Event;  Only C3; Partial Halo"
-
-
-@pytest.mark.integration
-def test_cme_remarks_absent_when_event_has_none(db: Database, cme_dir: pathlib.Path, stored_data: StoredData) -> None:
-    """An event row without remarks is stored without a remarks field."""
-    LocalPipeline(db, cme_dir).run([CME_COLLECTION])
-
-    data = stored_data(CME_COLLECTION, HALO_EVENT_TIME)
-    assert "remarks" not in data
+    assert _fields_of_events(stored_data, [REGULAR_EVENT_TIME, HALO_EVENT_TIME], ["remarks"]) == {
+        REGULAR_EVENT_TIME: {"remarks": "Poor Event;  Only C3; Partial Halo"},
+        HALO_EVENT_TIME: {},
+    }
 
 
 @pytest.mark.integration
@@ -180,18 +164,6 @@ def test_cme_event_row_skipped_when_date_is_invalid(
     LocalPipeline(db, data_dir).run([CME_COLLECTION])
 
     assert [time for time, _ in stored_timestamps_and_metadata(CME_COLLECTION)] == EVENT_TIMES
-
-
-@pytest.mark.integration
-def test_cme_ingestion_creates_timeseries_collection(db: Database, cme_dir: pathlib.Path) -> None:
-    """The collection is a time series with time field 'timestamp' and meta field 'metadata'."""
-    LocalPipeline(db, cme_dir).run([CME_COLLECTION])
-
-    infos = list(db.list_collections(filter={"name": CME_COLLECTION}))
-    assert len(infos) == 1
-    assert infos[0]["type"] == "timeseries"
-    assert infos[0]["options"]["timeseries"]["timeField"] == "timestamp"
-    assert infos[0]["options"]["timeseries"]["metaField"] == "metadata"
 
 
 @pytest.mark.integration

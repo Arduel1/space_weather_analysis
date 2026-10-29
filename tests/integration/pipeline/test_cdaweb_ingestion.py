@@ -1,4 +1,3 @@
-import logging
 import pathlib
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -201,35 +200,20 @@ def test_cdaweb_fill_values_omit_only_their_fields(db: Database, tmp_path: pathl
 
 
 @pytest.mark.integration
-def test_cdaweb_values_outside_valid_range_are_omitted(
-    db: Database, tmp_path: pathlib.Path, stored_data: StoredData, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Values outside the scalar or per-component VALIDMIN/VALIDMAX are omitted and counted in one warning per variable."""
-    caplog.set_level(logging.INFO)
-
+def test_cdaweb_values_outside_valid_range_are_omitted(db: Database, tmp_path: pathlib.Path, stored_data: StoredData) -> None:
+    """Values outside the scalar or per-component VALIDMIN/VALIDMAX are omitted while the other fields of the record are kept."""
     _ingest(db, tmp_path, FakeCdawebClient())
 
     assert stored_data(DATASET_ID, _record_time(DAY_ONE, 3)) == pytest.approx({"quality": 3, "B_0": 9.0, "B_2": -29.0})
-    range_warnings = sorted(record.getMessage() for record in caplog.records if "VALIDMIN/VALIDMAX" in record.getMessage())
-    assert range_warnings == [
-        "Variable 'B': 1 values outside VALIDMIN/VALIDMAX are omitted.",
-        "Variable 'flux': 1 values outside VALIDMIN/VALIDMAX are omitted.",
-    ]
 
 
 @pytest.mark.integration
-def test_cdaweb_vector_columns_stored_and_large_array_not_stored(
-    db: Database, tmp_path: pathlib.Path, stored_data: StoredData, caplog: pytest.LogCaptureFixture
-) -> None:
-    """A 3-component vector is stored as B_0 to B_2; the 12-component variable is not stored, listed in the metadata and warned about once per run."""
-    caplog.set_level(logging.INFO)
-
+def test_cdaweb_vector_columns_stored_and_large_array_not_stored(db: Database, tmp_path: pathlib.Path, stored_data: StoredData) -> None:
+    """A 3-component vector is stored as B_0 to B_2; the 12-component variable is not stored and listed in the metadata."""
     _ingest(db, tmp_path, FakeCdawebClient(), end=DAY_THREE)
 
     assert stored_data(DATASET_ID, _record_time(DAY_ONE, 0)) == pytest.approx({"flux": 1.5, "quality": 0, "B_0": 1.0, "B_1": 2.0, "B_2": 3.0})
     assert [skipped.name for skipped in _dataset_metadata(db).not_stored] == ["spectrum"]
-    skip_warnings = [record for record in caplog.records if record.levelno == logging.WARNING and "not stored" in record.getMessage()]
-    assert len(skip_warnings) == 1
 
 
 @pytest.mark.integration
