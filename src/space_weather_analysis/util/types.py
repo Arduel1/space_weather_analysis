@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import (
+    TYPE_CHECKING,
     Any,
     Dict,
     List,
@@ -10,8 +11,10 @@ from typing import (
     TypedDict,
 )
 
-import xarray as xr
-from sunpy.timeseries import GenericTimeSeries
+if TYPE_CHECKING:
+    # Both packages take seconds to import; the alias that needs them is evaluated only by type checkers.
+    import xarray as xr
+    from sunpy.timeseries import GenericTimeSeries
 
 # --- TypedDict Definitions for Stricter Structure ---
 
@@ -87,7 +90,7 @@ Both datetimes should be timezone-aware (UTC).
 TransformedDocuments: TypeAlias = List[DocumentDict]
 """A list of formatted dictionaries ready for MongoDB insertion."""
 
-ParsedFileData: TypeAlias = Optional[GenericTimeSeries | List[Tuple[xr.Dataset, str, str]]]
+type ParsedFileData = Optional[GenericTimeSeries | List[Tuple[xr.Dataset, str, str]]]
 """
 Parsed file data structure.
 Returns:

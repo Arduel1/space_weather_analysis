@@ -82,6 +82,8 @@ select = [
 ignore = ["D100", "D104"]
 
 [tool.ruff.lint.per-file-ignores]
+# Imports of the catalog discovery step, which stays switched off because a full run takes hours.
+"src/catalog_collector/main.py" = ["F401"]
 # Test classes only group test functions; each test function carries its own docstring.
 "tests/**" = ["D101"]
 
@@ -94,6 +96,7 @@ indent-style = "space"
 
 [tool.mypy]
 python_version = "3.12"
+files = ["src", "tests"]
 # Lets mypy understand pydantic models, including settings fields filled from the environment.
 plugins = ["pydantic.mypy"]
 warn_return_any = false

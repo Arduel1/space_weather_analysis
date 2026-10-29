@@ -104,8 +104,9 @@ class TestMongoSettings:
         """Assigning to a field after creation raises a validation error."""
         settings = MongoSettings()
 
+        # The assignment violates the frozen model on purpose, which the type checker reports.
         with pytest.raises(ValidationError):
-            settings.host = "elsewhere"
+            settings.host = "elsewhere"  # type: ignore[misc]
 
 
 class TestFormatSettingsError:
