@@ -87,24 +87,24 @@ Details on each file: [docs/local-data.md](docs/local-data.md).
 
 The providers request the following acknowledgements and citations.
 
-- SILSO: Source: WDC-SILSO, Royal Observatory of Belgium, Brussels, https://doi.org/10.24414/qnza-ac80
-- SOHO/LASCO CME catalog: "This CME catalog is generated and maintained at the CDAW Data Center by NASA and The Catholic University of America in cooperation with the Naval Research Laboratory. SOHO is a project of international cooperation between ESA and NASA." References: Yashiro et al. (2004), https://doi.org/10.1029/2003JA010282; Gopalswamy et al. (2009), https://doi.org/10.1007/s11038-008-9282-7
-- GFZ Kp index: Matzka, J., Stolle, C., Yamazaki, Y., Bronkalla, O. and Morschhauser, A. (2021). The geomagnetic Kp index and derived indices of geomagnetic activity. Space Weather, https://doi.org/10.1029/2020SW002641. Data: Matzka, J., Bronkalla, O., Tornow, K., Elger, K. and Stolle, C. (2021). Geomagnetic Kp index. V. 1.0. GFZ Data Services, https://doi.org/10.5880/Kp.0001
-- NASA SPDF: NASA Space Physics Data Facility (SPDF), https://doi.org/10.17616/R3P301. Individual CDAWeb datasets name their instrument teams and specific requirements in their `Acknowledgement` and `Rules_of_use` metadata attributes.
-- NASA CCMC: We acknowledge the Community Coordinated Modeling Center (CCMC) at Goddard Space Flight Center for the use of iSWA, https://ccmc.gsfc.nasa.gov/tools/iSWA/
+- SILSO: Source: WDC-SILSO, Royal Observatory of Belgium, Brussels, <https://doi.org/10.24414/qnza-ac80>
+- SOHO/LASCO CME catalog: "This CME catalog is generated and maintained at the CDAW Data Center by NASA and The Catholic University of America in cooperation with the Naval Research Laboratory. SOHO is a project of international cooperation between ESA and NASA." References: Yashiro et al. (2004), <https://doi.org/10.1029/2003JA010282>; Gopalswamy et al. (2009), <https://doi.org/10.1007/s11038-008-9282-7>
+- GFZ Kp index: Matzka, J., Stolle, C., Yamazaki, Y., Bronkalla, O. and Morschhauser, A. (2021). The geomagnetic Kp index and derived indices of geomagnetic activity. Space Weather, <https://doi.org/10.1029/2020SW002641>. Data: Matzka, J., Bronkalla, O., Tornow, K., Elger, K. and Stolle, C. (2021). Geomagnetic Kp index. V. 1.0. GFZ Data Services, <https://doi.org/10.5880/Kp.0001>
+- NASA SPDF: NASA Space Physics Data Facility (SPDF), <https://doi.org/10.17616/R3P301>. Individual CDAWeb datasets name their instrument teams and specific requirements in their `Acknowledgement` and `Rules_of_use` metadata attributes.
+- NASA CCMC: We acknowledge the Community Coordinated Modeling Center (CCMC) at Goddard Space Flight Center for the use of iSWA, <https://ccmc.gsfc.nasa.gov/tools/iSWA/>
 - WDC for Geomagnetism, Edinburgh: We acknowledge the WDC for Geomagnetism (Edinburgh) and the institutes that supply its data.
-- INTERMAGNET: This project relies on data collected at magnetic observatories. We thank the national institutes that support them and INTERMAGNET for promoting high standards of magnetic observatory practice (www.intermagnet.org).
+- INTERMAGNET: This project relies on data collected at magnetic observatories. We thank the national institutes that support them and INTERMAGNET for promoting high standards of magnetic observatory practice (<www.intermagnet.org>).
 - AMDA: Data analysis was performed with the AMDA science analysis system provided by the Centre de Données de la Physique des Plasmas (CDPP) supported by CNRS, CNES, Observatoire de Paris and Université Paul Sabatier, Toulouse.
 - ESA: Data provided by the European Space Agency (ESA). For Cluster data, we acknowledge the instrument teams and the Cluster Science Archive.
 
 SuperMAG data and indices, including those retrieved through AMDA or KNMI, are acknowledged as required by the [SuperMAG rules of the road](https://supermag.jhuapl.edu/info/?page=rulesoftheroad):
 
-- All SuperMAG data: Gjerloev, J. W. (2012), The SuperMAG data processing technique, J. Geophys. Res., 117, A09213, https://doi.org/10.1029/2012JA017683
-- Indices: "We gratefully acknowledge the SuperMAG collaborators (https://supermag.jhuapl.edu/info/?page=acknowledgement)". References for the indices:
-  - SML, SMU, SME: Newell, P. T., and J. W. Gjerloev (2011), Evaluation of SuperMAG auroral electrojet indices as indicators of substorms and auroral power, J. Geophys. Res., 116, A12211, https://doi.org/10.1029/2011JA016779
+- All SuperMAG data: Gjerloev, J. W. (2012), The SuperMAG data processing technique, J. Geophys. Res., 117, A09213, <https://doi.org/10.1029/2012JA017683>
+- Indices: "We gratefully acknowledge the SuperMAG collaborators (<https://supermag.jhuapl.edu/info/?page=acknowledgement>)". References for the indices:
+  - SML, SMU, SME: Newell, P. T., and J. W. Gjerloev (2011), Evaluation of SuperMAG auroral electrojet indices as indicators of substorms and auroral power, J. Geophys. Res., 116, A12211, <https://doi.org/10.1029/2011JA016779>
   - SMLs, SMLd, SMUs, SMUd: Gjerloev, J. W., R. A. Hoffman, S. Ohtani, J. Weygand, and R. Barnes (2010), Response of the Auroral Electrojet Indices to Abrupt Southward IMF Turnings, Annales Geophysicae, 28, 1167-1182.
-  - SME-LT, SMU-LT, SML-LT: Newell, P. T., and J. W. Gjerloev (2014), Local geomagnetic indices and the prediction of auroral power, J. Geophys. Res. Space Physics, 119, https://doi.org/10.1002/2014JA020524
-  - SMR, SMR-LT: Newell, P. T. and J. W. Gjerloev (2012), SuperMAG-Based Partial Ring Current Indices, J. Geophys. Res., 117, https://doi.org/10.1029/2012JA017586
+  - SME-LT, SMU-LT, SML-LT: Newell, P. T., and J. W. Gjerloev (2014), Local geomagnetic indices and the prediction of auroral power, J. Geophys. Res. Space Physics, 119, <https://doi.org/10.1002/2014JA020524>
+  - SMR, SMR-LT: Newell, P. T. and J. W. Gjerloev (2012), SuperMAG-Based Partial Ring Current Indices, J. Geophys. Res., 117, <https://doi.org/10.1029/2012JA017586>
 - Ground magnetometer data: the acknowledgement and the station network references below.
 
 <details>
@@ -117,14 +117,14 @@ For the ground magnetometer data we gratefully acknowledge: INTERMAGNET; USGS Ge
 <details>
 <summary>SuperMAG station network references</summary>
 
-- EMMA: Lichtenberger J., M. Clilverd, B. Heilig, M. Vellante, J. Manninen, C. Rodger, A. Collier, A. Jørgensen, J. Reda, R. Holzworth, and R. Friedel (2013), The plasmasphere during a space weather event: first results from the PLASMON project, J. Space Weather Space Clim., 3, A23, https://www.swsc-journal.org/articles/swsc/pdf/2013/01/swsc120062.pdf
-- IMAGE: Tanskanen, E.I. (2009), A comprehensive high-throughput analysis of substorms observed by IMAGE magnetometer network: Years 1993-2003 examined, 114, A05204, https://doi.org/10.1029/2008JA013682
-- MACCS: Engebretson, M. J., W. J. Hughes, J. L. Alford, E. Zesta, L. J. Cahill, Jr., R. L. Arnoldy, and G. D. Reeves (1995), Magnetometer array for cusp and cleft studies observations of the spatial extent of broadband ULF magnetic pulsations at cusp/cleft latitudes, J. Geophys. Res., 100, 19371-19386, https://doi.org/10.1029/95JA00768
-- McMAC: Chi, P. J., M. J. Engebretson, M. B. Moldwin, C. T. Russell, I. R. Mann, M. R. Hairston, M. Reno, J. Goldstein, L. I. Winkler, J. L. Cruz-Abeyro, D.-H. Lee, K. Yumoto, R. Dalrymple, B. Chen, and J. P. Gibson (2013), Sounding of the plasmasphere by Mid-continent MAgnetoseismic Chain magnetometers, J. Geophys. Res. Space Physics, 118, https://doi.org/10.1002/jgra.50274
+- EMMA: Lichtenberger J., M. Clilverd, B. Heilig, M. Vellante, J. Manninen, C. Rodger, A. Collier, A. Jørgensen, J. Reda, R. Holzworth, and R. Friedel (2013), The plasmasphere during a space weather event: first results from the PLASMON project, J. Space Weather Space Clim., 3, A23, <https://www.swsc-journal.org/articles/swsc/pdf/2013/01/swsc120062.pdf>
+- IMAGE: Tanskanen, E.I. (2009), A comprehensive high-throughput analysis of substorms observed by IMAGE magnetometer network: Years 1993-2003 examined, 114, A05204, <https://doi.org/10.1029/2008JA013682>
+- MACCS: Engebretson, M. J., W. J. Hughes, J. L. Alford, E. Zesta, L. J. Cahill, Jr., R. L. Arnoldy, and G. D. Reeves (1995), Magnetometer array for cusp and cleft studies observations of the spatial extent of broadband ULF magnetic pulsations at cusp/cleft latitudes, J. Geophys. Res., 100, 19371-19386, <https://doi.org/10.1029/95JA00768>
+- McMAC: Chi, P. J., M. J. Engebretson, M. B. Moldwin, C. T. Russell, I. R. Mann, M. R. Hairston, M. Reno, J. Goldstein, L. I. Winkler, J. L. Cruz-Abeyro, D.-H. Lee, K. Yumoto, R. Dalrymple, B. Chen, and J. P. Gibson (2013), Sounding of the plasmasphere by Mid-continent MAgnetoseismic Chain magnetometers, J. Geophys. Res. Space Physics, 118, <https://doi.org/10.1002/jgra.50274>
 - MAGDAS / 210 Chain: Yumoto, K., and the CPMN Group (2001), Characteristics of Pi 2 magnetic pulsations observed at the CPMN stations: A review of the STEP results, Earth Planets Space, 53, 981-992.
-- CARISMA: Mann, I. R., et al. (2008), The upgraded CARISMA magnetometer array in the THEMIS era, Space Sci. Rev., 141, 413-451, https://doi.org/10.1007/s11214-008-9457-6
-- AALPIP: Clauer, C. R., et al. (2014), An autonomous adaptive low-power instrument platform (AAL-PIP) for remote high-latitude geospace data collection, Geosci. Instrum. Methods Data Syst., 3, 211-227, https://doi.org/10.5194/gi-3-211-2014
-- INTERMAGNET: Love, J. J., Chulliat, A. (2013), An international network of magnetic observatories, Eos, 94(42), 373-374, https://doi.org/10.1002/2013EO420001
+- CARISMA: Mann, I. R., et al. (2008), The upgraded CARISMA magnetometer array in the THEMIS era, Space Sci. Rev., 141, 413-451, <https://doi.org/10.1007/s11214-008-9457-6>
+- AALPIP: Clauer, C. R., et al. (2014), An autonomous adaptive low-power instrument platform (AAL-PIP) for remote high-latitude geospace data collection, Geosci. Instrum. Methods Data Syst., 3, 211-227, <https://doi.org/10.5194/gi-3-211-2014>
+- INTERMAGNET: Love, J. J., Chulliat, A. (2013), An international network of magnetic observatories, Eos, 94(42), 373-374, <https://doi.org/10.1002/2013EO420001>
 
 </details>
 
@@ -173,8 +173,8 @@ The full stack runs in Docker. uv is only required for local development, tests,
 
    | Service | Purpose | Exposed at |
    | --- | --- | --- |
-   | `frontend` | Streamlit dashboard | http://localhost:8501 |
-   | `mongo-express` | MongoDB web admin UI | http://localhost:8081 |
+   | `frontend` | Streamlit dashboard | <http://localhost:8501> |
+   | `mongo-express` | MongoDB web admin UI | <http://localhost:8081> |
    | `mongo` | MongoDB database | `localhost:27017` |
    | `pipeline-service` | ETL / data pipeline | (no public port) |
    | `catalog-collector` | Dataset catalog builder | (no public port) |
@@ -220,7 +220,7 @@ Tools started outside Docker, such as the notebooks, can load the variables from
 
 ```text
 .
-├── docker-compose.yml          # Five-service stack definition
+├── docker-compose.yml          # Six-service stack definition
 ├── Dockerfile                  # Shared image for all Python services
 ├── pyproject.toml              # Project metadata, dependencies, tool config
 ├── uv.lock                     # Locked dependency versions
@@ -230,7 +230,11 @@ Tools started outside Docker, such as the notebooks, can load the variables from
 ├── notebooks/                  # Jupyter notebooks for exploratory analysis
 ├── src/
 │   ├── space_weather_analysis/ # Shared core library (clients, config, DB, logging, utils)
-│   ├── catalog_collector/      # Dataset discovery and master catalog builder
+│   ├── catalog_collector/      # Collector (main.py) and metadata worker (metadata_worker.py)
+│   │   ├── data_catalog/       # Master catalog: snapshot load, availability, dataset discovery
+│   │   ├── metadata_catalog/   # Dataset metadata: snapshot load, HAPI metadata refresh
+│   │   ├── hapi_mirror/        # Server lookup shared by the HAPI metadata mirror refreshes
+│   │   └── scheduling/         # Task queue and worker for recurring metadata requests
 │   ├── pipeline_service/       # ETL: fetch, parse, normalize, store
 │   └── streamlit_app/          # Streamlit dashboard and plots
 └── tests/                      # Unit tests (tests/unit) and integration tests (tests/integration)

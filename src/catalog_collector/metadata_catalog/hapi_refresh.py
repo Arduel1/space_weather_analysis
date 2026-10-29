@@ -8,8 +8,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 import requests
 from pydantic import ValidationError
 
-from catalog_collector.availability import MIRROR_BASE_URL, describes_hapi_source, index_mirror_servers, mirror_server_id
-from catalog_collector.loader import first_hapi_servers
+from catalog_collector.hapi_mirror.servers import MIRROR_BASE_URL, describes_hapi_source, first_hapi_servers, index_mirror_servers, mirror_server_id
 from space_weather_analysis.catalog.repository import CatalogRepository
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
 from space_weather_analysis.metadata.models import DatasetMetadata, RawMetadataRecord

@@ -3,18 +3,15 @@ import pathlib
 import sys
 from typing import List
 
-from pydantic import ValidationError
-
-from catalog_collector.availability import AvailabilityRefresher
-from catalog_collector.builder import CatalogBuilder
-from catalog_collector.discoverers.base import AbstractDiscoverer
-from catalog_collector.discoverers.cdaweb import CdawebDiscoverer
-from catalog_collector.discoverers.gfz import GfzDiscoverer
-from catalog_collector.discoverers.hapi import HapiDiscoverer
-from catalog_collector.loader import CatalogLoader
-from space_weather_analysis.config.errors import format_settings_error
-from space_weather_analysis.config.mongo import MongoSettings
-from space_weather_analysis.database.connection import MongoConnection
+from catalog_collector.data_catalog.availability import AvailabilityRefresher
+from catalog_collector.data_catalog.discovery.builder import CatalogBuilder
+from catalog_collector.data_catalog.discovery.discoverers.base import AbstractDiscoverer
+from catalog_collector.data_catalog.discovery.discoverers.cdaweb import CdawebDiscoverer
+from catalog_collector.data_catalog.discovery.discoverers.gfz import GfzDiscoverer
+from catalog_collector.data_catalog.discovery.discoverers.hapi import HapiDiscoverer
+from catalog_collector.data_catalog.snapshot import CatalogSnapshotLoader
+from catalog_collector.metadata_catalog.snapshot import MetadataSnapshotLoader
+from space_weather_analysis.database.connection import connect_from_environment
 from space_weather_analysis.logging.config import setup_logging
 
 # Setup logging configuration for the service
@@ -39,19 +36,7 @@ def main() -> None:
     """
     logger.info("Starting Catalog Collector Service execution.")
 
-    # Build the MongoDB settings once from the environment
-    try:
-        mongo_settings = MongoSettings()
-    except ValidationError as e:
-        logger.critical(f"Invalid MongoDB settings, check the MONGO_* environment variables: {format_settings_error(e)}. Exiting.")
-        sys.exit(1)
-
-    # Establish the database connection for this run
-    connection = MongoConnection(mongo_settings)
-    db = connection.get_database()
-    if db is None:
-        logger.critical("Failed to obtain database connection. Exiting.")
-        sys.exit(1)
+    connection, db = connect_from_environment()
 
     try:
         # Initialize discovery strategies for different data providers
@@ -64,20 +49,23 @@ def main() -> None:
 
         # discoverers: List[AbstractDiscoverer] = [hapi_discoverer, fido_discoverer, gfz_discoverer]
 
-        # Initialize Loader first
-        loader = CatalogLoader(db=db, file_path=CATALOG_FILE, metadata_path=METADATA_FILE)
-        loader.load_to_db()
-        loader.load_metadata_to_db()
+        # The catalog is loaded first, as the metadata load reads the HAPI server of each dataset from it
+        catalog_loader = CatalogSnapshotLoader(db=db, file_path=CATALOG_FILE)
+        metadata_loader = MetadataSnapshotLoader(db=db, file_path=METADATA_FILE)
+        catalog_loader.load_to_db()
+        metadata_loader.load_metadata_to_db()
 
         # The snapshot holds the time ranges of its creation date, so the refresh runs after the load
         try:
-            AvailabilityRefresher(loader.catalog_repository, loader.metadata_repository).refresh()
+            AvailabilityRefresher(catalog_loader.catalog_repository, metadata_loader.metadata_repository).refresh()
         except Exception as e:
             logger.error(f"Availability refresh failed; the catalog keeps the snapshot time ranges: {e}", exc_info=True)
 
         # Aggregate findings from all discoverers into a master JSON file
         # logger.info(f"Targeting output file: {CATALOG_FILE}")
-        # builder = CatalogBuilder(discoverers=discoverers, catalog_output_path=CATALOG_FILE, loader=loader)
+        # builder = CatalogBuilder(
+        #     discoverers=discoverers, catalog_output_path=CATALOG_FILE, catalog_loader=catalog_loader, metadata_loader=metadata_loader
+        # )
         # builder.build_catalog()
 
     except Exception as e:

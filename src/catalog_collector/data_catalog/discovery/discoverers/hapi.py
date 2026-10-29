@@ -2,7 +2,7 @@ import logging
 import pathlib
 from typing import Any, Dict, Generator, List
 
-from catalog_collector.discoverers.base import AbstractDiscoverer, DiscoveryYield
+from catalog_collector.data_catalog.discovery.discoverers.base import AbstractDiscoverer, DiscoveryYield
 from space_weather_analysis.catalog.models import CatalogEntryDict
 from space_weather_analysis.clients.hapi import HapiClient
 

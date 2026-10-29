@@ -3,12 +3,8 @@ import sys
 from datetime import datetime, timezone
 from typing import Any, Dict
 
-from pydantic import ValidationError
-
 from pipeline_service.orchestrator import PipelineOrchestrator
-from space_weather_analysis.config.errors import format_settings_error
-from space_weather_analysis.config.mongo import MongoSettings
-from space_weather_analysis.database.connection import MongoConnection
+from space_weather_analysis.database.connection import connect_from_environment
 from space_weather_analysis.logging.config import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -31,19 +27,7 @@ def main() -> None:
     setup_logging(service_name="PipelineService")
     logger.info("Initializing Pipeline Service...")
 
-    # Build the MongoDB settings once from the environment
-    try:
-        mongo_settings = MongoSettings()
-    except ValidationError as e:
-        logger.critical(f"Invalid MongoDB settings, check the MONGO_* environment variables: {format_settings_error(e)}. Exiting.")
-        sys.exit(1)
-
-    # Establish connection to the database
-    connection = MongoConnection(mongo_settings)
-    db = connection.get_database()
-    if db is None:
-        logger.critical("Failed to connect to the database. Exiting.")
-        sys.exit(1)
+    connection, db = connect_from_environment()
 
     # Define the parameters for a manual download run.
     # This dictionary allows for immediate execution of specific datasets

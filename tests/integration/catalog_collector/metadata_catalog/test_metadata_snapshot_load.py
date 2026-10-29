@@ -5,7 +5,8 @@ from typing import Any, Dict, List
 import pytest
 from pymongo.database import Database
 
-from catalog_collector.loader import CatalogLoader
+from catalog_collector.data_catalog.snapshot import CatalogSnapshotLoader
+from catalog_collector.metadata_catalog.snapshot import MetadataSnapshotLoader
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
 
 HAPI_SERVER = "https://hapi.example.org/hapi"
@@ -40,9 +41,8 @@ def _load(db: Database, tmp_path: pathlib.Path, snapshot: Any) -> None:
     metadata_path = tmp_path / "dataset_metadata.json"
     catalog_path.write_text(json.dumps(CATALOG), encoding="utf-8")
     metadata_path.write_text(json.dumps(snapshot), encoding="utf-8")
-    loader = CatalogLoader(db=db, file_path=catalog_path, metadata_path=metadata_path)
-    loader.load_to_db()
-    loader.load_metadata_to_db()
+    CatalogSnapshotLoader(db=db, file_path=catalog_path).load_to_db()
+    MetadataSnapshotLoader(db=db, file_path=metadata_path).load_metadata_to_db()
 
 
 @pytest.mark.integration

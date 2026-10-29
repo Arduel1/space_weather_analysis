@@ -6,8 +6,11 @@ from typing import Callable, List
 import pytest
 from pymongo.database import Database
 
-from catalog_collector.metadata_tasks import MetadataTask, MongoMetadataTaskRepository, TaskSpec
-from catalog_collector.metadata_worker import MetadataWorker, TaskFailedError, TaskKind, WorkerSettings, hapi_mirror_kinds
+from catalog_collector.data_catalog.tasks import hapi_availability_kind
+from catalog_collector.metadata_catalog.tasks import hapi_metadata_kind
+from catalog_collector.scheduling.models import MetadataTask, PlannedRequest
+from catalog_collector.scheduling.repository import MongoMetadataTaskRepository
+from catalog_collector.scheduling.worker import MetadataWorker, TaskFailedError, TaskKind, WorkerSettings
 
 START = datetime(2026, 10, 30, 12, 0, tzinfo=timezone.utc)
 INTERVAL = timedelta(days=1)
@@ -26,9 +29,9 @@ class FakeClock:
         return self.now
 
 
-def _kind(specs: List[TaskSpec], run: Callable[[MetadataTask], None], name: str = "synthetic") -> TaskKind:
+def _kind(planned_requests: List[PlannedRequest], run: Callable[[MetadataTask], None], name: str = "synthetic") -> TaskKind:
     """Builds a task kind with a fixed plan and the given handler."""
-    return TaskKind(name, INTERVAL, lambda: specs, run)
+    return TaskKind(name, INTERVAL, lambda: planned_requests, run)
 
 
 def _worker(db: Database, kinds: List[TaskKind], clock: FakeClock) -> MetadataWorker:
@@ -47,12 +50,12 @@ def _stored(db: Database, key: str) -> MetadataTask:
 def test_sync_spreads_first_runs_keeps_state_and_deactivates_unplanned_tasks(db: Database) -> None:
     """New tasks start within one interval, a re-sync keeps their state, and unplanned tasks stay stored but inactive."""
     repository = MongoMetadataTaskRepository(db)
-    specs = [TaskSpec(f"dataset_{index}", "https://a.example.org/x") for index in range(20)]
-    repository.sync("synthetic", specs, INTERVAL, START)
+    planned_requests = [PlannedRequest(f"dataset_{index}", "https://a.example.org/x") for index in range(20)]
+    repository.sync("synthetic", planned_requests, INTERVAL, START)
     first_due_times = [_stored(db, f"synthetic/dataset_{index}").next_due_at for index in range(20)]
     repository.record_success("synthetic/dataset_0", START, START + INTERVAL)
 
-    repository.sync("synthetic", specs[:1], INTERVAL, START + timedelta(hours=1))
+    repository.sync("synthetic", planned_requests[:1], INTERVAL, START + timedelta(hours=1))
 
     assert all(START <= due_at < START + INTERVAL for due_at in first_due_times)
     assert len(set(first_due_times)) > 1
@@ -66,7 +69,7 @@ def test_due_task_runs_once_and_is_scheduled_one_jittered_interval_later(db: Dat
     """A task runs only when due, and its next run lies one interval plus or minus the jitter after the run."""
     clock = FakeClock()
     runs: List[str] = []
-    worker = _worker(db, [_kind([TaskSpec("all", "https://a.example.org/x")], lambda task: runs.append(task.id))], clock)
+    worker = _worker(db, [_kind([PlannedRequest("all", "https://a.example.org/x")], lambda task: runs.append(task.id))], clock)
     worker.run_once()
     due_at = _stored(db, "synthetic/all").next_due_at
     clock.now = due_at - timedelta(seconds=1)
@@ -92,7 +95,7 @@ def test_failures_back_off_doubling_and_a_success_resets_them(db: Database) -> N
         if outcome is not None:
             raise outcome
 
-    worker = _worker(db, [_kind([TaskSpec("all", "https://a.example.org/x")], run)], clock)
+    worker = _worker(db, [_kind([PlannedRequest("all", "https://a.example.org/x")], run)], clock)
     worker.run_once()
     retry_delays = []
     clock.now = START + INTERVAL
@@ -113,8 +116,12 @@ def test_requests_to_one_host_pause_while_other_hosts_run(db: Database) -> None:
     """After a request, its host waits a random pause within the settings, while a due task of another host runs at once."""
     clock = FakeClock()
     runs: List[str] = []
-    specs = [TaskSpec("a1", "https://a.example.org/1"), TaskSpec("a2", "https://A.example.org/2"), TaskSpec("b1", "https://b.example.org/1")]
-    worker = _worker(db, [_kind(specs, lambda task: runs.append(task.target))], clock)
+    planned_requests = [
+        PlannedRequest("a1", "https://a.example.org/1"),
+        PlannedRequest("a2", "https://A.example.org/2"),
+        PlannedRequest("b1", "https://b.example.org/1"),
+    ]
+    worker = _worker(db, [_kind(planned_requests, lambda task: runs.append(task.target))], clock)
     worker.run_once()
     clock.now = START + INTERVAL
 
@@ -141,7 +148,8 @@ def _closed_port_url() -> str:
 def test_hapi_mirror_tasks_record_failure_when_the_mirror_is_unreachable(db: Database) -> None:
     """Both HAPI mirror tasks are planned, and an unreachable mirror counts as failed run instead of success."""
     clock = FakeClock()
-    worker = _worker(db, hapi_mirror_kinds(db, SETTINGS, _closed_port_url()), clock)
+    mirror_base_url = _closed_port_url()
+    worker = _worker(db, [hapi_metadata_kind(db, SETTINGS, mirror_base_url), hapi_availability_kind(db, SETTINGS, mirror_base_url)], clock)
     worker.run_once()
     clock.now = START + timedelta(hours=SETTINGS.hapi_mirror_interval_hours)
 

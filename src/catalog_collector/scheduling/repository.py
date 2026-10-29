@@ -1,119 +1,19 @@
-import hashlib
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
-from pydantic import BaseModel, field_validator
 from pymongo import ASCENDING, UpdateOne
 from pymongo.database import Database
 
+from catalog_collector.scheduling.models import MetadataTask, PlannedRequest, first_due_time, task_key
 from space_weather_analysis.database.bulk import bulk_write_in_batches
-from space_weather_analysis.util.time_utils import ensure_aware
-
-
-@dataclass(frozen=True)
-class TaskSpec:
-    """One metadata request a task kind wants to be repeated.
-
-    Attributes:
-        target: What the request fetches within its kind, a dataset ID or a fixed name for single requests.
-        url: The location requested; its host decides the pause before the next request to the same host.
-    """
-
-    target: str
-    url: str
-
-
-class MetadataTask(BaseModel):
-    """The schedule and state of one recurring metadata request.
-
-    Attributes:
-        id: The task key `{kind}/{target}`, stored as `_id`.
-        kind: The kind of request, which selects the handler.
-        target: What the request fetches within its kind.
-        url: The location requested.
-        interval_seconds: The time between two successful runs.
-        active: False if the planner no longer lists the task; inactive tasks are kept but not run.
-        next_due_at: The earliest time of the next run.
-        last_attempt_at: When the task last ran.
-        last_success_at: When the task last succeeded.
-        consecutive_failures: The failed runs since the last success.
-        last_error: The error of the last failed run.
-    """
-
-    id: str
-    kind: str
-    target: str
-    url: str
-    interval_seconds: int
-    active: bool = True
-    next_due_at: datetime
-    last_attempt_at: Optional[datetime] = None
-    last_success_at: Optional[datetime] = None
-    consecutive_failures: int = 0
-    last_error: Optional[str] = None
-
-    @field_validator("next_due_at", "last_attempt_at", "last_success_at")
-    @classmethod
-    def _times_in_utc(cls, value: Optional[datetime]) -> Optional[datetime]:
-        """Reads naive times as UTC, as MongoDB returns stored times without time zone."""
-        return ensure_aware(value) if value is not None else None
-
-    @classmethod
-    def from_document(cls, document: Mapping[str, Any]) -> "MetadataTask":
-        """Builds a task from its MongoDB document.
-
-        Args:
-            document: The stored document with the task key in `_id`.
-
-        Returns:
-            The task.
-
-        Raises:
-            pydantic.ValidationError: If the document does not match the schema.
-        """
-        fields = {key: value for key, value in document.items() if key != "_id"}
-        return cls.model_validate({"id": document["_id"], **fields})
-
-
-def task_key(kind: str, target: str) -> str:
-    """Builds the key of a task.
-
-    Args:
-        kind: The kind of request.
-        target: What the request fetches within its kind.
-
-    Returns:
-        The key `{kind}/{target}`.
-    """
-    return f"{kind}/{target}"
-
-
-def first_due_time(key: str, interval: timedelta, now: datetime) -> datetime:
-    """Places the first run of a new task at a fixed point within its interval.
-
-    The offset comes from a hash of the key, so the tasks of one kind spread evenly over the
-    interval instead of all running at once, and a task keeps its offset across restarts.
-
-    Args:
-        key: The task key.
-        interval: The time between two runs.
-        now: The current time.
-
-    Returns:
-        The time of the first run, at most one interval after now.
-    """
-    interval_seconds = max(int(interval.total_seconds()), 1)
-    offset_seconds = int(hashlib.sha256(key.encode("utf-8")).hexdigest(), 16) % interval_seconds
-    return now + timedelta(seconds=offset_seconds)
 
 
 class MetadataTaskRepository(ABC):
     """Stores the schedule and state of the recurring metadata requests."""
 
     @abstractmethod
-    def sync(self, kind: str, specs: Sequence[TaskSpec], interval: timedelta, now: datetime) -> None:
+    def sync(self, kind: str, planned_requests: Sequence[PlannedRequest], interval: timedelta, now: datetime) -> None:
         """Makes the stored tasks of a kind match the planned requests.
 
         New requests get a task with its first run spread over the interval; existing tasks keep
@@ -121,7 +21,7 @@ class MetadataTaskRepository(ABC):
 
         Args:
             kind: The kind of request.
-            specs: The planned requests of the kind.
+            planned_requests: The requests the kind currently plans.
             interval: The time between two successful runs.
             now: The current time.
         """
@@ -193,12 +93,12 @@ class MongoMetadataTaskRepository(MetadataTaskRepository):
         self.collection.create_index([("active", ASCENDING), ("next_due_at", ASCENDING)])
         self._index_ensured = True
 
-    def sync(self, kind: str, specs: Sequence[TaskSpec], interval: timedelta, now: datetime) -> None:
+    def sync(self, kind: str, planned_requests: Sequence[PlannedRequest], interval: timedelta, now: datetime) -> None:
         """Makes the stored tasks of a kind match the planned requests in batches of BATCH_SIZE.
 
         Args:
             kind: The kind of request.
-            specs: The planned requests of the kind.
+            planned_requests: The requests the kind currently plans.
             interval: The time between two successful runs.
             now: The current time.
         """
@@ -206,14 +106,20 @@ class MongoMetadataTaskRepository(MetadataTaskRepository):
         interval_seconds = int(interval.total_seconds())
         operations = []
         planned_keys = []
-        for spec in specs:
-            key = task_key(kind, spec.target)
+        for planned_request in planned_requests:
+            key = task_key(kind, planned_request.target)
             planned_keys.append(key)
             operations.append(
                 UpdateOne(
                     {"_id": key},
                     {
-                        "$set": {"kind": kind, "target": spec.target, "url": spec.url, "interval_seconds": interval_seconds, "active": True},
+                        "$set": {
+                            "kind": kind,
+                            "target": planned_request.target,
+                            "url": planned_request.url,
+                            "interval_seconds": interval_seconds,
+                            "active": True,
+                        },
                         "$setOnInsert": {"next_due_at": first_due_time(key, interval, now), "consecutive_failures": 0},
                     },
                     upsert=True,

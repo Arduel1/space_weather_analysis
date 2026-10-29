@@ -7,8 +7,9 @@ import pytest
 from pymongo.database import Database
 from pytest_httpserver import HTTPServer
 
-from catalog_collector.loader import CatalogLoader
-from catalog_collector.metadata_refresh import MetadataRefresher, MetadataRefreshSummary
+from catalog_collector.data_catalog.snapshot import CatalogSnapshotLoader
+from catalog_collector.metadata_catalog.hapi_refresh import MetadataRefresher, MetadataRefreshSummary
+from catalog_collector.metadata_catalog.snapshot import MetadataSnapshotLoader
 from space_weather_analysis.catalog.models import CatalogEntryDict
 from space_weather_analysis.catalog.repository import MongoCatalogRepository
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
@@ -152,14 +153,15 @@ def test_collector_restart_with_stale_snapshot_keeps_refreshed_metadata(db: Data
     catalog_file.write_text(json.dumps({DATASET_ID: [CATALOG_SOURCE]}))
     metadata_file = tmp_path / "dataset_metadata.json"
     metadata_file.write_text(json.dumps([{"dataset_id": DATASET_ID, "metadata": {**STORED_INFO, "x_server_url": SERVER_URL}}]))
-    loader = CatalogLoader(db, catalog_file, metadata_file)
-    loader.load_to_db()
-    loader.load_metadata_to_db()
+    catalog_loader = CatalogSnapshotLoader(db, catalog_file)
+    metadata_loader = MetadataSnapshotLoader(db, metadata_file)
+    catalog_loader.load_to_db()
+    metadata_loader.load_metadata_to_db()
     _refresh(db, _serve_mirror(httpserver, {DATASET_ID: CHANGED_INFO}))
     refreshed = _stored_metadata(db)
 
-    loader.load_to_db()
-    loader.load_metadata_to_db()
+    catalog_loader.load_to_db()
+    metadata_loader.load_metadata_to_db()
 
     record, raw_record = _stored_metadata(db)
     assert record is not None and raw_record is not None

@@ -1,10 +1,13 @@
 import logging
-from typing import Optional
+import sys
+from typing import Optional, Tuple
 
+from pydantic import ValidationError
 from pymongo import MongoClient
 from pymongo.database import Database
 from pymongo.errors import ConnectionFailure
 
+from space_weather_analysis.config.errors import format_settings_error
 from space_weather_analysis.config.mongo import MongoSettings
 
 # Logger initialization for the database module
@@ -76,3 +79,28 @@ class MongoConnection:
             self._client.close()
             self._client = None
             self._db = None
+
+
+def connect_from_environment() -> Tuple[MongoConnection, Database]:
+    """Opens the database connection of a service entry point from the MONGO_* environment variables.
+
+    Meant for the start of a service process, which cannot work without its database.
+
+    Returns:
+        The connection, which the caller closes on shutdown, and its database.
+
+    Raises:
+        SystemExit: With status 1 if the settings are invalid or the database is unreachable; the reason is logged.
+    """
+    try:
+        mongo_settings = MongoSettings()
+    except ValidationError as e:
+        logger.critical(f"Invalid MongoDB settings, check the MONGO_* environment variables: {format_settings_error(e)}. Exiting.")
+        sys.exit(1)
+
+    connection = MongoConnection(mongo_settings)
+    db = connection.get_database()
+    if db is None:
+        logger.critical("Failed to obtain database connection. Exiting.")
+        sys.exit(1)
+    return connection, db

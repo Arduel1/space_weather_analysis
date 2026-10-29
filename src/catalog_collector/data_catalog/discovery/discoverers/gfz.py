@@ -1,7 +1,7 @@
 import logging
 from typing import Generator
 
-from catalog_collector.discoverers.base import AbstractDiscoverer, DiscoveryYield
+from catalog_collector.data_catalog.discovery.discoverers.base import AbstractDiscoverer, DiscoveryYield
 from space_weather_analysis.clients.gfz import GfzClient
 
 logger = logging.getLogger(__name__)

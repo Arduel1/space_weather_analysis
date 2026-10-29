@@ -8,8 +8,9 @@ import pytest
 from pymongo.database import Database
 from pytest_httpserver import HTTPServer
 
-from catalog_collector.availability import AvailabilityRefresher, AvailabilitySummary
-from catalog_collector.loader import CatalogLoader
+from catalog_collector.data_catalog.availability import AvailabilityRefresher, AvailabilitySummary
+from catalog_collector.data_catalog.snapshot import CatalogSnapshotLoader
+from catalog_collector.metadata_catalog.snapshot import MetadataSnapshotLoader
 from space_weather_analysis.catalog.models import CatalogEntryDict, MasterCatalogItem
 from space_weather_analysis.catalog.repository import MongoCatalogRepository
 from space_weather_analysis.metadata.models import DatasetMetadata, SourceInfo, TimeInfo
@@ -165,14 +166,15 @@ def test_collector_restart_with_stale_snapshot_keeps_refreshed_availability(db: 
     metadata_file = tmp_path / "dataset_metadata.json"
     snapshot_info = {"startDate": "2016-07-26T00:00:00Z", "stopDate": "2026-01-11T01:59:00Z", "parameters": [{"name": "Time", "type": "isotime"}]}
     metadata_file.write_text(json.dumps([{"dataset_id": DATASET_ID, "metadata": {**snapshot_info, "x_server_url": SERVER_URL}}]))
-    loader = CatalogLoader(db, catalog_file, metadata_file)
-    loader.load_to_db()
-    loader.load_metadata_to_db()
+    catalog_loader = CatalogSnapshotLoader(db, catalog_file)
+    metadata_loader = MetadataSnapshotLoader(db, metadata_file)
+    catalog_loader.load_to_db()
+    metadata_loader.load_metadata_to_db()
     mirror_base_url = _serve_mirror(httpserver, {DATASET_ID: "2026-10-28T00:00Z"})
     _refresh(db, mirror_base_url)
 
-    loader.load_to_db()
-    loader.load_metadata_to_db()
+    catalog_loader.load_to_db()
+    metadata_loader.load_metadata_to_db()
     after_restart = _stored_source(db)
     _refresh(db, mirror_base_url)
 

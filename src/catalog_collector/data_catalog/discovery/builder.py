@@ -3,8 +3,9 @@ import logging
 import pathlib
 from typing import Dict, List, Set, Tuple
 
-from catalog_collector.discoverers.base import AbstractDiscoverer
-from catalog_collector.loader import CatalogLoader
+from catalog_collector.data_catalog.discovery.discoverers.base import AbstractDiscoverer
+from catalog_collector.data_catalog.snapshot import CatalogSnapshotLoader
+from catalog_collector.metadata_catalog.snapshot import MetadataSnapshotLoader
 from space_weather_analysis.catalog.models import CatalogEntryDict
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,8 @@ class CatalogBuilder:
         self,
         discoverers: List[AbstractDiscoverer],
         catalog_output_path: pathlib.Path,
-        loader: CatalogLoader,
+        catalog_loader: CatalogSnapshotLoader,
+        metadata_loader: MetadataSnapshotLoader,
     ):
         """Initializes the CatalogBuilder.
 
@@ -30,11 +32,13 @@ class CatalogBuilder:
                 discoverer strategy objects.
             catalog_output_path (pathlib.Path): Path where the generated
                 master catalog JSON will be saved.
-            loader (CatalogLoader): The loader instance to update the DB.
+            catalog_loader (CatalogSnapshotLoader): The loader that writes the catalog entries to the DB.
+            metadata_loader (MetadataSnapshotLoader): The loader that writes the discovered metadata to the DB.
         """
         self.discoverers = discoverers
         self.catalog_output_path = catalog_output_path
-        self.loader = loader
+        self.catalog_loader = catalog_loader
+        self.metadata_loader = metadata_loader
         self.master_catalog: Dict[str, List[CatalogEntryDict]] = {}
         self.lowercase_id_map: Dict[str, str] = {}
 
@@ -123,7 +127,7 @@ class CatalogBuilder:
         self._load_initial_catalog()
 
         # Load existing catalog to DB first
-        self.loader.load_to_db()
+        self.catalog_loader.load_to_db()
 
         # Track found entries to identify stale ones later
         # Signature: (dataset_id, source_id, type)
@@ -145,11 +149,11 @@ class CatalogBuilder:
 
                     if self._update_catalog(key_to_use, entry):
                         self._save_catalog_to_file()
-                        self.loader.upsert_dataset(key_to_use, self.master_catalog[key_to_use])
+                        self.catalog_loader.upsert_dataset(key_to_use, self.master_catalog[key_to_use])
 
                     # Upsert metadata if available (checked separately from catalog entry)
                     if metadata:
-                        self.loader.upsert_metadata(key_to_use, metadata)
+                        self.metadata_loader.upsert_metadata(key_to_use, metadata)
 
             except Exception as e:
                 logger.error(
@@ -209,8 +213,8 @@ class CatalogBuilder:
             self._save_catalog_to_file()
 
             for d_id in modified_datasets:
-                self.loader.upsert_dataset(d_id, self.master_catalog[d_id])
+                self.catalog_loader.upsert_dataset(d_id, self.master_catalog[d_id])
 
             for d_id in deleted_datasets:
-                self.loader.delete_dataset(d_id)
-                self.loader.delete_metadata(d_id)
+                self.catalog_loader.delete_dataset(d_id)
+                self.metadata_loader.delete_metadata(d_id)
