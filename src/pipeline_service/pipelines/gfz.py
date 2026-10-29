@@ -8,14 +8,14 @@ import pandas as pd
 from pymongo.database import Database
 
 from pipeline_service.database.mongo_loader import MongoLoader
-from pipeline_service.metadata.generator import MetadataWriter
-from pipeline_service.metadata.models import VariableMetadata
 from pipeline_service.pipelines.base import BasePipeline, ProgressCallback
 from pipeline_service.util.documents import dataframe_to_documents
-from pipeline_service.util.naming import sanitize_collection_name
 from pipeline_service.util.time import generate_time_chunks
 from space_weather_analysis.clients.gfz import GfzClient
-from space_weather_analysis.util.time_utils import ensure_aware
+from space_weather_analysis.metadata.models import CitationInfo, DatasetMetadata, MetadataSource, SourceInfo, TimeInfo, VariableMetadata
+from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
+from space_weather_analysis.util.naming import sanitize_collection_name
+from space_weather_analysis.util.time_utils import ensure_aware, format_iso_duration
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,9 @@ class GfzPipeline(MongoLoader, BasePipeline):
 
     PRELIMINARY_STATUS = "pre"
 
+    # Values of the 'status' field and their meaning
+    STATUS_MEANINGS: Dict[str, str] = {"def": "definitive", PRELIMINARY_STATUS: "preliminary"}
+
     TIME_FIELD = "timestamp"
 
     def __init__(self, db: Database, base_data_path: pathlib.Path):
@@ -50,7 +53,7 @@ class GfzPipeline(MongoLoader, BasePipeline):
         super().__init__(db)
         self.base_data_path = base_data_path
         self.client = GfzClient()
-        self.metadata_writer = MetadataWriter(db)
+        self.metadata_repository: MetadataRepository = MongoMetadataRepository(db)
 
     def run(
         self,
@@ -104,7 +107,7 @@ class GfzPipeline(MongoLoader, BasePipeline):
                     latest_response = chunk_response
 
             if latest_response is not None:
-                self._save_metadata(dataset_id, latest_response)
+                self._save_metadata(dataset_id, collection_name, latest_response)
 
     def _process_chunk(self, dataset_id: str, collection_name: str, chunk_start: datetime, chunk_stop: datetime) -> Optional[pd.DataFrame]:
         """Fetches one chunk and replaces its stored documents, unless the stored chunk is complete and final.
@@ -166,27 +169,54 @@ class GfzPipeline(MongoLoader, BasePipeline):
         preliminary_count = collection.count_documents({**chunk_filter, "data.status": self.PRELIMINARY_STATUS})
         return preliminary_count == 0
 
-    def _save_metadata(self, dataset_id: str, response: pd.DataFrame) -> None:
-        """Saves the dataset metadata of an index, with license and source from the response meta.
+    def _save_metadata(self, dataset_id: str, collection_name: str, response: pd.DataFrame) -> None:
+        """Saves the metadata record of an index, with license and provider from the response meta.
+
+        Variable descriptions, status meanings, cadence and time stamp location are values of this
+        class; license and provider come from the meta object GFZ sends with every response.
+        A failing save is logged, as the stored data documents stay valid without metadata.
 
         Args:
             dataset_id: The GFZ index name.
+            collection_name: The collection holding the index.
             response: A fetched response of the index, carrying the response meta in attrs["meta"].
         """
         meta: Dict[str, Any] = response.attrs.get("meta", {})
+        retrieved_at = datetime.now(timezone.utc)
         description = self.INDEX_DESCRIPTIONS.get(dataset_id, f"GFZ geomagnetic index {dataset_id}")
+        cadence = self.INDEX_CADENCES.get(dataset_id)
 
-        variables = [VariableMetadata(name=dataset_id, description=description, units=None)]
+        variables = [VariableMetadata.from_single_source("curated", name=dataset_id, source_name=dataset_id, description=description, dtype="double")]
         if "status" in response.columns:
-            variables.append(VariableMetadata(name="status", description="Value status: 'def' definitive, 'pre' preliminary", units=None))
+            variables.append(
+                VariableMetadata.from_single_source(
+                    "curated",
+                    name="status",
+                    source_name="status",
+                    description="Status of the index value",
+                    dtype="string",
+                    flag_meanings=dict(self.STATUS_MEANINGS),
+                )
+            )
 
-        source_info = {
-            "Source": meta.get("source"),
-            "License": meta.get("license"),
+        record = DatasetMetadata(
+            dataset_id=dataset_id,
+            collection=collection_name,
+            source=SourceInfo(type="GFZ_POTSDAM", provider=meta.get("source"), server_url=self.client.BASE_URL),
             # GFZ timestamps mark the start of each interval
-            "Time Stamp Location": "begin",
-        }
-        self.metadata_writer.save_metadata_to_db(dataset_id=dataset_id, variables=variables, source_info=source_info)
+            time=TimeInfo(cadence=format_iso_duration(cadence) if cadence else None, timestamp_location="begin"),
+            citation=CitationInfo(license=meta.get("license")),
+            variables=variables,
+            provenance=[
+                MetadataSource(kind="api", url=self.client.BASE_URL, retrieved_at=retrieved_at),
+                MetadataSource(kind="curated", retrieved_at=retrieved_at),
+            ],
+            updated_at=retrieved_at,
+        )
+        try:
+            self.metadata_repository.save(record)
+        except Exception as e:
+            logger.error(f"Failed to save metadata of {dataset_id}: {e}", exc_info=True)
 
 
 def count_grid_times(start: datetime, stop: datetime, cadence: timedelta) -> int:

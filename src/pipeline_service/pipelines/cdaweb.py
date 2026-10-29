@@ -1,24 +1,42 @@
 import logging
 import pathlib
 import pickle
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
 import gridfs
+import pandas as pd
 import xarray as xr
 from pymongo.database import Database
 from sunpy.timeseries.timeseriesbase import GenericTimeSeries
 
 from pipeline_service.database.mongo_loader import MongoLoader
-from pipeline_service.metadata.generator import MetadataWriter
-from pipeline_service.metadata.models import VariableMetadata
-from pipeline_service.parsing.cdf import MAX_ARRAY_COLUMNS, cdf_scalar_attribute, cdf_text_attribute, clean_cdf_columns, time_stamp_location
+from pipeline_service.parsing.cdf import (
+    MAX_ARRAY_COLUMNS,
+    cdf_scalar_attribute,
+    cdf_text_attribute,
+    clean_cdf_columns,
+    map_columns_to_cdf_variables,
+    time_stamp_location,
+)
 from pipeline_service.parsing.file_parser import parse_datafiles
 from pipeline_service.pipelines.base import BasePipeline, ProgressCallback
 from pipeline_service.util.documents import build_gridfs_reference_document, dataframe_to_documents
-from pipeline_service.util.naming import sanitize_collection_name
 from pipeline_service.util.time import generate_time_chunks
 from space_weather_analysis.clients.cdaweb import CdawebClient
+from space_weather_analysis.metadata.models import (
+    DatasetMetadata,
+    DataType,
+    MetadataSource,
+    SkippedParameter,
+    SourceInfo,
+    TimeInfo,
+    TimestampLocation,
+    VariableMetadata,
+)
+from space_weather_analysis.metadata.normalize import normalize_units
+from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
+from space_weather_analysis.util.naming import sanitize_collection_name
 from space_weather_analysis.util.netcdf_utils import parse_xarray_timestamp
 from space_weather_analysis.util.time_utils import ensure_aware
 
@@ -42,6 +60,8 @@ class CdawebPipeline(MongoLoader, BasePipeline):
     SOURCE_ID = "FIDO_CDAWEB"
     # Time span of one download and of one check for already stored documents
     CHUNK_DURATION = timedelta(days=7)
+    # Time stamp locations from BIN_LOCATION that the metadata record names; any other becomes 'other'
+    ISTP_TIMESTAMP_LOCATIONS: Dict[str, TimestampLocation] = {"begin": "begin", "center": "center", "end": "end"}
 
     def __init__(self, db: Database, base_data_path: pathlib.Path, client: Optional[CdawebClient] = None):
         """Initializes the pipeline.
@@ -54,7 +74,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         super().__init__(db)
         self.client: CdawebClient = client if client is not None else CdawebClient()
         self.base_data_dir: pathlib.Path = base_data_path
-        self.metadata_writer: MetadataWriter = MetadataWriter(db)
+        self.metadata_repository: MetadataRepository = MongoMetadataRepository(db)
         self.fs: gridfs.GridFS = gridfs.GridFS(self.db)
 
         if not self.base_data_dir.exists():
@@ -191,6 +211,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
 
         opened_datasets: List[xr.Dataset] = []
         skipped_variables: List[str] = []
+        stored_column_types: Dict[str, Optional[DataType]] = {}
         try:
             # We construct the download path here to pass it to the client
             download_dir = self.base_data_dir / group_name / dataset_id
@@ -212,7 +233,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
 
             if data_object is not None:
                 if isinstance(data_object, GenericTimeSeries):
-                    skipped_variables = self._handle_1d_data(data_object, collection_name, source_id, file_metadata)
+                    stored_column_types, skipped_variables = self._handle_1d_data(data_object, collection_name, source_id, file_metadata)
                 elif isinstance(data_object, list):
                     self._load_nd_data_to_gridfs(data_object, collection_name, source_id, opened_datasets)
                 else:
@@ -221,7 +242,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
                 logger.info(f"No 1D or N-D data could be parsed for {dataset_id} in this chunk.")
 
             if file_metadata:
-                self._save_pipeline_metadata(dataset_id, group_name, file_metadata, skipped_variables)
+                self._save_pipeline_metadata(dataset_id, file_metadata, stored_column_types, skipped_variables)
 
         except Exception as e:
             logger.error(f"Pipeline step failed for dataset chunk {dataset_id}: {e}", exc_info=True)
@@ -241,7 +262,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         collection_name: str,
         source_id: str,
         file_metadata: Dict[str, Any],
-    ) -> List[str]:
+    ) -> Tuple[Dict[str, Optional[DataType]], List[str]]:
         """Cleans, transforms and loads 1D TimeSeries data into MongoDB.
 
         Args:
@@ -251,7 +272,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
             file_metadata: The attributes of each CDF variable, which define fill values and valid ranges.
 
         Returns:
-            The names of the variables left out because they have too many components for columns.
+            The value type of each stored column and the names of the variables left out because they have too many components for columns.
         """
         logger.info(f"1D data for {collection_name} parsed. Transforming for MongoDB load...")
         df_to_load, skipped_variables = clean_cdf_columns(data_object.to_dataframe(), file_metadata)
@@ -260,7 +281,8 @@ class CdawebPipeline(MongoLoader, BasePipeline):
 
         self._load_data(collection_name, documents)
         logger.info(f"Successfully loaded {len(documents)} documents into collection '{collection_name}'")
-        return skipped_variables
+        stored_column_types = {str(column_name): column_data_type(df_to_load[column_name]) for column_name in df_to_load.columns}
+        return stored_column_types, skipped_variables
 
     def _load_nd_data_to_gridfs(
         self,
@@ -372,53 +394,106 @@ class CdawebPipeline(MongoLoader, BasePipeline):
     def _save_pipeline_metadata(
         self,
         dataset_id: str,
-        group_name: str,
         file_metadata: Dict[str, Any],
+        stored_column_types: Dict[str, Optional[DataType]],
         skipped_variables: List[str],
     ) -> None:
-        """Normalizes and saves the pipeline metadata to the database.
+        """Saves the metadata record built from the ISTP attributes and the attributes themselves.
+
+        A failing save is logged, as the stored data documents stay valid without metadata.
 
         Args:
             dataset_id: The dataset ID.
-            group_name: The source group name.
-            file_metadata: The metadata parsed from the file.
+            file_metadata: The attributes of each file variable, keyed by its name.
+            stored_column_types: The value type of each stored column; empty if no column was stored.
             skipped_variables: The names of the variables not stored because they have too many components.
         """
-        variables = self._normalize_cdaweb_meta_to_variables(file_metadata)
-        source_info = {
-            "Source Client": self.SOURCE_ID,
-            "Source Group": group_name,
-            "Time Stamp Location": time_stamp_location(file_metadata),
-            "Parameters Not Stored": skipped_variables,
-        }
-        self.metadata_writer.save_metadata_to_db(
+        retrieved_at = datetime.now(timezone.utc)
+        location = time_stamp_location(file_metadata)
+        record = DatasetMetadata(
             dataset_id=dataset_id,
-            variables=variables,
-            source_info=source_info,
+            collection=sanitize_collection_name(dataset_id),
+            source=SourceInfo(type="FIDO_CDAWEB"),
+            time=TimeInfo(timestamp_location=self.ISTP_TIMESTAMP_LOCATIONS.get(location, "other")),
+            variables=self._istp_variables(file_metadata, stored_column_types),
+            not_stored=[SkippedParameter(name=name, reason=f"array with more than {MAX_ARRAY_COLUMNS} elements") for name in skipped_variables],
+            provenance=[MetadataSource(kind="istp", retrieved_at=retrieved_at)],
+            updated_at=retrieved_at,
         )
+        try:
+            self.metadata_repository.save_raw(dataset_id, "istp", file_metadata, None, retrieved_at)
+            self.metadata_repository.save(record)
+        except Exception as e:
+            logger.error(f"Failed to save metadata of {dataset_id}: {e}", exc_info=True)
 
-    def _normalize_cdaweb_meta_to_variables(self, file_meta: Dict[str, Any]) -> List[VariableMetadata]:
-        """Converts the ISTP attributes of each file variable into VariableMetadata objects.
+    @staticmethod
+    def _istp_variables(file_metadata: Dict[str, Any], stored_column_types: Dict[str, Optional[DataType]]) -> List[VariableMetadata]:
+        """Describes each stored column by the ISTP attributes of its CDF variable.
 
         Args:
-            file_meta: Metadata parsed from a data file, the attributes of each variable keyed by its name.
+            file_metadata: The attributes of each CDF variable, keyed by its name.
+            stored_column_types: The value type of each stored column.
 
         Returns:
-            One metadata object per variable, with description, units and fill value taken from the attributes.
+            One variable per stored column; a column without CDF variable carries only its name and type.
         """
+        column_sources = map_columns_to_cdf_variables(stored_column_types, file_metadata)
         variables: List[VariableMetadata] = []
-        for var_name, file_attrs in file_meta.items():
-            if not var_name or not isinstance(file_attrs, dict):
-                continue
-
+        for column_name, data_type in stored_column_types.items():
+            variable_name, component_index = column_sources.get(column_name, (column_name, None))
+            attributes = file_metadata.get(variable_name)
+            if not isinstance(attributes, dict):
+                attributes = {}
             variables.append(
-                VariableMetadata(
-                    name=var_name,
+                VariableMetadata.from_single_source(
+                    "istp",
+                    name=column_name,
+                    source_name=variable_name,
+                    component=component_index,
                     # FIELDNAM is the short name every ISTP variable carries, used when CATDESC is missing
-                    description=cdf_text_attribute(file_attrs, "CATDESC") or cdf_text_attribute(file_attrs, "FIELDNAM"),
-                    units=cdf_text_attribute(file_attrs, "UNITS"),
-                    fill=cdf_scalar_attribute(file_attrs.get("FILLVAL")),
-                    file_attributes=file_attrs,
+                    description=cdf_text_attribute(attributes, "CATDESC") or cdf_text_attribute(attributes, "FIELDNAM"),
+                    label=cdf_text_attribute(attributes, "LABLAXIS"),
+                    dtype=data_type,
+                    units=normalize_units(cdf_text_attribute(attributes, "UNITS")),
+                    fill=cdf_scalar_attribute(attributes.get("FILLVAL")),
+                    valid_min=_numeric_attribute(attributes.get("VALIDMIN")),
+                    valid_max=_numeric_attribute(attributes.get("VALIDMAX")),
+                    var_type=cdf_text_attribute(attributes, "VAR_TYPE"),
                 )
             )
         return variables
+
+
+def column_data_type(column: pd.Series) -> Optional[DataType]:
+    """Names the value type of a stored column.
+
+    Args:
+        column: The column as stored, after cleaning.
+
+    Returns:
+        'boolean', 'integer', 'double' or 'string', or None for any other pandas type.
+    """
+    if pd.api.types.is_bool_dtype(column):
+        return "boolean"
+    if pd.api.types.is_integer_dtype(column):
+        return "integer"
+    if pd.api.types.is_float_dtype(column):
+        return "double"
+    if pd.api.types.is_string_dtype(column) or pd.api.types.is_object_dtype(column):
+        return "string"
+    return None
+
+
+def _numeric_attribute(value: Any) -> Optional[float]:
+    """Reads a single-valued numeric CDF attribute such as VALIDMIN.
+
+    Args:
+        value: The attribute value as returned by cdflib.
+
+    Returns:
+        The value as float, or None if the attribute is missing, holds one value per component or is not numeric.
+    """
+    scalar = cdf_scalar_attribute(value)
+    if isinstance(scalar, (int, float)) and not isinstance(scalar, bool):
+        return float(scalar)
+    return None

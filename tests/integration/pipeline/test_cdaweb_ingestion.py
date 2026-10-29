@@ -11,6 +11,8 @@ from pymongo.database import Database
 
 from pipeline_service.pipelines.cdaweb import CdawebPipeline
 from space_weather_analysis.clients.cdaweb import CdawebClient
+from space_weather_analysis.metadata.models import DatasetMetadata
+from space_weather_analysis.metadata.repository import MongoMetadataRepository
 
 StoredData = Callable[[str, datetime], Dict[str, Any]]
 StoredTimestampsAndMetadata = Callable[[str], List[Tuple[datetime, Dict[str, Any]]]]
@@ -155,11 +157,11 @@ def _ingest(db: Database, tmp_path: pathlib.Path, client: FakeCdawebClient, star
     CdawebPipeline(db, tmp_path / "downloads", client=client).run([DATASET_ID], start, end)
 
 
-def _dataset_metadata(db: Database) -> Dict[str, Any]:
-    """Returns the stored metadata document of the dataset."""
-    metadata = db["dataset_metadata"].find_one({"_id": DATASET_ID})
-    assert metadata is not None
-    return metadata
+def _dataset_metadata(db: Database) -> DatasetMetadata:
+    """Reads the metadata record of the dataset through the repository."""
+    record = MongoMetadataRepository(db).get(DATASET_ID)
+    assert record is not None
+    return record
 
 
 @pytest.mark.integration
@@ -225,32 +227,50 @@ def test_cdaweb_vector_columns_stored_and_large_array_not_stored(
     _ingest(db, tmp_path, FakeCdawebClient(), end=DAY_THREE)
 
     assert stored_data(DATASET_ID, _record_time(DAY_ONE, 0)) == pytest.approx({"flux": 1.5, "quality": 0, "B_0": 1.0, "B_1": 2.0, "B_2": 3.0})
-    assert _dataset_metadata(db)["source_info"]["Parameters Not Stored"] == ["spectrum"]
+    assert [skipped.name for skipped in _dataset_metadata(db).not_stored] == ["spectrum"]
     skip_warnings = [record for record in caplog.records if record.levelno == logging.WARNING and "not stored" in record.getMessage()]
     assert len(skip_warnings) == 1
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize(("bin_location", "expected_location"), [(None, "center"), (0.0, "begin")])
+@pytest.mark.parametrize(("bin_location", "expected_location"), [(None, "center"), (0.0, "begin"), (0.25, "other")])
 def test_cdaweb_metadata_from_istp_attributes(db: Database, tmp_path: pathlib.Path, bin_location: Optional[float], expected_location: str) -> None:
-    """Description, units and fill come from CATDESC, UNITS (blank as None) and FILLVAL; the time stamp location from BIN_LOCATION."""
+    """Description, units, fill, valid range and VAR_TYPE come from the ISTP attributes; the time stamp location from BIN_LOCATION."""
     _ingest(db, tmp_path, FakeCdawebClient(bin_location=bin_location))
 
     metadata = _dataset_metadata(db)
-    variables = {variable["name"]: variable for variable in metadata["variables"]}
-    assert {key: variables["flux"][key] for key in ("description", "units", "fill")} == {
-        "description": "Synthetic flux",
-        "units": "nT",
-        "fill": FLOAT_FILL,
-    }
-    assert {key: variables["quality"][key] for key in ("description", "units", "fill")} == {
-        "description": "Synthetic quality flag",
-        "units": None,
-        "fill": INT_FILL,
-    }
-    assert type(variables["quality"]["fill"]) is int
-    assert variables["Epoch"]["description"] == "Epoch"
-    assert metadata["source_info"]["Time Stamp Location"] == expected_location
+    variables = {variable.name: variable for variable in metadata.variables}
+    flux = variables["flux"]
+    assert (flux.description, flux.units, flux.fill, flux.valid_min, flux.valid_max, flux.var_type, flux.dtype) == (
+        "Synthetic flux",
+        "nT",
+        FLOAT_FILL,
+        0.0,
+        100.0,
+        "data",
+        "double",
+    )
+    quality = variables["quality"]
+    assert (quality.description, quality.units, quality.fill, quality.dtype) == ("Synthetic quality flag", None, INT_FILL, "integer")
+    assert type(quality.fill) is int
+    assert set(flux.field_sources.values()) == {"istp"}
+    assert metadata.time.timestamp_location == expected_location
+
+
+@pytest.mark.integration
+def test_cdaweb_metadata_variables_match_stored_fields(db: Database, tmp_path: pathlib.Path, stored_data: StoredData) -> None:
+    """The record lists one variable per stored field, vector components with their index, and keeps the raw ISTP attributes."""
+    _ingest(db, tmp_path, FakeCdawebClient())
+
+    metadata = _dataset_metadata(db)
+    variables = {variable.name: variable for variable in metadata.variables}
+    assert set(variables) == set(stored_data(DATASET_ID, _record_time(DAY_ONE, 0)))
+    assert [(variables[name].source_name, variables[name].component) for name in ("B_0", "B_1", "B_2")] == [("B", 0), ("B", 1), ("B", 2)]
+    # VALIDMIN of B holds one value per component, so no single valid range applies
+    assert variables["B_1"].valid_min is None
+    raw = MongoMetadataRepository(db).get_raw(DATASET_ID, "istp")
+    assert raw is not None
+    assert raw.payload["B"]["VALIDMIN"] == B_VALID_MIN
 
 
 @pytest.mark.integration
@@ -275,4 +295,4 @@ def test_cdaweb_without_downloaded_files_stores_nothing(db: Database, tmp_path: 
 
     assert len(client.calls) == 1
     assert db[DATASET_ID].count_documents({}) == 0
-    assert db["dataset_metadata"].count_documents({}) == 0
+    assert MongoMetadataRepository(db).get(DATASET_ID) is None

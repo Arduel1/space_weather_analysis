@@ -1,21 +1,22 @@
 import logging
 import pathlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from pymongo.database import Database
 from sunpy.timeseries import GenericTimeSeries
 
 from pipeline_service.database.mongo_loader import MongoLoader
-from pipeline_service.metadata.generator import MetadataWriter
-from pipeline_service.metadata.models import VariableMetadata
-from pipeline_service.parsing.hapi import MAX_ARRAY_COLUMNS, convert_hapi_to_timeseries, null_string_to_none, parameters_too_large_for_columns
+from pipeline_service.parsing.hapi import convert_hapi_to_timeseries
 from pipeline_service.pipelines.base import BasePipeline, ProgressCallback
 from pipeline_service.util.documents import dataframe_to_documents
-from pipeline_service.util.naming import sanitize_collection_name
 from pipeline_service.util.time import generate_time_chunks
 from space_weather_analysis.clients.hapi import HapiClient
+from space_weather_analysis.metadata.hapi import build_hapi_metadata
+from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
 from space_weather_analysis.util.error_handling import log_and_handle_unexpected_failure
+from space_weather_analysis.util.hapi_parameters import MAX_ARRAY_COLUMNS, parameters_too_large_for_columns
+from space_weather_analysis.util.naming import sanitize_collection_name
 from space_weather_analysis.util.time_utils import ensure_aware, parse_iso_time
 from space_weather_analysis.util.types import CatalogEntryDict, TransformedDocuments
 
@@ -33,6 +34,26 @@ class HapiPipeline(MongoLoader, BasePipeline):
     # Identifying string for source tracking in metadata
     SOURCE_ID = "HAPI"
 
+    # Keys hapiclient adds to the /info response to describe its own request, cache files and timing
+    HAPICLIENT_REQUEST_KEYS = frozenset(
+        {
+            "x_server",
+            "x_dataset",
+            "x_parameters",
+            "x_time.min",
+            "x_time.max",
+            "x_requestDate",
+            "x_cacheDir",
+            "x_downloadTime",
+            "x_readTime",
+            "x_metaFileParsed",
+            "x_dataFileParsed",
+            "x_metaFile",
+            "x_dataFile",
+            "x_totalTime",
+        }
+    )
+
     def __init__(self, db: Database, base_data_path: pathlib.Path) -> None:
         """Initializes the pipeline with database connection and clients.
 
@@ -43,7 +64,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
         """
         super().__init__(db)
         self.client = HapiClient(db)
-        self.metadata_writer = MetadataWriter(db)
+        self.metadata_repository: MetadataRepository = MongoMetadataRepository(db)
 
     def run(
         self,
@@ -99,7 +120,9 @@ class HapiPipeline(MongoLoader, BasePipeline):
                 meta_field="metadata",
             )
 
-            skipped_parameters_reported = False
+            # Info of the last chunk with data and when it was read, the source of the dataset metadata
+            latest_info: Optional[Dict[str, Any]] = None
+            latest_retrieved_at: Optional[datetime] = None
 
             for j, (chunk_start, chunk_stop) in enumerate(time_chunks):
                 self._report_chunk_progress(
@@ -116,12 +139,17 @@ class HapiPipeline(MongoLoader, BasePipeline):
                     continue
 
                 logger.info("Processing chunk: No data found in DB.")
-                skipped_parameters = self._process_dataset_chunk(dataset_id, chunk_start, chunk_stop)
+                chunk_info = self._process_dataset_chunk(dataset_id, chunk_start, chunk_stop)
+                if chunk_info is not None:
+                    latest_info = chunk_info
+                    latest_retrieved_at = datetime.now(timezone.utc)
 
+            if latest_info is not None and latest_retrieved_at is not None:
                 # Reported once per dataset, as every chunk skips the same parameters
-                if skipped_parameters and not skipped_parameters_reported:
+                skipped_parameters = parameters_too_large_for_columns(latest_info)
+                if skipped_parameters:
                     logger.warning(f"Dataset {dataset_id}: arrays with more than {MAX_ARRAY_COLUMNS} elements are not stored: {skipped_parameters}")
-                    skipped_parameters_reported = True
+                self._save_metadata(dataset_id, collection_name, latest_info, latest_retrieved_at)
 
         logger.info(f"Generic {self.SOURCE_ID} Pipeline Finished")
 
@@ -188,7 +216,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
         dataset_id: str,
         chunk_start: datetime,
         chunk_stop: datetime,
-    ) -> List[str]:
+    ) -> Optional[Dict[str, Any]]:
         """Runs the full pipeline for a single dataset chunk.
 
         Includes data fetching, conversion, transformation, and loading.
@@ -201,7 +229,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
             chunk_stop: The end time for the data chunk.
 
         Returns:
-            The names of the array parameters left out because they are too large for columns.
+            The /info response the server sent with the data, or None if no documents were stored.
         """
         logger.info(f"Processing Dataset Chunk: {dataset_id}")
         try:
@@ -213,14 +241,13 @@ class HapiPipeline(MongoLoader, BasePipeline):
                     f"Skipping {dataset_id} for {chunk_start} to {chunk_stop}: "
                     "Could not retrieve data. All fallbacks failed or no time overlap found."
                 )
-                return []
+                return None
 
             ts = convert_hapi_to_timeseries(data, meta)
 
             if ts:
                 self._load_data_to_db(ts, dataset_id, meta)
-                self._save_metadata_to_db(meta, dataset_id)
-                return parameters_too_large_for_columns(meta)
+                return meta
 
             logger.warning(f"Failed to convert {dataset_id} to TimeSeries. Cannot load to DB.")
 
@@ -234,7 +261,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
         finally:
             logger.info(f"Finished Dataset Chunk: {dataset_id}")
 
-        return []
+        return None
 
     def _load_data_to_db(
         self,
@@ -257,52 +284,27 @@ class HapiPipeline(MongoLoader, BasePipeline):
         collection_name = sanitize_collection_name(dataset_id)
         self._load_data(collection_name, documents)
 
-    def _save_metadata_to_db(self, meta: Dict[str, Any], dataset_id: str) -> None:
-        """Internal helper to normalize and save metadata to MongoDB.
+    def _save_metadata(self, dataset_id: str, collection_name: str, info: Dict[str, Any], retrieved_at: datetime) -> None:
+        """Saves the metadata record built from the /info response and the response itself.
+
+        The raw response is saved without the keys hapiclient adds about its request.
+        A failing save is logged, as the stored data documents stay valid without metadata.
 
         Args:
-            meta: The raw metadata dict from the client.
             dataset_id: The ID of the dataset.
+            collection_name: The collection holding the data documents.
+            info: The /info response as returned by the client, with the server URL in 'x_server_url'.
+            retrieved_at: When the response was read.
         """
-        variables = self._normalize_hapi_meta_to_variables(meta)
-        source_info = {
-            "Source HAPI Server": meta.get("x_server_url", "N/A"),
-            "Data Start Date": meta.get("startDate", "N/A"),
-            "Data Stop Date": meta.get("stopDate", "N/A"),
-            "Description": meta.get("description", "N/A"),
-            "Citation": meta.get("datasetCitation", "N/A"),
-            # HAPI defines 'center' as the location of the time stamp within the measurement interval if none is given
-            "Time Stamp Location": meta.get("timeStampLocation", "center"),
-            "Parameters Not Stored": parameters_too_large_for_columns(meta),
-        }
-        self.metadata_writer.save_metadata_to_db(
-            dataset_id=dataset_id,
-            variables=variables,
-            source_info=source_info,
-        )
-
-    def _normalize_hapi_meta_to_variables(self, hapi_meta: Dict[str, Any]) -> List[VariableMetadata]:
-        """Converts the raw metadata dictionary into standardized VariableMetadata objects.
-
-        Args:
-            hapi_meta: The raw metadata dict from the client.
-
-        Returns:
-            A list of standardized metadata objects.
-        """
-        variables = []
-        for param in hapi_meta.get("parameters", []):
-            variables.append(
-                VariableMetadata(
-                    name=param.get("name"),
-                    description=param.get("description"),
-                    units=null_string_to_none(param.get("units")),
-                    fill=null_string_to_none(param.get("fill")),
-                    type=param.get("type"),
-                    size=param.get("size"),
-                )
-            )
-        return variables
+        server_url = info.get("x_server_url")
+        server_info = {key: value for key, value in info.items() if key not in self.HAPICLIENT_REQUEST_KEYS}
+        try:
+            record = build_hapi_metadata(dataset_id, collection_name, server_info, server_url, retrieved_at)
+            self.metadata_repository.save_raw(dataset_id, "hapi", server_info, server_url, retrieved_at)
+            self.metadata_repository.save(record)
+            logger.info(f"Saved metadata of {dataset_id}.")
+        except Exception as e:
+            logger.error(f"Failed to save metadata of {dataset_id}: {e}", exc_info=True)
 
     def _transform_timeseries_to_docs(self, ts: GenericTimeSeries, source_info: str) -> TransformedDocuments:
         """Converts a TimeSeries object into standardized MongoDB documents.

@@ -6,7 +6,12 @@ import pandas as pd
 from bson.objectid import ObjectId
 from pymongo.database import Database
 
+from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
+
 logger = logging.getLogger(__name__)
+
+# Collections holding catalog, metadata and jobs rather than time series
+EXCLUDED_COLLECTIONS = (MongoMetadataRepository.RECORD_COLLECTION, MongoMetadataRepository.RAW_COLLECTION, "master_catalog", "jobs")
 
 
 class DataLoader:
@@ -26,6 +31,7 @@ class DataLoader:
                                      database, all queries return empty results.
         """
         self.db: Optional[Database] = db
+        self.metadata_repository: Optional[MetadataRepository] = MongoMetadataRepository(db) if db is not None else None
         if self.db is None:
             logger.error("Could not establish database connection for Streamlit app.")
 
@@ -44,7 +50,7 @@ class DataLoader:
         try:
             collections = self.db.list_collection_names()
             # Exclude system and metadata collections to keep the UI clean
-            filtered = [c for c in collections if not c.startswith("system.") and c not in ["dataset_metadata", "master_catalog", "jobs"]]
+            filtered = [c for c in collections if not c.startswith("system.") and c not in EXCLUDED_COLLECTIONS]
             return sorted(filtered)
         except Exception as e:
             logger.error(f"Error fetching collections: {e}")
@@ -116,21 +122,43 @@ class DataLoader:
             return pd.DataFrame()
 
     def get_metadata(self, dataset_id: str) -> Dict[str, Any]:
-        """Fetches the metadata document for a given dataset.
+        """Fetches the metadata record of a dataset.
 
         Args:
-            dataset_id: The unique dataset identifier (collection name).
+            dataset_id: The dataset ID as named in the master catalog.
 
         Returns:
-            The metadata dictionary or an empty dict if not found.
+            The record as JSON-compatible dictionary, or an empty dict if not found.
         """
-        if self.db is None:
+        if self.metadata_repository is None:
             return {}
 
         try:
-            return self.db["dataset_metadata"].find_one({"dataset_id": dataset_id}) or {}
-        except Exception:
+            record = self.metadata_repository.get(dataset_id)
+        except Exception as e:
+            logger.error(f"Error fetching metadata of {dataset_id}: {e}")
             return {}
+        return record.model_dump(mode="json") if record else {}
+
+    def get_metadata_for_collection(self, collection_name: str) -> Dict[str, Any]:
+        """Fetches the metadata record of the dataset stored in a collection.
+
+        Args:
+            collection_name: The MongoDB collection holding the data documents.
+
+        Returns:
+            The record as JSON-compatible dictionary, the one with the first dataset ID if several
+            datasets share the collection, or an empty dict if none is found.
+        """
+        if self.metadata_repository is None:
+            return {}
+
+        try:
+            records = self.metadata_repository.find_by_collection(collection_name)
+        except Exception as e:
+            logger.error(f"Error fetching metadata of collection {collection_name}: {e}")
+            return {}
+        return records[0].model_dump(mode="json") if records else {}
 
     def get_master_catalog(self) -> List[Dict[str, Any]]:
         """Retrieves the entire master catalog to list available datasets.

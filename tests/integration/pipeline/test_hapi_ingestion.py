@@ -12,6 +12,8 @@ from pytest_httpserver import HTTPServer
 from werkzeug import Request, Response
 
 from pipeline_service.pipelines.hapi import HapiPipeline
+from space_weather_analysis.metadata.models import DatasetMetadata
+from space_weather_analysis.metadata.repository import MongoMetadataRepository
 
 StoredData = Callable[[str, datetime], Dict[str, Any]]
 StoredTimestampsAndMetadata = Callable[[str], List[Tuple[datetime, Dict[str, Any]]]]
@@ -245,9 +247,7 @@ def test_hapi_arrays_above_column_limit_are_not_stored(
 
     assert db[DATASET_ID].count_documents({}) == 2
     assert stored_data(DATASET_ID, datetime(2024, 3, 1, 4, 0)) == pytest.approx({"Short_Wave": 1.5e-07})
-    metadata = db["dataset_metadata"].find_one({"_id": DATASET_ID})
-    assert metadata is not None
-    assert metadata["source_info"]["Parameters Not Stored"] == ["spectrum", "image"]
+    assert [skipped.name for skipped in _stored_metadata(db).not_stored] == ["spectrum", "image"]
     skip_warnings = [record for record in caplog.records if record.levelno == logging.WARNING and "not stored" in record.getMessage()]
     assert len(skip_warnings) == 1
 
@@ -334,16 +334,38 @@ def test_hapi_chunk_costs_one_info_and_one_data_request_without_files(
     assert _files_below(cache_dir) == files_before
 
 
+def _stored_metadata(db: Database) -> DatasetMetadata:
+    """Reads the metadata record of the dataset through the repository."""
+    record = MongoMetadataRepository(db).get(DATASET_ID)
+    assert record is not None
+    return record
+
+
 @pytest.mark.integration
 def test_hapi_metadata_stores_null_strings_as_none(db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset) -> None:
     """Units and fill given as the string "null" are stored as None; other fills are kept as given."""
     _ingest(db, tmp_path, [serve_dataset()])
 
-    metadata = db["dataset_metadata"].find_one({"_id": DATASET_ID})
-    assert metadata is not None
-    variables = {variable["name"]: variable for variable in metadata["variables"]}
-    assert (variables["Time"]["fill"], variables["quality_flag"]["units"]) == (None, None)
-    assert (variables["satellite"]["fill"], variables["satellite"]["units"]) == ("-1", "identifier")
+    variables = {variable.name: variable for variable in _stored_metadata(db).variables}
+    assert variables["quality_flag"].units is None
+    assert (variables["satellite"].fill, variables["satellite"].units) == ("-1", "identifier")
+
+
+@pytest.mark.integration
+def test_hapi_metadata_variables_match_stored_fields(
+    db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset, stored_data: StoredData
+) -> None:
+    """The record lists one variable per stored field, without the time parameter, and keeps the raw info without hapiclient request details."""
+    server_url = serve_dataset()
+    _ingest(db, tmp_path, [server_url])
+
+    record = _stored_metadata(db)
+    assert {variable.name for variable in record.variables} == set(stored_data(DATASET_ID, REGULAR_TIME))
+    assert (record.source.type, record.source.server_url, record.collection) == ("HAPI", server_url, DATASET_ID)
+    raw = MongoMetadataRepository(db).get_raw(DATASET_ID, "hapi")
+    assert raw is not None
+    assert raw.payload["parameters"] == XRAY_PARAMETERS
+    assert (raw.payload["x_server_url"], "x_dataFile" in raw.payload) == (server_url, False)
 
 
 @pytest.mark.integration
@@ -357,12 +379,10 @@ def test_hapi_metadata_stores_null_strings_as_none(db: Database, tmp_path: pathl
 def test_hapi_metadata_records_time_stamp_location(
     db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset, info: Dict[str, Any], expected_location: str
 ) -> None:
-    """The source info holds the time stamp location of the server, 'center' if the server gives none."""
+    """The record holds the time stamp location of the server, 'center' if the server gives none."""
     _ingest(db, tmp_path, [serve_dataset(info=info)])
 
-    metadata = db["dataset_metadata"].find_one({"_id": DATASET_ID})
-    assert metadata is not None
-    assert metadata["source_info"]["Time Stamp Location"] == expected_location
+    assert _stored_metadata(db).time.timestamp_location == expected_location
 
 
 @pytest.mark.integration

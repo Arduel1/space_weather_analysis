@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, Hashable, Iterable, List, Mapping, Optional
+from typing import Any, Dict, Hashable, Iterable, Mapping, Optional
 
 import pandas as pd
 
@@ -125,20 +125,3 @@ def build_gridfs_reference_document(
         "metadata": metadata,
         "data_gridfs_id": gridfs_id,
     }
-
-
-def build_metadata_document(dataset_id: str, source_info: Dict[str, Any], variables: List[Dict[str, Any]]) -> DocumentDict:
-    """Builds a standardized metadata document for dataset description.
-
-    Metadata documents use the dataset_id as their MongoDB _id to enable
-    efficient lookups and ensure one metadata document per dataset.
-
-    Args:
-        dataset_id: Unique identifier for the dataset (becomes _id).
-        source_info: Dictionary describing the data source.
-        variables: List of variable metadata dictionaries.
-
-    Returns:
-        A formatted metadata document for MongoDB insertion.
-    """
-    return {"_id": dataset_id, "source_info": source_info, "variables": variables}

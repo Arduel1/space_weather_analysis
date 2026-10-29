@@ -11,6 +11,7 @@ from werkzeug import Request, Response
 
 from pipeline_service.pipelines.gfz import GfzPipeline
 from space_weather_analysis.clients.gfz import GfzClient
+from space_weather_analysis.metadata.repository import MongoMetadataRepository
 
 StoredData = Callable[[str, datetime], Dict[str, Any]]
 StoredTimestampsAndMetadata = Callable[[str], List[Tuple[datetime, Dict[str, Any]]]]
@@ -243,12 +244,17 @@ def test_gfz_unknown_index_sends_no_request(db: Database, tmp_path: pathlib.Path
 
 @pytest.mark.integration
 def test_gfz_metadata_records_time_stamp_location_and_license(db: Database, tmp_path: pathlib.Path, gfz_server: FakeGfzServer) -> None:
-    """The dataset metadata records 'begin' as time stamp location, source and license from the response meta, and the Kp and status variables."""
+    """The record holds 'begin' as time stamp location, the Kp cadence, provider and license of the response meta, and the Kp and status variables."""
     gfz_server.set_day(DAY_ONE, KP_DAY_ONE, "def")
 
     _ingest(db, tmp_path)
 
-    metadata = db["dataset_metadata"].find_one({"_id": INDEX})
-    assert metadata is not None
-    assert metadata["source_info"] == {"Source": "GFZ Potsdam", "License": "CC BY 4.0", "Time Stamp Location": "begin"}
-    assert [variable["name"] for variable in metadata["variables"]] == ["Kp", "status"]
+    record = MongoMetadataRepository(db).get(INDEX)
+    assert record is not None
+    assert (record.time.timestamp_location, record.time.cadence) == ("begin", "PT3H")
+    assert (record.source.type, record.source.provider, record.citation.license) == ("GFZ_POTSDAM", "GFZ Potsdam", "CC BY 4.0")
+    assert [variable.name for variable in record.variables] == ["Kp", "status"]
+    status = record.variables[1]
+    assert status.flag_meanings == {"def": "definitive", "pre": "preliminary"}
+    assert set(status.field_sources.values()) == {"curated"}
+    assert [source.kind for source in record.provenance] == ["api", "curated"]

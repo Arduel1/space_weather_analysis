@@ -169,7 +169,7 @@ if app_mode == "Dataset Explorer":
     with st.spinner("Loading data from MongoDB..."):
         df = loader.get_timeseries_data(selected_collection, start_time=start_dt, end_time=end_dt, limit=0)
 
-    meta = loader.get_metadata(selected_collection)
+    meta = loader.get_metadata_for_collection(selected_collection)
     if meta:
         with st.expander("ℹ Dataset Metadata"):
             st.json(meta)
@@ -274,7 +274,7 @@ elif app_mode == "Data Downloader":
                 st.subheader("Dataset Info")
                 full_meta = loader.get_metadata(selected_id)
                 if full_meta:
-                    st.json(full_meta.get("metadata", {}), expanded=False)
+                    st.json(full_meta, expanded=False)
                 st.write(f"**Source ID:** {primary_source.get('source_id', 'Unknown')}")
                 st.write(f"**Type:** {primary_source.get('type', 'Unknown')}")
 

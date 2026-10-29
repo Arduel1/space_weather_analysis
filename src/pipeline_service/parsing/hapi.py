@@ -1,5 +1,4 @@
 import logging
-import math
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -7,47 +6,12 @@ import pandas as pd
 from hapiclient.hapitime import hapitime2datetime
 from sunpy.timeseries import GenericTimeSeries
 
+from space_weather_analysis.util.hapi_parameters import null_string_to_none, parameter_columns, parameters_too_large_for_columns
+
 logger = logging.getLogger(__name__)
-
-# Arrays with more elements are maps, images or spectra rather than single values over time, so they are not stored as columns.
-MAX_ARRAY_COLUMNS = 10
-
-# Some HAPI servers write the string "null" where the specification expects a JSON null.
-HAPI_NULL_STRING = "null"
 
 NUMERIC_PARAMETER_TYPES = ("double", "integer")
 TEXT_PARAMETER_TYPES = ("string", "isotime")
-
-
-def null_string_to_none(value: Any) -> Any:
-    """Maps the string "null" to None and returns any other value unchanged.
-
-    Args:
-        value: A metadata value as reported by a HAPI server.
-
-    Returns:
-        None if the value is the string "null", otherwise the value itself.
-    """
-    if value == HAPI_NULL_STRING:
-        return None
-    return value
-
-
-def parameters_too_large_for_columns(meta: Dict[str, Any]) -> List[str]:
-    """Returns the names of the array parameters with more than MAX_ARRAY_COLUMNS elements.
-
-    Args:
-        meta: The metadata dictionary returned by `hapi()`.
-
-    Returns:
-        The names of the parameters that are left out of the converted data.
-    """
-    too_large_names = []
-    for param in meta.get("parameters", [])[1:]:
-        size = param.get("size")
-        if size and math.prod(size) > MAX_ARRAY_COLUMNS:
-            too_large_names.append(param.get("name"))
-    return too_large_names
 
 
 def convert_hapi_to_timeseries(data: np.ndarray, meta: Dict[str, Any]) -> Optional[GenericTimeSeries]:
@@ -133,7 +97,7 @@ def _expand_array_parameter(
 ) -> Optional[pd.DataFrame]:
     """Expands a multi-dimensional HAPI parameter (array/vector) into a DataFrame.
 
-    This helper handles the generation of column names for array parameters. A
+    The column names come from parameter_columns, shared with the dataset metadata. A
     vector gets one column per component, named by the labels provided in the
     metadata or by numerical indices if labels are missing. An array with more
     than one dimension gets one column per element, named by its indices in the
@@ -166,45 +130,10 @@ def _expand_array_parameter(
         )
         return None
 
-    col_names: List[str]
-    if len(element_shape) == 1:
-        col_names = _vector_column_names(param_name, param_meta.get("label"), element_shape[0])
-    else:
-        # np.ndindex yields the indices in C order, the same order as the reshape below
-        col_names = [_indexed_column_name(param_name, element_index) for element_index in np.ndindex(element_shape)]
+    col_names = [column.name for column in parameter_columns(param_meta)]
 
     flat_data = param_data.reshape(len(param_data), -1)
     return pd.DataFrame(flat_data, index=time_index, columns=col_names)
-
-
-def _vector_column_names(param_name: str, labels: Any, vector_length: int) -> List[str]:
-    """Builds the column names of a vector parameter.
-
-    Args:
-        param_name: The name of the parameter.
-        labels: The 'label' attribute of the parameter, which names each component if it is a list of matching length.
-        vector_length: The number of components.
-
-    Returns:
-        One name `{param_name}_{label}` per label, or `{param_name}_{index}` per component if no usable labels are given.
-    """
-    if isinstance(labels, list) and len(labels) == vector_length:
-        return [f"{param_name}_{label}" for label in labels]
-    return [_indexed_column_name(param_name, (index,)) for index in range(vector_length)]
-
-
-def _indexed_column_name(param_name: str, element_index: tuple) -> str:
-    """Builds the column name `{param_name}_{i}_{j}...` of one array element.
-
-    Args:
-        param_name: The name of the parameter.
-        element_index: The index of the element in each dimension.
-
-    Returns:
-        The parameter name followed by each index, joined by underscores.
-    """
-    index_suffix = "_".join(str(index) for index in element_index)
-    return f"{param_name}_{index_suffix}"
 
 
 def _replace_fill_values(frame: pd.DataFrame, param_meta: Dict[str, Any]) -> pd.DataFrame:
