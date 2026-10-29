@@ -1,14 +1,19 @@
+import logging
 import math
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
+from bson import encode
 from pymongo import ASCENDING, ReplaceOne
 from pymongo.database import Database
 
 from space_weather_analysis.database.bulk import bulk_write_in_batches
 from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSourceKind, RawMetadataRecord
+from space_weather_analysis.util.time_utils import ensure_aware
+
+logger = logging.getLogger(__name__)
 
 
 def sanitize_for_bson(value: Any) -> Any:
@@ -91,6 +96,17 @@ class MetadataRepository(ABC):
         """
 
     @abstractmethod
+    def get_many(self, dataset_ids: Sequence[str]) -> Dict[str, DatasetMetadata]:
+        """Reads the records of many datasets.
+
+        Args:
+            dataset_ids: The dataset IDs.
+
+        Returns:
+            The records keyed by dataset ID; datasets without record are left out.
+        """
+
+    @abstractmethod
     def find_by_collection(self, collection: str) -> List[DatasetMetadata]:
         """Reads the records of the datasets stored in a MongoDB collection.
 
@@ -115,7 +131,7 @@ class MetadataRepository(ABC):
 
     @abstractmethod
     def save_raw_many(self, raw_records: Sequence[RawMetadataRecord]) -> None:
-        """Inserts or replaces many raw provider metadata entries.
+        """Inserts or replaces many raw provider metadata entries; entries too large for the store are skipped and logged.
 
         Args:
             raw_records: The raw metadata, at most one per dataset and kind.
@@ -131,6 +147,29 @@ class MetadataRepository(ABC):
 
         Returns:
             The raw metadata, or None if none is stored.
+        """
+
+    @abstractmethod
+    def get_raw_many(self, dataset_ids: Sequence[str], kind: MetadataSourceKind) -> Dict[str, RawMetadataRecord]:
+        """Reads the raw provider metadata of many datasets for one source kind.
+
+        Args:
+            dataset_ids: The dataset IDs.
+            kind: The kind of source.
+
+        Returns:
+            The raw metadata keyed by dataset ID; datasets without raw metadata of this kind are left out.
+        """
+
+    @abstractmethod
+    def get_raw_retrieval_times(self, kind: MetadataSourceKind) -> Dict[str, datetime]:
+        """Reads when the stored raw metadata of one source kind was retrieved, without the payloads.
+
+        Args:
+            kind: The kind of source.
+
+        Returns:
+            The retrieval time in UTC, keyed by dataset ID.
         """
 
     @abstractmethod
@@ -160,6 +199,8 @@ class MongoMetadataRepository(MetadataRepository):
     RECORD_COLLECTION = "dataset_metadata"
     RAW_COLLECTION = "dataset_metadata_raw"
     BATCH_SIZE = 1000
+    # MongoDB rejects documents above 16 MiB, and one such document fails its whole batch.
+    MAX_DOCUMENT_BYTES = 16 * 1024 * 1024
 
     def __init__(self, db: Database) -> None:
         """Initializes the repository; the indexes are created before the first write.
@@ -209,6 +250,18 @@ class MongoMetadataRepository(MetadataRepository):
         document = self.records.find_one({"_id": dataset_id})
         return DatasetMetadata.from_document(document) if document else None
 
+    def get_many(self, dataset_ids: Sequence[str]) -> Dict[str, DatasetMetadata]:
+        """Reads the records of many datasets.
+
+        Args:
+            dataset_ids: The dataset IDs.
+
+        Returns:
+            The records keyed by dataset ID; datasets without record are left out.
+        """
+        documents = self.records.find({"_id": {"$in": list(dataset_ids)}})
+        return {document["_id"]: DatasetMetadata.from_document(document) for document in documents}
+
     def find_by_collection(self, collection: str) -> List[DatasetMetadata]:
         """Reads the records of the datasets stored in a MongoDB collection.
 
@@ -236,6 +289,8 @@ class MongoMetadataRepository(MetadataRepository):
     def save_raw_many(self, raw_records: Sequence[RawMetadataRecord]) -> None:
         """Inserts or replaces many raw provider metadata entries in batches of BATCH_SIZE.
 
+        Entries whose document exceeds MAX_DOCUMENT_BYTES are skipped with a warning; a stored older entry stays.
+
         Args:
             raw_records: The raw metadata, at most one per dataset and kind.
         """
@@ -245,6 +300,13 @@ class MongoMetadataRepository(MetadataRepository):
             key = {"dataset_id": raw_record.dataset_id, "kind": raw_record.kind}
             # The payload is sanitized directly, as model_dump would convert objects without BSON type into iterators
             document = {**key, "url": raw_record.url, "retrieved_at": raw_record.retrieved_at, "payload": sanitize_for_bson(raw_record.payload)}
+            document_bytes = len(encode(document))
+            if document_bytes > self.MAX_DOCUMENT_BYTES:
+                logger.warning(
+                    f"Raw {raw_record.kind} metadata of '{raw_record.dataset_id}' has {document_bytes} bytes, "
+                    f"more than MongoDB stores in one document; not saved."
+                )
+                continue
             operations.append(ReplaceOne(key, document, upsert=True))
         bulk_write_in_batches(self.raw_records, operations, self.BATCH_SIZE)
 
@@ -260,6 +322,31 @@ class MongoMetadataRepository(MetadataRepository):
         """
         document = self.raw_records.find_one({"dataset_id": dataset_id, "kind": kind}, {"_id": 0})
         return RawMetadataRecord.model_validate(document) if document else None
+
+    def get_raw_many(self, dataset_ids: Sequence[str], kind: MetadataSourceKind) -> Dict[str, RawMetadataRecord]:
+        """Reads the raw provider metadata of many datasets for one source kind.
+
+        Args:
+            dataset_ids: The dataset IDs.
+            kind: The kind of source.
+
+        Returns:
+            The raw metadata keyed by dataset ID; datasets without raw metadata of this kind are left out.
+        """
+        documents = self.raw_records.find({"dataset_id": {"$in": list(dataset_ids)}, "kind": kind}, {"_id": 0})
+        return {document["dataset_id"]: RawMetadataRecord.model_validate(document) for document in documents}
+
+    def get_raw_retrieval_times(self, kind: MetadataSourceKind) -> Dict[str, datetime]:
+        """Reads when the stored raw metadata of one source kind was retrieved, without the payloads.
+
+        Args:
+            kind: The kind of source.
+
+        Returns:
+            The retrieval time in UTC, keyed by dataset ID.
+        """
+        documents = self.raw_records.find({"kind": kind}, {"_id": 0, "dataset_id": 1, "retrieved_at": 1})
+        return {document["dataset_id"]: ensure_aware(document["retrieved_at"]) for document in documents}
 
     def delete(self, dataset_id: str) -> None:
         """Removes the record and all raw metadata of one dataset.

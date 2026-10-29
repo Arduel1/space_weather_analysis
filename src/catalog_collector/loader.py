@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 # Source fields the availability refresh maintains; a snapshot reload keeps them for refreshed sources.
 AVAILABILITY_FIELDS = ("time_range", "ongoing", "availability_checked_at", "missing_runs", "missing_since")
 
+HAPI_SOURCE_TYPE = "HAPI"
+
 
 class CatalogLoader:
     """Loads the master catalog file into MongoDB.
@@ -28,8 +30,6 @@ class CatalogLoader:
     collection, ensuring that the central database reflects the latest
     discovery results.
     """
-
-    HAPI_SOURCE_TYPE = "HAPI"
 
     def __init__(
         self,
@@ -133,7 +133,8 @@ class CatalogLoader:
         The file holds a list of {dataset_id, metadata} entries or a mapping from dataset ID to
         metadata, where the metadata is the /info response of a HAPI server. Each response is
         saved as raw metadata of kind "hapi"; datasets with a HAPI source in the master catalog
-        also get a normalized record. Malformed entries are logged and skipped.
+        also get a normalized record. Malformed entries are logged and skipped. Datasets whose
+        stored raw metadata was retrieved after the snapshot keep their newer metadata.
         """
         if not self.metadata_path or not self.metadata_path.exists():
             logger.warning(f"Metadata file not found or not set: {self.metadata_path}")
@@ -150,11 +151,16 @@ class CatalogLoader:
 
             # The snapshot does not record when each response was fetched, so the file time stands in
             retrieved_at = datetime.fromtimestamp(self.metadata_path.stat().st_mtime, tz=timezone.utc)
-            hapi_servers = self._hapi_servers_by_dataset()
+            hapi_servers = first_hapi_servers(self.catalog_repository)
+            retrieval_times = self.metadata_repository.get_raw_retrieval_times("hapi")
 
             raw_records: List[RawMetadataRecord] = []
             records: List[DatasetMetadata] = []
+            kept_count = 0
             for dataset_id, info in _snapshot_entries(data):
+                if dataset_id in retrieval_times and retrieval_times[dataset_id] > retrieved_at:
+                    kept_count += 1
+                    continue
                 raw_record, record = self._metadata_from_info(dataset_id, info, hapi_servers.get(dataset_id), retrieved_at)
                 if raw_record is not None:
                     raw_records.append(raw_record)
@@ -166,26 +172,15 @@ class CatalogLoader:
             if removed_count:
                 logger.info(f"Removed {removed_count} metadata documents of an outdated shape.")
             self.metadata_repository.save_many(records)
-            logger.info(f"Saved {len(raw_records)} raw metadata entries and {len(records)} normalized records.")
+            logger.info(
+                f"Saved {len(raw_records)} raw metadata entries and {len(records)} normalized records; "
+                f"{kept_count} datasets keep metadata newer than the snapshot."
+            )
 
         except Exception as e:
             logger.error(f"Failed to load metadata file: {e}", exc_info=True)
 
         logger.info("--- Metadata Load Finished ---")
-
-    def _hapi_servers_by_dataset(self) -> Dict[str, str]:
-        """Reads the first HAPI server of each dataset from the master catalog.
-
-        Returns:
-            The base URL of the first HAPI source, keyed by dataset ID; datasets without HAPI source are left out.
-        """
-        hapi_servers: Dict[str, str] = {}
-        for dataset_id, sources in self.catalog_repository.get_source_map(self.HAPI_SOURCE_TYPE).items():
-            for source in sources:
-                if source.get("source_id"):
-                    hapi_servers[dataset_id] = source["source_id"]
-                    break
-        return hapi_servers
 
     def _metadata_from_info(
         self, dataset_id: str, info: Any, catalog_server_url: Optional[str], retrieved_at: datetime
@@ -272,6 +267,24 @@ class CatalogLoader:
             logger.info(f"Metadata Deleted: {dataset_id}")
         except Exception as e:
             logger.error(f"Failed to delete metadata for {dataset_id}: {e}")
+
+
+def first_hapi_servers(catalog_repository: CatalogRepository) -> Dict[str, str]:
+    """Reads the first HAPI server of each dataset from the master catalog, the server its metadata record describes.
+
+    Args:
+        catalog_repository: The master catalog.
+
+    Returns:
+        The base URL of the first HAPI source, keyed by dataset ID; datasets without HAPI source are left out.
+    """
+    hapi_servers: Dict[str, str] = {}
+    for dataset_id, sources in catalog_repository.get_source_map(HAPI_SOURCE_TYPE).items():
+        for source in sources:
+            if source.get("source_id"):
+                hapi_servers[dataset_id] = source["source_id"]
+                break
+    return hapi_servers
 
 
 def _snapshot_entries(data: Any) -> Iterable[Tuple[str, Any]]:

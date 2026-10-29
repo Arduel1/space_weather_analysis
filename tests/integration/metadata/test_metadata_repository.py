@@ -93,6 +93,22 @@ def test_raw_metadata_round_trip_and_overwrite_per_dataset_and_kind(db: Database
 
 
 @pytest.mark.integration
+def test_raw_metadata_too_large_for_one_document_is_skipped_and_the_batch_saved(db: Database) -> None:
+    """Raw metadata above MongoDB's document size limit is left out, while the other entries of the batch are stored."""
+    repository = MongoMetadataRepository(db)
+    oversized_payload = {"bins": "x" * MongoMetadataRepository.MAX_DOCUMENT_BYTES}
+
+    repository.save_raw_many(
+        [
+            RawMetadataRecord(dataset_id="synthetic/huge", kind="hapi", payload=oversized_payload, retrieved_at=RETRIEVED_AT),
+            RawMetadataRecord(dataset_id="synthetic/one", kind="hapi", payload={"version": 1}, retrieved_at=RETRIEVED_AT),
+        ]
+    )
+
+    assert (repository.get_raw("synthetic/huge", "hapi"), db["dataset_metadata_raw"].count_documents({})) == (None, 1)
+
+
+@pytest.mark.integration
 def test_delete_removes_record_and_raw_metadata(db: Database) -> None:
     """Deleting a dataset removes the record and every raw entry of the dataset, and leaves other datasets untouched."""
     repository = MongoMetadataRepository(db)
