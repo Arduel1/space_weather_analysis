@@ -1,18 +1,18 @@
 import logging
-from typing import Sequence
+from typing import Sequence, Union
 
-from pymongo import ReplaceOne
+from pymongo import ReplaceOne, UpdateOne
 from pymongo.collection import Collection
 
 logger = logging.getLogger(__name__)
 
 
-def bulk_write_in_batches(collection: Collection, operations: Sequence[ReplaceOne], batch_size: int) -> None:
-    """Executes replace operations in batches, unordered within each batch.
+def bulk_write_in_batches(collection: Collection, operations: Sequence[Union[ReplaceOne, UpdateOne]], batch_size: int) -> None:
+    """Executes replace or update operations in batches, unordered within each batch.
 
     Args:
         collection: The target collection.
-        operations: The replace operations to execute.
+        operations: The replace or update operations to execute.
         batch_size: The maximum number of operations sent in one bulk write.
 
     Raises:

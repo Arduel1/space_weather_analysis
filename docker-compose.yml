@@ -13,6 +13,21 @@ services:
     networks:
       - space-weather-net
 
+  # Long-running background process for all recurring metadata requests, paced per provider host
+  metadata-worker:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      catalog-collector:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+    command: ["python", "-m", "catalog_collector.metadata_worker"]
+    networks:
+      - space-weather-net
+
   pipeline-service:
     build: .
     restart: on-failure

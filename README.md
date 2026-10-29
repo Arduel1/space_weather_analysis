@@ -37,6 +37,7 @@ The data model follows the physical chain of space weather: phenomena originate 
 The system is a modular monolith: a shared core library (`space_weather_analysis`) plus three separately-runnable components. All components share one codebase and one Docker image and communicate through MongoDB rather than over the network.
 
 - Catalog Collector: discovers available datasets from the providers and builds the master catalog and the dataset metadata. It runs as its own entrypoint because a full discovery pass is long-running.
+- Metadata Worker: a long-running background process that repeats all metadata requests (HAPI metadata mirror, dataset availability) on a schedule, one request at a time with a random pause per provider host, keeping the last good state when a provider is unreachable.
 - Pipeline Service: fetches, parses, and normalizes data for a dataset and stores it in MongoDB, adding dataset metadata from the source where available. It also processes on-demand fetch jobs requested by the frontend.
 - Frontend: the Streamlit dashboard, which reads the catalog, the dataset metadata, and the time-series data from MongoDB and renders them.
 - MongoDB: the shared data store, holding the dataset catalog, descriptive metadata for each dataset, the per-dataset time-series data, and the fetch-job queue. `mongo-express` provides a web admin UI.
