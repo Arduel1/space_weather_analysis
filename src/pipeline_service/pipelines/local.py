@@ -8,6 +8,7 @@ from pymongo.database import Database
 from pipeline_service.pipelines.base import BasePipeline, ProgressCallback
 from pipeline_service.pipelines.processors.cme import CmeETL
 from pipeline_service.pipelines.processors.sunspots import SilsoETL
+from space_weather_analysis.coverage.repository import CoverageRepository, MongoCoverageRepository
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +25,11 @@ class LocalPipeline(BasePipeline):
 
         Args:
             db: MongoDB database instance.
-            base_data_path: Root directory for data .
+            base_data_path: Root directory for data.
         """
         self.db = db
         self.base_data_path = base_data_path
+        self.coverage_repository: CoverageRepository = MongoCoverageRepository(db)
 
     def run(
         self,
@@ -58,10 +60,12 @@ class LocalPipeline(BasePipeline):
                 if dataset_id == "silso_sunspot_daily":
                     file_path = self.base_data_path / "SN_d_tot_V2.0.csv"
                     SilsoETL(self.db, file_path).run()
+                    self._refresh_coverage(self.coverage_repository, dataset_id, SilsoETL.COLLECTION_NAME)
 
                 elif dataset_id == "cme_catalog":
                     file_path = self.base_data_path / "cme_catalog.txt"
                     CmeETL(self.db, file_path).run()
+                    self._refresh_coverage(self.coverage_repository, dataset_id, CmeETL.COLLECTION_NAME)
 
                 else:
                     logger.warning(f"Unknown local dataset requested: {dataset_id}")

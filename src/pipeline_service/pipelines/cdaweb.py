@@ -26,6 +26,7 @@ from pipeline_service.util.documents import build_gridfs_reference_document, dat
 from pipeline_service.util.time import generate_time_chunks
 from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
 from space_weather_analysis.clients.cdaweb import CdawebClient
+from space_weather_analysis.coverage.repository import CoverageRepository, MongoCoverageRepository
 from space_weather_analysis.metadata.models import (
     DatasetMetadata,
     DataType,
@@ -76,6 +77,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         self.base_data_dir: pathlib.Path = base_data_path
         self.metadata_repository: MetadataRepository = MongoMetadataRepository(db)
         self.catalog_repository: CatalogRepository = MongoCatalogRepository(db)
+        self.coverage_repository: CoverageRepository = MongoCoverageRepository(db)
         self.fs: gridfs.GridFS = gridfs.GridFS(self.db)
 
         if not self.base_data_dir.exists():
@@ -133,6 +135,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
 
             logger.info(f"Processing dataset {dataset_id} (group {group_name}) for {total_chunks} chunks...")
             skipped_variables_reported = False
+            processed_any_chunk = False
 
             for j, (chunk_start, chunk_stop) in enumerate(time_chunks):
                 self._report_chunk_progress(
@@ -149,11 +152,16 @@ class CdawebPipeline(MongoLoader, BasePipeline):
 
                 logger.info("Processing chunk: No data found in DB.")
                 skipped_variables = self._process_dataset(dataset_id, group_name, chunk_start, chunk_stop)
+                processed_any_chunk = True
 
                 # Reported once per dataset, as every chunk skips the same variables
                 if skipped_variables and not skipped_variables_reported:
                     logger.warning(f"Dataset {dataset_id}: arrays with more than {MAX_ARRAY_COLUMNS} elements are not stored: {skipped_variables}")
                     skipped_variables_reported = True
+
+            # 1D documents and the GridFS reference documents of N-D data both carry their time in the time field
+            if processed_any_chunk:
+                self._refresh_coverage(self.coverage_repository, dataset_id, collection_name)
 
         logger.info("CDAWeb Pipeline finished.")
 

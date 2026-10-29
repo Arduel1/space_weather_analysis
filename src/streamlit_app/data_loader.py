@@ -6,17 +6,19 @@ import pandas as pd
 from pymongo.database import Database
 
 from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
+from space_weather_analysis.coverage.repository import MongoCoverageRepository
 from space_weather_analysis.jobs.repository import JobRepository, MongoJobRepository
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
 
 logger = logging.getLogger(__name__)
 
-# Collections holding catalog, metadata and jobs rather than time series
+# Collections holding catalog, metadata, jobs and coverage rather than time series
 EXCLUDED_COLLECTIONS = (
     MongoMetadataRepository.RECORD_COLLECTION,
     MongoMetadataRepository.RAW_COLLECTION,
     MongoCatalogRepository.COLLECTION,
     MongoJobRepository.COLLECTION,
+    MongoCoverageRepository.COLLECTION,
 )
 
 

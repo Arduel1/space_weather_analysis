@@ -14,6 +14,7 @@ from pipeline_service.util.time import generate_time_chunks
 from space_weather_analysis.catalog.models import CatalogEntryDict
 from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
 from space_weather_analysis.clients.hapi import HapiClient
+from space_weather_analysis.coverage.repository import CoverageRepository, MongoCoverageRepository
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
 from space_weather_analysis.util.error_handling import log_and_handle_unexpected_failure
@@ -69,6 +70,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
         logger.info(f"Loaded the HAPI sources of {len(hapi_sources)} datasets from the master catalog.")
         self.client = HapiClient(hapi_sources)
         self.metadata_repository: MetadataRepository = MongoMetadataRepository(db)
+        self.coverage_repository: CoverageRepository = MongoCoverageRepository(db)
 
     def run(
         self,
@@ -154,6 +156,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
                 if skipped_parameters:
                     logger.warning(f"Dataset {dataset_id}: arrays with more than {MAX_ARRAY_COLUMNS} elements are not stored: {skipped_parameters}")
                 self._save_metadata(dataset_id, collection_name, latest_info, latest_retrieved_at)
+                self._refresh_coverage(self.coverage_repository, dataset_id, collection_name)
 
         logger.info(f"Generic {self.SOURCE_ID} Pipeline Finished")
 

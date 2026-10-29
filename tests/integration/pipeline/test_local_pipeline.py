@@ -1,10 +1,12 @@
 import pathlib
+from datetime import datetime, timezone
 from typing import Callable
 
 import pytest
 from pymongo.database import Database
 
 from pipeline_service.pipelines.local import LocalPipeline
+from space_weather_analysis.coverage.repository import MongoCoverageRepository
 
 WriteDatasetInput = Callable[[pathlib.Path, str], None]
 
@@ -66,3 +68,21 @@ def test_local_dataset_creates_timeseries_collection(
     collection_info = db.list_collections(filter={"name": collection}).next()
     timeseries_options = collection_info["options"]["timeseries"]
     assert (collection_info["type"], timeseries_options["timeField"], timeseries_options["metaField"]) == ("timeseries", "timestamp", "metadata")
+
+
+@pytest.mark.integration
+def test_local_run_records_coverage_of_stored_documents(db: Database, sunspot_dir: pathlib.Path) -> None:
+    """After a run the coverage of the dataset spans the three consecutive synthetic sunspot days."""
+    LocalPipeline(db, sunspot_dir).run([SUNSPOT_COLLECTION])
+
+    coverage = MongoCoverageRepository(db).get(SUNSPOT_COLLECTION)
+    assert coverage is not None
+    assert coverage.model_dump(exclude={"updated_at"}) == {
+        "dataset_id": SUNSPOT_COLLECTION,
+        "collection": SUNSPOT_COLLECTION,
+        "first_timestamp": datetime(2001, 3, 14, tzinfo=timezone.utc),
+        "last_timestamp": datetime(2001, 3, 16, tzinfo=timezone.utc),
+        "document_count": ROWS_PER_INPUT_FILE,
+        "intervals": [{"start": datetime(2001, 3, 14, tzinfo=timezone.utc), "end": datetime(2001, 3, 17, tzinfo=timezone.utc)}],
+        "bucket": "PT24H",
+    }

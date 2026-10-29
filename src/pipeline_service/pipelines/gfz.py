@@ -12,6 +12,7 @@ from pipeline_service.pipelines.base import BasePipeline, ProgressCallback
 from pipeline_service.util.documents import dataframe_to_documents
 from pipeline_service.util.time import generate_time_chunks
 from space_weather_analysis.clients.gfz import GfzClient
+from space_weather_analysis.coverage.repository import CoverageRepository, MongoCoverageRepository
 from space_weather_analysis.metadata.models import CitationInfo, DatasetMetadata, MetadataSource, SourceInfo, TimeInfo, VariableMetadata
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
 from space_weather_analysis.util.naming import sanitize_collection_name
@@ -54,6 +55,7 @@ class GfzPipeline(MongoLoader, BasePipeline):
         self.base_data_path = base_data_path
         self.client = GfzClient()
         self.metadata_repository: MetadataRepository = MongoMetadataRepository(db)
+        self.coverage_repository: CoverageRepository = MongoCoverageRepository(db)
 
     def run(
         self,
@@ -108,6 +110,7 @@ class GfzPipeline(MongoLoader, BasePipeline):
 
             if latest_response is not None:
                 self._save_metadata(dataset_id, collection_name, latest_response)
+                self._refresh_coverage(self.coverage_repository, dataset_id, collection_name)
 
     def _process_chunk(self, dataset_id: str, collection_name: str, chunk_start: datetime, chunk_stop: datetime) -> Optional[pd.DataFrame]:
         """Fetches one chunk and replaces its stored documents, unless the stored chunk is complete and final.

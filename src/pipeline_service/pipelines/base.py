@@ -1,6 +1,11 @@
+import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Callable, List, Optional
+
+from space_weather_analysis.coverage.repository import CoverageRepository
+
+logger = logging.getLogger(__name__)
 
 # Type alias for the progress callback function
 # Arguments: progress (float 0.0 to 1.0), message (str)
@@ -59,3 +64,20 @@ class BasePipeline(ABC):
         dataset_base_progress = dataset_index / dataset_count
         chunk_progress = chunk_index / chunk_count
         progress_callback(dataset_base_progress + (chunk_progress / dataset_count), message)
+
+    @staticmethod
+    def _refresh_coverage(coverage_repository: CoverageRepository, dataset_id: str, collection_name: str) -> None:
+        """Recomputes and saves which time ranges of a dataset are stored.
+
+        A failing refresh is logged, as the stored data documents stay valid without coverage.
+
+        Args:
+            coverage_repository: The repository computing and storing the coverage.
+            dataset_id: The dataset ID.
+            collection_name: The collection holding the data documents of the dataset.
+        """
+        try:
+            coverage = coverage_repository.refresh(dataset_id, collection_name)
+            logger.info(f"Refreshed coverage of {dataset_id}: {coverage.document_count} documents in {len(coverage.intervals)} intervals.")
+        except Exception as e:
+            logger.error(f"Failed to refresh coverage of {dataset_id}: {e}", exc_info=True)
