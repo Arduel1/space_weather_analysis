@@ -165,7 +165,8 @@ class HapiPipeline(MongoLoader, BasePipeline):
     ) -> Tuple[Optional[datetime], Optional[datetime]]:
         """Determines the effective time range for a dataset.
 
-        If start/end are None, it fetches the full range from the catalog/server.
+        If start/end are None, it fetches the full range from the catalog/server; the range of
+        an ongoing source ends now.
 
         Args:
             dataset_id: The dataset identifier.
@@ -188,7 +189,11 @@ class HapiPipeline(MongoLoader, BasePipeline):
 
         # Find the overall min start and max end from all available servers
         global_start = min(self._parse_catalog_times(entries, "start_time"), default=None)
-        global_end = max(self._parse_catalog_times(entries, "end_time"), default=None)
+        end_times = self._parse_catalog_times(entries, "end_time")
+        # An ongoing source has data up to now, beyond the stop time recorded in the catalog
+        if any(entry.get("ongoing") for entry in entries):
+            end_times.append(datetime.now(timezone.utc))
+        global_end = max(end_times, default=None)
 
         if global_start and global_end:
             logger.info(f"Detected full range: {global_start} to {global_end}")

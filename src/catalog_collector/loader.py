@@ -17,6 +17,9 @@ from space_weather_analysis.util.naming import sanitize_collection_name
 
 logger = logging.getLogger(__name__)
 
+# Source fields the availability refresh maintains; a snapshot reload keeps them for refreshed sources.
+AVAILABILITY_FIELDS = ("time_range", "ongoing", "availability_checked_at", "missing_runs", "missing_since")
+
 
 class CatalogLoader:
     """Loads the master catalog file into MongoDB.
@@ -87,6 +90,8 @@ class CatalogLoader:
         for item in items:
             item["sources"].sort(key=self._get_sortable_key)
 
+        self._keep_refreshed_availability(items)
+
         try:
             self.catalog_repository.save_many(items)
         except pymongo_errors.BulkWriteError as bwe:
@@ -95,6 +100,32 @@ class CatalogLoader:
             logger.error(f"DB Load failed: {e}", exc_info=True)
 
         logger.info("--- Catalog Load Finished ---")
+
+    def _keep_refreshed_availability(self, items: List[MasterCatalogItem]) -> None:
+        """Carries the availability state of already refreshed sources over into the snapshot items.
+
+        The snapshot holds the time ranges of its creation; a source refreshed from the HAPI mirror keeps
+        its newer time range, ongoing state and miss count, so a collector restart with an unreachable
+        mirror does not fall back to stale ranges.
+
+        Args:
+            items: The snapshot items, changed in place.
+        """
+        refreshed_sources: Dict[Tuple[str, str, str], CatalogEntryDict] = {}
+        for stored_item in self.catalog_repository.get_all():
+            for stored_source in stored_item["sources"]:
+                if "availability_checked_at" in stored_source:
+                    source_key = (stored_item["dataset_id"], stored_source.get("type", ""), stored_source.get("source_id", ""))
+                    refreshed_sources[source_key] = stored_source
+
+        for item in items:
+            for source in item["sources"]:
+                refreshed_source = refreshed_sources.get((item["dataset_id"], source.get("type", ""), source.get("source_id", "")))
+                if refreshed_source is None:
+                    continue
+                for field in AVAILABILITY_FIELDS:
+                    if field in refreshed_source:
+                        source[field] = refreshed_source[field]  # type: ignore[literal-required]
 
     def load_metadata_to_db(self) -> None:
         """Loads the HAPI /info snapshot file into the metadata repository.

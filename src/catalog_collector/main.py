@@ -5,6 +5,7 @@ from typing import List
 
 from pydantic import ValidationError
 
+from catalog_collector.availability import AvailabilityRefresher
 from catalog_collector.builder import CatalogBuilder
 from catalog_collector.discoverers.base import AbstractDiscoverer
 from catalog_collector.discoverers.cdaweb import CdawebDiscoverer
@@ -67,6 +68,12 @@ def main() -> None:
         loader = CatalogLoader(db=db, file_path=CATALOG_FILE, metadata_path=METADATA_FILE)
         loader.load_to_db()
         loader.load_metadata_to_db()
+
+        # The snapshot holds the time ranges of its creation date, so the refresh runs after the load
+        try:
+            AvailabilityRefresher(loader.catalog_repository, loader.metadata_repository).refresh()
+        except Exception as e:
+            logger.error(f"Availability refresh failed; the catalog keeps the snapshot time ranges: {e}", exc_info=True)
 
         # Aggregate findings from all discoverers into a master JSON file
         # logger.info(f"Targeting output file: {CATALOG_FILE}")

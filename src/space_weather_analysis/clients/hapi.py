@@ -212,7 +212,8 @@ class HapiClient(BaseClient):
 
         Args:
             dataset_id: The dataset ID.
-            entry: The catalog entry containing source_id and time_range.
+            entry: The catalog entry containing source_id and time_range; the request is clipped to the time range,
+                except for the end of an ongoing source.
             config_start: The requested start time.
             config_end: The requested end time.
             params_str: Comma-separated parameters.
@@ -233,7 +234,9 @@ class HapiClient(BaseClient):
             logger.warning(f"Skipping {server_url}: unparsable time range {time_range}.")
             return None, None
 
-        valid_range = calculate_time_intersection(config_start, config_end, server_start, server_end)
+        # The catalog stop of an ongoing source lags behind the data the server already has
+        available_end = config_end if entry.get("ongoing") else server_end
+        valid_range = calculate_time_intersection(config_start, config_end, server_start, available_end)
 
         if not valid_range:
             logger.debug(f"Skipping {server_url}: No overlap. Req: {config_start}-{config_end}, Avail: {server_start}-{server_end}")

@@ -29,6 +29,14 @@ class CatalogEntryDict(TypedDict):
         time_range: The temporal coverage of this dataset at this source.
         dataset_id: Optional dataset identifier, added by some discoverers.
         description: Optional human-readable description of the dataset.
+        ongoing: Whether the source still receives new data, so its stop time moves forward; set by the
+            availability refresh from the HAPI metadata mirror.
+        availability_checked_at: When the availability refresh last found the dataset at its source,
+            as ISO 8601 UTC time.
+        missing_runs: How many availability refreshes in a row did not find the dataset at its server;
+            0 once it is found again.
+        missing_since: When the availability refresh first missed the dataset in the current run of
+            misses, as ISO 8601 UTC time; absent while the dataset is found.
     """
 
     type: str
@@ -36,6 +44,10 @@ class CatalogEntryDict(TypedDict):
     time_range: TimeRangeDict
     dataset_id: NotRequired[str]
     description: NotRequired[str]
+    ongoing: NotRequired[bool]
+    availability_checked_at: NotRequired[str]
+    missing_runs: NotRequired[int]
+    missing_since: NotRequired[str]
 
 
 class MasterCatalogItem(TypedDict):

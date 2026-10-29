@@ -109,17 +109,25 @@ def serve_dataset(httpserver: HTTPServer) -> ServeDataset:
     return serve
 
 
-def _add_catalog_entry(db: Database, server_urls: List[str]) -> None:
-    """Inserts the master catalog document listing the given HAPI servers as sources of the dataset."""
+def _add_catalog_entry(db: Database, server_urls: List[str], extra_fields: Optional[Dict[str, Any]] = None) -> None:
+    """Inserts the master catalog document listing the given HAPI servers, each with the extra fields, as sources of the dataset."""
     sources = []
     for server_url in server_urls:
-        sources.append({"type": "HAPI", "source_id": server_url, "time_range": {"start_time": CATALOG_START, "end_time": CATALOG_END}})
+        time_range = {"start_time": CATALOG_START, "end_time": CATALOG_END}
+        sources.append({"type": "HAPI", "source_id": server_url, "time_range": time_range, **(extra_fields or {})})
     db["master_catalog"].insert_one({"dataset_id": DATASET_ID, "sources": sources})
 
 
-def _ingest(db: Database, tmp_path: pathlib.Path, server_urls: List[str], start: datetime = RUN_START, end: datetime = RUN_END) -> None:
-    """Registers the servers in the catalog and runs the HAPI pipeline for the dataset."""
-    _add_catalog_entry(db, server_urls)
+def _ingest(
+    db: Database,
+    tmp_path: pathlib.Path,
+    server_urls: List[str],
+    start: datetime = RUN_START,
+    end: datetime = RUN_END,
+    extra_fields: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Registers the servers with the extra source fields in the catalog and runs the HAPI pipeline for the dataset."""
+    _add_catalog_entry(db, server_urls, extra_fields)
     HapiPipeline(db, tmp_path).run([DATASET_ID], start, end)
 
 
@@ -271,16 +279,30 @@ def test_hapi_falls_back_to_next_source_when_first_fails(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    ("extra_fields", "expected_stop"),
+    [
+        pytest.param({}, CATALOG_END, id="ended_source"),
+        pytest.param({"ongoing": True}, "2024-03-02T00:00:00Z", id="ongoing_source"),
+    ],
+)
 def test_hapi_request_clipped_to_catalog_time_range(
-    db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset, httpserver: HTTPServer
+    db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset, httpserver: HTTPServer, extra_fields: Dict[str, Any], expected_stop: str
 ) -> None:
-    """A requested range wider than the catalog range is requested from the server only within the catalog range."""
+    """A range wider than the catalog range is requested from the catalog start to the catalog stop, or to the run end if the source is ongoing."""
     server_url = serve_dataset()
 
-    _ingest(db, tmp_path, [server_url], start=datetime(2024, 2, 29, tzinfo=timezone.utc), end=datetime(2024, 3, 2, tzinfo=timezone.utc))
+    _ingest(
+        db,
+        tmp_path,
+        [server_url],
+        start=datetime(2024, 2, 29, tzinfo=timezone.utc),
+        end=datetime(2024, 3, 2, tzinfo=timezone.utc),
+        extra_fields=extra_fields,
+    )
 
     data_requests = [request for request, _ in httpserver.log if request.path == f"{SERVER_PATH}/data"]
-    assert [(request.args["time.min"], request.args["time.max"]) for request in data_requests] == [(CATALOG_START, CATALOG_END)]
+    assert [(request.args["time.min"], request.args["time.max"]) for request in data_requests] == [(CATALOG_START, expected_stop)]
 
 
 @pytest.mark.integration
