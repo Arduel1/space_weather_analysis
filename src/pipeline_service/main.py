@@ -44,7 +44,7 @@ def main() -> None:
     fido_manual_config: dict[str, Any] = {
         "start_time": datetime(2025, 10, 1, 0, 0, 0, tzinfo=UTC),
         "end_time": datetime(2025, 11, 26, 0, 0, 0, tzinfo=UTC),
-        "datasets": [],  # Add dataset IDs here to enable FIDO download
+        "datasets": [],  # Add dataset IDs here to enable the CDAWeb download
     }
 
     # Configuration for GFZ Data Ingestion

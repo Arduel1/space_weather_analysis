@@ -18,7 +18,7 @@ class PipelineFactory:
 
         Args:
             db: The MongoDB database instance.
-            data_dir: The directory holding the local dataset files and the downloaded data files.
+            data_dir: The directory holding the local dataset files.
         """
         self.db = db
         self.data_dir = data_dir
@@ -36,7 +36,7 @@ class PipelineFactory:
             case SourceType.HAPI:
                 return HapiPipeline(self.db)
             case SourceType.FIDO_CDAWEB:
-                return CdawebPipeline(self.db, self.data_dir)
+                return CdawebPipeline(self.db)
             case SourceType.GFZ_POTSDAM:
                 return GfzPipeline(self.db)
             case SourceType.LOCAL:

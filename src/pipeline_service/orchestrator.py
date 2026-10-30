@@ -29,7 +29,7 @@ class PipelineOrchestrator:
     """
 
     POLLING_INTERVAL_SECONDS = 10
-    # The data directory of the project, holding the local dataset files and the downloads
+    # The data directory of the project, holding the local dataset files
     DATA_BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent / "data"
 
     def __init__(self, db: Database, data_dir: pathlib.Path = DATA_BASE_DIR) -> None:
@@ -37,7 +37,7 @@ class PipelineOrchestrator:
 
         Args:
             db: The MongoDB database instance holding jobs, catalog and data.
-            data_dir: The directory holding the local dataset files and the downloads.
+            data_dir: The directory holding the local dataset files.
         """
         self.db = db
         self.job_repository: JobRepository = MongoJobRepository(db)

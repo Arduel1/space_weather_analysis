@@ -1,20 +1,19 @@
 import logging
-import pathlib
+from collections.abc import Callable, Sequence
 from datetime import datetime
+from http import HTTPStatus
 from typing import Any
 
 import requests
+import xarray as xr
 from astropy.table import Row, Table
-from parfive.results import Results as ParfiveResults
-from sunpy.net import Fido
-from sunpy.net import attrs as a
-from sunpy.net.cdaweb import attrs as cdaweb_attrs
+from cdasws import CdasWs
+from cdasws.datarepresentation import DataRepresentation
 from sunpy.net.cdaweb.helpers import get_datasets, get_observatory_groups
-from sunpy.net.fido_factory import UnifiedResponse
 
 from space_weather_analysis.catalog.models import CatalogEntryDict, SourceType
 from space_weather_analysis.clients.base import DataClient, FetchResult
-from space_weather_analysis.util.error_handling import DataRetrievalError
+from space_weather_analysis.util.error_handling import DataProcessingError, DataRetrievalError
 from space_weather_analysis.util.resilience import retry_interaction
 
 logger = logging.getLogger(__name__)
@@ -22,24 +21,32 @@ logger = logging.getLogger(__name__)
 # Network failures of the CDAWeb requests SunPy sends, which a repeated request may not have.
 TRANSIENT_REQUEST_ERRORS = (requests.ConnectionError, requests.Timeout)
 
+# The CDAS endpoint cdasws requests by default.
+CDAS_ENDPOINT = "https://cdaweb.gsfc.nasa.gov/WS/cdasr/1/dataviews/sp_phys/"
 
-class CdawebClient(DataClient[list[pathlib.Path]]):
-    """Downloads CDAWeb data files with SunPy Fido and lists observatory groups and datasets for the discovery.
+# CDAS answers HTTP 404 for a time range that holds no data of the requested variables.
+CDAS_NO_DATA_STATUS = HTTPStatus.NOT_FOUND
 
-    The data of a range are the downloaded files covering it; the files may hold records outside the
-    range, which the caller clips.
+
+class CdawebClient(DataClient[xr.Dataset]):
+    """Fetches CDAWeb data from the CDAS web services and lists observatory groups and datasets for the discovery.
+
+    CDAS, the Coordinated Data Analysis System of CDAWeb (https://cdaweb.gsfc.nasa.gov/WebServices/REST/),
+    serves the data of a dataset subset by variables and time range; cdasws is its official Python client.
     """
 
     source_type = SourceType.FIDO_CDAWEB
 
-    def __init__(self, download_dir: pathlib.Path | None = None) -> None:
+    def __init__(self, cdas: CdasWs | None = None, variables_for: Callable[[str], Sequence[str] | None] | None = None) -> None:
         """Initializes the client.
 
         Args:
-            download_dir: The directory the data files are downloaded to, one subdirectory per dataset;
-                None for a client that only serves the discovery.
+            cdas: The CDAS web service client; a new one without response cache if None.
+            variables_for: Names the variables to request for a dataset, or None to request the variables CDAS lists.
         """
-        self.download_dir = download_dir
+        self.cdas = cdas if cdas is not None else CdasWs(disable_cache=True)
+        self.variables_for = variables_for
+        self._listed_variables: dict[str, Sequence[str]] = {}
 
     @retry_interaction(exceptions=TRANSIENT_REQUEST_ERRORS)
     def get_observatory_groups(self) -> Table | None:
@@ -107,8 +114,11 @@ class CdawebClient(DataClient[list[pathlib.Path]]):
             "time_range": {"start_time": str(start_date), "end_time": str(stop_date)},
         }
 
-    def fetch(self, dataset_id: str, start: datetime, stop: datetime) -> FetchResult[list[pathlib.Path]]:
-        """Downloads the data files of a dataset that cover a time range.
+    def fetch(self, dataset_id: str, start: datetime, stop: datetime) -> FetchResult[xr.Dataset]:
+        """Fetches the data variables of a dataset for a time range from CDAS.
+
+        CDAS subsets the data on the server by variables and time range; cdasws itself waits and
+        repeats a request answered with HTTP 429 or 503 and a Retry-After header.
 
         Args:
             dataset_id: The CDAWeb dataset ID.
@@ -116,30 +126,52 @@ class CdawebClient(DataClient[list[pathlib.Path]]):
             stop: The end of the range (exclusive), timezone-aware.
 
         Returns:
-            The paths of the downloaded files, or a result without data if CDAWeb has no file for the range.
+            The data as xarray Dataset with the ISTP attributes of each variable, or a result without data
+            if the range holds no data or the dataset has no variable to request.
 
         Raises:
-            ValueError: If the client has no download directory.
-            DataRetrievalError: If the search or a download failed.
+            DataRetrievalError: If the request failed or CDAS answered with an error status.
+            DataProcessingError: If CDAS answered successfully but delivered no data.
         """
-        if self.download_dir is None:
-            raise ValueError("CdawebClient needs a download directory to fetch data files.")
-        destination = self.download_dir / dataset_id
-        destination.mkdir(parents=True, exist_ok=True)
-
-        logger.info("Searching Fido for '%s' from %s to %s...", dataset_id, start, stop)
-        try:
-            query_response: UnifiedResponse = Fido.search(a.Time(start, stop), cdaweb_attrs.Dataset(dataset_id))
-        except (requests.RequestException, OSError) as error:
-            raise DataRetrievalError(f"Fido search for {dataset_id} failed: {error}") from error
-        if query_response.file_num == 0:
-            logger.info("Fido found no file of '%s' for %s to %s.", dataset_id, start, stop)
+        variables = self.variables(dataset_id)
+        if not variables:
+            logger.info("Dataset %s has no variable to request.", dataset_id)
             return FetchResult(None)
 
-        file_results: ParfiveResults = Fido.fetch(query_response, path=str(destination / "{file}"), progress=False)
-        if file_results.errors:
-            raise DataRetrievalError(f"Fido could not download {len(file_results.errors)} files of {dataset_id}: {file_results.errors}")
+        try:
+            status, data = self.cdas.get_data(dataset_id, list(variables), start, stop, dataRepresentation=DataRepresentation.XARRAY)
+        except (requests.RequestException, OSError) as error:
+            raise DataRetrievalError(f"CDAS request for {dataset_id} failed: {error}") from error
 
-        downloaded_paths = [pathlib.Path(file_path) for file_path in file_results.data]
-        logger.info("Downloaded %d files of %s.", len(downloaded_paths), dataset_id)
-        return FetchResult(downloaded_paths or None)
+        status_code = status.get("http", {}).get("status_code")
+        if status_code == CDAS_NO_DATA_STATUS:
+            logger.info("CDAS has no data of %s for %s to %s.", dataset_id, start, stop)
+            return FetchResult(None)
+        if status_code != HTTPStatus.OK:
+            raise DataRetrievalError(f"CDAS answered HTTP {status_code} for {dataset_id}: {status.get('cdas')}")
+        if not isinstance(data, xr.Dataset):
+            raise DataProcessingError(f"CDAS answered HTTP 200 for {dataset_id} but delivered no data: {status.get('cdas')}")
+        return FetchResult(data, source_url=CDAS_ENDPOINT)
+
+    def variables(self, dataset_id: str) -> Sequence[str]:
+        """Names the variables to request for a dataset.
+
+        Args:
+            dataset_id: The CDAWeb dataset ID.
+
+        Returns:
+            The variables the resolver names, or else the variables CDAS lists for the dataset, read once per client.
+
+        Raises:
+            DataRetrievalError: If the variable list cannot be read from CDAS.
+        """
+        if self.variables_for is not None:
+            resolved = self.variables_for(dataset_id)
+            if resolved is not None:
+                return resolved
+        if dataset_id not in self._listed_variables:
+            try:
+                self._listed_variables[dataset_id] = self.cdas.get_variable_names(dataset_id)
+            except (requests.RequestException, OSError) as error:
+                raise DataRetrievalError(f"CDAS variable list of {dataset_id} could not be read: {error}") from error
+        return self._listed_variables[dataset_id]

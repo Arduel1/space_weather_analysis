@@ -68,7 +68,7 @@ Details on each file: [docs/local-data.md](docs/local-data.md).
 
 | Provider | Data | Access | License / terms |
 | --- | --- | --- | --- |
-| NASA SPDF (CDAWeb, SSCWeb) | Heliophysics mission data and spacecraft orbits | SunPy Fido, HAPI | Public domain (CC0), citation requested ([data use policy](https://spdf.gsfc.nasa.gov/data_use_policy.html)) |
+| NASA SPDF (CDAWeb, SSCWeb) | Heliophysics mission data and spacecraft orbits | CDAS web services (cdasws), HAPI | Public domain (CC0), citation requested ([data use policy](https://spdf.gsfc.nasa.gov/data_use_policy.html)) |
 | NASA CCMC (iSWA) | Space weather products | HAPI | NASA open data policy, acknowledgement requested ([publication policy](https://ccmc.gsfc.nasa.gov/publication-policy)) |
 | GFZ Helmholtz Centre for Geosciences | Kp index | GFZ web service | [CC BY 4.0](https://kp.gfz.de/en/) |
 | WDC for Geomagnetism, Edinburgh (BGS) | Ground magnetometer data | HAPI | Free for scientific use; commercial use requires contacting the data supplier ([usage](https://wdc.bgs.ac.uk/usage)) |
