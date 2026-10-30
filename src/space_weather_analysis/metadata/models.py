@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union, get_args
 
 from pydantic import BaseModel, Field, field_validator
 
+from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.util.time_utils import ensure_aware
 
 # Where a metadata value comes from:
@@ -12,11 +13,9 @@ from space_weather_analysis.util.time_utils import ensure_aware
 # curated: a value written in the code of this project.
 # file: a value read from a downloaded data file without a metadata standard.
 # api: the response of a provider API other than HAPI.
-MetadataSourceKind = Literal["hapi", "istp", "spase", "curated", "file", "api"]
+# cdas: the dataset list of CDAS, the CDAWeb Coordinated Data Analysis System web services (https://cdaweb.gsfc.nasa.gov/WebServices/REST/).
+MetadataSourceKind = Literal["hapi", "istp", "spase", "curated", "file", "api", "cdas"]
 METADATA_SOURCE_KINDS: Tuple[str, ...] = get_args(MetadataSourceKind)
-
-# The client family that ingests a dataset, the same names as the source types of the master catalog.
-SourceType = Literal["HAPI", "FIDO_CDAWEB", "GFZ_POTSDAM", "LOCAL"]
 
 # Value types of the stored fields, named like the HAPI parameter types.
 DataType = Literal["double", "integer", "string", "isotime", "boolean"]

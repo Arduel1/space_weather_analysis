@@ -11,9 +11,11 @@ from pipeline_service.database.mongo_loader import MongoLoader
 from pipeline_service.pipelines.base import BasePipeline, ProgressCallback
 from pipeline_service.util.documents import dataframe_to_documents
 from pipeline_service.util.time import generate_time_chunks
+from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.clients.gfz import GfzClient
 from space_weather_analysis.coverage.repository import CoverageRepository, MongoCoverageRepository
 from space_weather_analysis.metadata.models import CitationInfo, DatasetMetadata, MetadataSource, SourceInfo, TimeInfo, VariableMetadata
+from space_weather_analysis.metadata.overlays import save_with_overlays
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
 from space_weather_analysis.util.naming import sanitize_collection_name
 from space_weather_analysis.util.time_utils import ensure_aware, format_iso_duration
@@ -205,7 +207,7 @@ class GfzPipeline(MongoLoader, BasePipeline):
         record = DatasetMetadata(
             dataset_id=dataset_id,
             collection=collection_name,
-            source=SourceInfo(type="GFZ_POTSDAM", provider=meta.get("source"), server_url=self.client.BASE_URL),
+            source=SourceInfo(type=SourceType.GFZ_POTSDAM, provider=meta.get("source"), server_url=self.client.BASE_URL),
             # GFZ timestamps mark the start of each interval
             time=TimeInfo(cadence=format_iso_duration(cadence) if cadence else None, timestamp_location="begin"),
             citation=CitationInfo(license=meta.get("license")),
@@ -217,7 +219,7 @@ class GfzPipeline(MongoLoader, BasePipeline):
             updated_at=retrieved_at,
         )
         try:
-            self.metadata_repository.save(record)
+            save_with_overlays(self.metadata_repository, [record])
         except Exception as e:
             logger.error(f"Failed to save metadata of {dataset_id}: {e}", exc_info=True)
 

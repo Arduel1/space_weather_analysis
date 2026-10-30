@@ -3,12 +3,12 @@ import pathlib
 import sys
 from typing import List
 
-from catalog_collector.data_catalog.availability import AvailabilityRefresher
 from catalog_collector.data_catalog.discovery.builder import CatalogBuilder
 from catalog_collector.data_catalog.discovery.discoverers.base import AbstractDiscoverer
 from catalog_collector.data_catalog.discovery.discoverers.cdaweb import CdawebDiscoverer
 from catalog_collector.data_catalog.discovery.discoverers.gfz import GfzDiscoverer
 from catalog_collector.data_catalog.discovery.discoverers.hapi import HapiDiscoverer
+from catalog_collector.data_catalog.hapi_availability import AvailabilityRefresher
 from catalog_collector.data_catalog.snapshot import CatalogSnapshotLoader
 from catalog_collector.metadata_catalog.snapshot import MetadataSnapshotLoader
 from space_weather_analysis.database.connection import connect_from_environment

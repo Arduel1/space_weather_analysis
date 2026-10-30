@@ -1,14 +1,12 @@
 from typing import Any, Dict, Optional, Set, Tuple
 
+from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.catalog.repository import CatalogRepository
 from space_weather_analysis.metadata.models import DatasetMetadata
 
 # The HAPI project (Heliophysics Application Programmer's Interface, https://hapi-server.org/) runs a mirror
 # that fetches the /catalog and /info responses of all known HAPI servers every night and publishes them as files.
 MIRROR_BASE_URL = "https://hapi-server.org/meta/"
-
-# The source type of HAPI sources in the master catalog.
-HAPI_SOURCE_TYPE = "HAPI"
 
 
 def describes_hapi_source(record: DatasetMetadata, server_url: str) -> bool:
@@ -23,7 +21,7 @@ def describes_hapi_source(record: DatasetMetadata, server_url: str) -> bool:
     Returns:
         True if the record is HAPI metadata of this server or of an unnamed server.
     """
-    if record.source.type != HAPI_SOURCE_TYPE:
+    if record.source.type != SourceType.HAPI:
         return False
     return not record.source.server_url or normalize_server_url(record.source.server_url) == normalize_server_url(server_url)
 
@@ -109,7 +107,7 @@ def first_hapi_servers(catalog_repository: CatalogRepository) -> Dict[str, str]:
         The base URL of the first HAPI source, keyed by dataset ID; datasets without HAPI source are left out.
     """
     hapi_servers: Dict[str, str] = {}
-    for dataset_id, sources in catalog_repository.get_source_map(HAPI_SOURCE_TYPE).items():
+    for dataset_id, sources in catalog_repository.get_source_map(SourceType.HAPI).items():
         for source in sources:
             if source.get("source_id"):
                 hapi_servers[dataset_id] = source["source_id"]

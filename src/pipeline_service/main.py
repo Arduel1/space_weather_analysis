@@ -4,15 +4,11 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 
 from pipeline_service.orchestrator import PipelineOrchestrator
+from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.database.connection import connect_from_environment
 from space_weather_analysis.logging.config import setup_logging
 
 logger = logging.getLogger(__name__)
-
-HAPI_SOURCE_ID = "HAPI"
-FIDO_CDAWEB_SOURCE_ID = "FIDO_CDAWEB"
-GFZ_SOURCE_ID = "GFZ_POTSDAM"
-LOCAL_SOURCE_ID = "LOCAL"
 
 
 def main() -> None:
@@ -62,10 +58,10 @@ def main() -> None:
 
     # Aggregate configurations mapped to their source IDs
     manual_jobs: Dict[str, Dict[str, Any]] = {
-        HAPI_SOURCE_ID: hapi_manual_config,
-        FIDO_CDAWEB_SOURCE_ID: fido_manual_config,
-        GFZ_SOURCE_ID: gfz_manual_config,
-        LOCAL_SOURCE_ID: local_manual_config,
+        SourceType.HAPI: hapi_manual_config,
+        SourceType.FIDO_CDAWEB: fido_manual_config,
+        SourceType.GFZ_POTSDAM: gfz_manual_config,
+        SourceType.LOCAL: local_manual_config,
     }
 
     try:

@@ -6,7 +6,7 @@ import numpy as np
 from hapiclient import hapi
 from hapiclient.util import HAPIError
 
-from space_weather_analysis.catalog.models import CatalogEntryDict, CatalogMap
+from space_weather_analysis.catalog.models import CatalogEntryDict, CatalogMap, SourceType
 from space_weather_analysis.clients.base import BaseClient
 from space_weather_analysis.util.resilience import retry_interaction
 from space_weather_analysis.util.time_utils import calculate_time_intersection, parse_iso_time
@@ -21,8 +21,6 @@ class HapiClient(BaseClient):
     fallback logic using the source list of each dataset. It handles metadata
     retrieval and data streaming for specified time ranges.
     """
-
-    SOURCE_TYPE = "HAPI"
 
     # Options for every hapi() call: no print output, no files in the hapiclient disk cache,
     # and CSV transfer, which every HAPI server supports and which spares the /capabilities request.
@@ -248,7 +246,7 @@ class HapiClient(BaseClient):
         start_str = valid_start.isoformat(timespec="seconds").replace("+00:00", "Z")
         stop_str = valid_stop.isoformat(timespec="seconds").replace("+00:00", "Z")
 
-        logger.info(f"{self.SOURCE_TYPE} Request: {dataset_id} [{start_str} -> {stop_str}]")
+        logger.info(f"{SourceType.HAPI} Request: {dataset_id} [{start_str} -> {stop_str}]")
 
         try:
             # The decorator handles retries for network glitches.

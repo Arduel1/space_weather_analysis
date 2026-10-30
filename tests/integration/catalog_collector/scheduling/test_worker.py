@@ -159,3 +159,34 @@ def test_hapi_mirror_tasks_record_failure_when_the_mirror_is_unreachable(db: Dat
 
     tasks = [_stored(db, "hapi_mirror_metadata/all"), _stored(db, "hapi_mirror_availability/all")]
     assert [(task.consecutive_failures, task.last_success_at, task.last_error is not None) for task in tasks] == [(1, None, True), (1, None, True)]
+
+
+@pytest.mark.integration
+def test_retry_after_lengthens_the_retry_delay_and_the_host_pause(db: Database) -> None:
+    """A failure naming a Retry-After longer than the backoff delays the retry and every request to the same host by that wait."""
+    clock = FakeClock()
+    runs: List[str] = []
+
+    def run(task: MetadataTask) -> None:
+        """Records the run and fails the busy task with a Retry-After of two hours."""
+        runs.append(task.target)
+        if task.target == "busy":
+            raise TaskFailedError("busy", retry_after_seconds=7200)
+
+    planned_requests = [PlannedRequest("busy", "https://a.example.org/1"), PlannedRequest("other", "https://a.example.org/2")]
+    worker = _worker(db, [_kind(planned_requests, run)], clock)
+    worker.run_once()
+    repository = MongoMetadataTaskRepository(db)
+    repository.record_success("synthetic/busy", START, START + timedelta(hours=1))
+    repository.record_success("synthetic/other", START, START + timedelta(hours=1, seconds=1))
+    clock.now = START + timedelta(hours=1, seconds=1)
+    worker.run_once()
+    failed_at = clock.now
+
+    clock.now = failed_at + timedelta(seconds=SETTINGS.host_pause_max_seconds)
+    during_retry_after = worker.run_once()
+    clock.now = failed_at + timedelta(seconds=7200)
+    after_retry_after = worker.run_once()
+
+    assert (runs, during_retry_after, after_retry_after) == (["busy", "other"], False, True)
+    assert _stored(db, "synthetic/busy").next_due_at == failed_at + timedelta(seconds=7200)

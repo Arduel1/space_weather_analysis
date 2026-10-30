@@ -12,6 +12,7 @@ from catalog_collector.hapi_mirror.servers import MIRROR_BASE_URL, describes_hap
 from space_weather_analysis.catalog.repository import CatalogRepository
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
 from space_weather_analysis.metadata.models import DatasetMetadata, RawMetadataRecord
+from space_weather_analysis.metadata.overlays import save_with_overlays
 from space_weather_analysis.metadata.repository import MetadataRepository, sanitize_for_bson
 from space_weather_analysis.util.naming import sanitize_collection_name
 
@@ -187,7 +188,7 @@ class MetadataRefresher:
             )
 
         # Records first: if the raw write fails, the next refresh still sees the change and rebuilds the record
-        self.metadata_repository.save_many(new_records)
+        save_with_overlays(self.metadata_repository, new_records)
         self.metadata_repository.save_raw_many(new_raw_records)
         summary.replaced += len(new_records)
 

@@ -3,8 +3,8 @@ import sys
 
 from pydantic import ValidationError
 
-from catalog_collector.data_catalog.tasks import hapi_availability_kind
-from catalog_collector.metadata_catalog.tasks import hapi_metadata_kind
+from catalog_collector.data_catalog.tasks import cdas_availability_kind, hapi_availability_kind
+from catalog_collector.metadata_catalog.tasks import cdas_metadata_kind, hapi_metadata_kind
 from catalog_collector.scheduling.repository import MongoMetadataTaskRepository
 from catalog_collector.scheduling.worker import MetadataWorker, WorkerSettings
 from space_weather_analysis.config.errors import format_settings_error
@@ -28,7 +28,12 @@ def main() -> None:
         sys.exit(1)
 
     connection, db = connect_from_environment()
-    kinds = [hapi_metadata_kind(db, worker_settings), hapi_availability_kind(db, worker_settings)]
+    kinds = [
+        hapi_metadata_kind(db, worker_settings),
+        hapi_availability_kind(db, worker_settings),
+        cdas_metadata_kind(db, worker_settings),
+        cdas_availability_kind(db, worker_settings),
+    ]
     try:
         MetadataWorker(MongoMetadataTaskRepository(db), kinds, worker_settings).run_forever()
     finally:

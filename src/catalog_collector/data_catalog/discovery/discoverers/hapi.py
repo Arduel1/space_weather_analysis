@@ -3,7 +3,7 @@ import pathlib
 from typing import Any, Dict, Generator, List
 
 from catalog_collector.data_catalog.discovery.discoverers.base import AbstractDiscoverer, DiscoveryYield
-from space_weather_analysis.catalog.models import CatalogEntryDict
+from space_weather_analysis.catalog.models import CatalogEntryDict, SourceType
 from space_weather_analysis.clients.hapi import HapiClient
 
 logger = logging.getLogger(__name__)
@@ -11,8 +11,6 @@ logger = logging.getLogger(__name__)
 
 class HapiDiscoverer(AbstractDiscoverer):
     """Discovers datasets by querying a list of HAPI-compliant servers."""
-
-    HAPI_SOURCE_ID = "HAPI"
 
     def __init__(
         self,
@@ -99,7 +97,7 @@ class HapiDiscoverer(AbstractDiscoverer):
 
         if start_date and stop_date:
             new_entry: CatalogEntryDict = {
-                "type": self.HAPI_SOURCE_ID,
+                "type": SourceType.HAPI,
                 "source_id": server_url,
                 "time_range": {
                     "start_time": str(start_date),

@@ -8,7 +8,7 @@ import pytest
 from pymongo.database import Database
 from pytest_httpserver import HTTPServer
 
-from catalog_collector.data_catalog.availability import AvailabilityRefresher, AvailabilitySummary
+from catalog_collector.data_catalog.hapi_availability import AvailabilityRefresher, AvailabilitySummary
 from catalog_collector.data_catalog.snapshot import CatalogSnapshotLoader
 from catalog_collector.metadata_catalog.snapshot import MetadataSnapshotLoader
 from space_weather_analysis.catalog.models import CatalogEntryDict, MasterCatalogItem

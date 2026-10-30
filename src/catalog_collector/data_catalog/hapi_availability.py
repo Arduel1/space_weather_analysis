@@ -1,20 +1,21 @@
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import requests
 from pydantic import ValidationError
 
+from catalog_collector.data_catalog.availability_state import ONGOING_TOLERANCE, apply_availability, format_utc, mark_missing
 from catalog_collector.hapi_mirror.servers import (
-    HAPI_SOURCE_TYPE,
     MIRROR_BASE_URL,
     describes_hapi_source,
     index_mirror_servers,
     mirror_server_id,
 )
-from space_weather_analysis.catalog.models import CatalogEntryDict, MasterCatalogItem
+from space_weather_analysis.catalog.models import MasterCatalogItem, SourceType
 from space_weather_analysis.catalog.repository import CatalogRepository
+from space_weather_analysis.metadata.overlays import save_with_overlays
 from space_weather_analysis.metadata.repository import MetadataRepository
 from space_weather_analysis.util.time_utils import ensure_aware
 
@@ -29,9 +30,6 @@ MIRROR_DATASET_TABLE_PATH = "table/hapi.all.datasets.json"
 
 # Connect and read timeout in seconds; the dataset table has about 25 MB.
 MIRROR_TIMEOUT = (10, 300)
-
-# Datasets updated monthly or with some lag still count as ongoing, while ended missions stop years back.
-ONGOING_TOLERANCE = timedelta(days=60)
 
 
 @dataclass(frozen=True)
@@ -119,7 +117,7 @@ class AvailabilityRefresher:
         if mirror is None:
             return None
 
-        checked_at = _format_utc(datetime.now(timezone.utc))
+        checked_at = format_utc(datetime.now(timezone.utc))
         ongoing_since = mirror.created_at - ONGOING_TOLERANCE
         summary = AvailabilitySummary()
         untouched_servers: Set[str] = set()
@@ -128,7 +126,7 @@ class AvailabilityRefresher:
         for item in self.catalog_repository.get_all():
             item_changed = False
             for source in item["sources"]:
-                if source.get("type") != HAPI_SOURCE_TYPE:
+                if source.get("type") != SourceType.HAPI:
                     continue
                 server_id = mirror_server_id(source["source_id"], item["dataset_id"], mirror.server_ids_by_url, mirror.listed_datasets)
                 if server_id is None:
@@ -141,7 +139,7 @@ class AvailabilityRefresher:
                     if availability is None:
                         summary.unresolved += 1
                         continue
-                    _apply_availability(source, availability, availability.stop_time >= ongoing_since, checked_at)
+                    apply_availability(source, availability.start, availability.stop, availability.stop_time >= ongoing_since, checked_at)
                     summary.refreshed += 1
                     summary.ongoing += int(source["ongoing"])
                     self._sync_metadata_coverage(item["dataset_id"], source["source_id"], availability)
@@ -150,7 +148,7 @@ class AvailabilityRefresher:
                     summary.unresolved += 1
                     continue
                 else:
-                    _mark_missing(source, checked_at)
+                    mark_missing(source, checked_at)
                     summary.missing += 1
                 item_changed = True
             if item_changed:
@@ -214,35 +212,7 @@ class AvailabilityRefresher:
             return
         record.time.coverage_start = availability.start_time
         record.time.coverage_stop = availability.stop_time
-        self.metadata_repository.save(record)
-
-
-def _apply_availability(source: CatalogEntryDict, availability: DatasetAvailability, ongoing: bool, checked_at: str) -> None:
-    """Sets the time range of a source to the mirror values and clears its missing state.
-
-    Args:
-        source: The catalog source, changed in place.
-        availability: The time range reported by the mirror.
-        ongoing: Whether the source still receives new data.
-        checked_at: The time of this refresh as ISO 8601 UTC text.
-    """
-    source["time_range"] = {"start_time": availability.start, "end_time": availability.stop}
-    source["ongoing"] = ongoing
-    source["availability_checked_at"] = checked_at
-    source["missing_runs"] = 0
-    source.pop("missing_since", None)
-
-
-def _mark_missing(source: CatalogEntryDict, checked_at: str) -> None:
-    """Counts one more refresh that missed the dataset of a source and keeps everything else.
-
-    Args:
-        source: The catalog source, changed in place.
-        checked_at: The time of this refresh as ISO 8601 UTC text.
-    """
-    source["missing_runs"] = source.get("missing_runs", 0) + 1
-    if "missing_since" not in source:
-        source["missing_since"] = checked_at
+        save_with_overlays(self.metadata_repository, [record])
 
 
 def _parse_mirror(catalogs: Dict[str, Any], dataset_table: Dict[str, Any]) -> MirrorSnapshot:
@@ -328,15 +298,3 @@ def _parse_mirror_time(value: Any) -> Optional[datetime]:
         return ensure_aware(datetime.fromisoformat(value))
     except ValueError:
         return None
-
-
-def _format_utc(time: datetime) -> str:
-    """Formats a UTC time as ISO 8601 text with seconds and `Z`.
-
-    Args:
-        time: The aware time.
-
-    Returns:
-        The time text.
-    """
-    return time.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

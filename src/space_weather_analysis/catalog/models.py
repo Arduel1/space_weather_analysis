@@ -1,3 +1,4 @@
+from enum import StrEnum
 from typing import Dict, List, NotRequired, TypeAlias, TypedDict
 
 
@@ -16,6 +17,18 @@ class TimeRangeDict(TypedDict):
     end_time: str
 
 
+class SourceType(StrEnum):
+    """The client families that ingest the sources of the master catalog.
+
+    The members are strings, so they compare equal to the stored source types and are stored as their value.
+    """
+
+    HAPI = "HAPI"
+    FIDO_CDAWEB = "FIDO_CDAWEB"
+    GFZ_POTSDAM = "GFZ_POTSDAM"
+    LOCAL = "LOCAL"
+
+
 class CatalogEntryDict(TypedDict):
     """A dictionary representing a single source entry in the catalog.
 
@@ -23,7 +36,7 @@ class CatalogEntryDict(TypedDict):
     time range available at that source.
 
     Attributes:
-        type: The source type identifier: 'HAPI', 'FIDO_CDAWEB' or 'GFZ_POTSDAM'.
+        type: The source type, the value of a SourceType member; stored documents hold it as plain text.
         source_id: The identifier of the source within its type: the server URL for HAPI,
             the group name for FIDO_CDAWEB and 'GFZ' for GFZ_POTSDAM.
         time_range: The temporal coverage of this dataset at this source.

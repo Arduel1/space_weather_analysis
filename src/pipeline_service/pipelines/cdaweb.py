@@ -24,6 +24,7 @@ from pipeline_service.parsing.netcdf import parse_xarray_timestamp
 from pipeline_service.pipelines.base import BasePipeline, ProgressCallback
 from pipeline_service.util.documents import build_gridfs_reference_document, dataframe_to_documents
 from pipeline_service.util.time import generate_time_chunks
+from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
 from space_weather_analysis.clients.cdaweb import CdawebClient
 from space_weather_analysis.coverage.repository import CoverageRepository, MongoCoverageRepository
@@ -38,6 +39,7 @@ from space_weather_analysis.metadata.models import (
     VariableMetadata,
 )
 from space_weather_analysis.metadata.normalize import normalize_units
+from space_weather_analysis.metadata.overlays import save_with_overlays
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
 from space_weather_analysis.util.naming import sanitize_collection_name
 from space_weather_analysis.util.time_utils import ensure_aware
@@ -58,7 +60,6 @@ class CdawebPipeline(MongoLoader, BasePipeline):
     and description (CATDESC). The pipeline uses them to clean the data and to describe it.
     """
 
-    SOURCE_ID = "FIDO_CDAWEB"
     # Time span of one download and of one check for already stored documents
     CHUNK_DURATION = timedelta(days=7)
     # Time stamp locations from BIN_LOCATION that the metadata record names; any other becomes 'other'
@@ -125,7 +126,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         for i, dataset_id in enumerate(datasets):
             group_name = self._find_fido_group(dataset_id)
             if not group_name:
-                logger.error(f"Skipping {dataset_id}: Could not find its {self.SOURCE_ID} group in catalog.")
+                logger.error(f"Skipping {dataset_id}: Could not find its {SourceType.FIDO_CDAWEB} group in catalog.")
                 continue
 
             collection_name = sanitize_collection_name(dataset_id)
@@ -174,7 +175,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         Returns:
             The source_id (group name) or None if not found.
         """
-        logger.info(f"Querying catalog for {self.SOURCE_ID} source for: {dataset_id}")
+        logger.info(f"Querying catalog for {SourceType.FIDO_CDAWEB} source for: {dataset_id}")
         try:
             item = self.catalog_repository.get(dataset_id)
 
@@ -183,13 +184,13 @@ class CdawebPipeline(MongoLoader, BasePipeline):
                 return None
 
             for source in item["sources"]:
-                if source.get("type") == self.SOURCE_ID:
+                if source.get("type") == SourceType.FIDO_CDAWEB:
                     source_id = source.get("source_id")
                     if source_id:
                         logger.info(f"Found FIDO source for {dataset_id}: {source_id}")
                         return source_id
 
-            logger.warning(f"No {self.SOURCE_ID} type source found for {dataset_id}")
+            logger.warning(f"No {SourceType.FIDO_CDAWEB} type source found for {dataset_id}")
             return None
         except Exception as e:
             logger.error(f"Error querying catalog for {dataset_id}: {e}", exc_info=True)
@@ -235,7 +236,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
             data_object, file_metadata = parse_datafiles(file_paths, start_time, end_time, variables_to_parse=[])
 
             collection_name = sanitize_collection_name(dataset_id)
-            source_id = f"{self.SOURCE_ID}/{group_name}"
+            source_id = f"{SourceType.FIDO_CDAWEB}/{group_name}"
 
             if data_object is not None:
                 if isinstance(data_object, GenericTimeSeries):
@@ -419,7 +420,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         record = DatasetMetadata(
             dataset_id=dataset_id,
             collection=sanitize_collection_name(dataset_id),
-            source=SourceInfo(type="FIDO_CDAWEB"),
+            source=SourceInfo(type=SourceType.FIDO_CDAWEB),
             time=TimeInfo(timestamp_location=self.ISTP_TIMESTAMP_LOCATIONS.get(location, "other")),
             variables=self._istp_variables(file_metadata, stored_column_types),
             not_stored=[SkippedParameter(name=name, reason=f"array with more than {MAX_ARRAY_COLUMNS} elements") for name in skipped_variables],
@@ -428,7 +429,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         )
         try:
             self.metadata_repository.save_raw(dataset_id, "istp", file_metadata, None, retrieved_at)
-            self.metadata_repository.save(record)
+            save_with_overlays(self.metadata_repository, [record])
         except Exception as e:
             logger.error(f"Failed to save metadata of {dataset_id}: {e}", exc_info=True)
 

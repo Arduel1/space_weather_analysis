@@ -11,6 +11,7 @@ from catalog_collector.hapi_mirror.servers import first_hapi_servers
 from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
 from space_weather_analysis.metadata.models import DatasetMetadata, RawMetadataRecord
+from space_weather_analysis.metadata.overlays import save_with_overlays
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
 from space_weather_analysis.util.naming import sanitize_collection_name
 
@@ -75,7 +76,7 @@ class MetadataSnapshotLoader:
             removed_count = self.metadata_repository.remove_outdated_records()
             if removed_count:
                 logger.info(f"Removed {removed_count} metadata documents of an outdated shape.")
-            self.metadata_repository.save_many(records)
+            save_with_overlays(self.metadata_repository, records)
             logger.info(
                 f"Saved {len(raw_records)} raw metadata entries and {len(records)} normalized records; "
                 f"{kept_count} datasets keep metadata newer than the snapshot."
@@ -138,7 +139,7 @@ class MetadataSnapshotLoader:
             if raw_record is not None:
                 self.metadata_repository.save_raw_many([raw_record])
             if record is not None:
-                self.metadata_repository.save(record)
+                save_with_overlays(self.metadata_repository, [record])
             logger.info(f"Metadata saved: {dataset_id}")
         except Exception as e:
             logger.error(f"Failed to upsert metadata for {dataset_id}: {e}")

@@ -7,7 +7,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from space_weather_analysis.catalog.models import CatalogEntryDict
+from space_weather_analysis.catalog.models import CatalogEntryDict, SourceType
 from space_weather_analysis.clients.base import BaseClient
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,6 @@ class GfzClient(BaseClient):
     """
 
     BASE_URL = "https://kp.gfz.de/app/json/"
-    SOURCE_TYPE = "GFZ_POTSDAM"
 
     # Index names the GFZ web service accepts; any other name is answered with HTTP 500.
     # Taken from getKpindex.py by I. Wehner, GFZ (CC BY 4.0): https://kp.gfz.de/app/webservice/python
@@ -50,7 +49,7 @@ class GfzClient(BaseClient):
         """
         return [
             {
-                "type": self.SOURCE_TYPE,
+                "type": SourceType.GFZ_POTSDAM,
                 "dataset_id": "Kp",
                 "source_id": "GFZ",
                 "description": "Planetary K-index (3-hourly) from GFZ Potsdam.",
@@ -67,7 +66,7 @@ class GfzClient(BaseClient):
         Returns:
             Dict[str, Any]: Metadata including units and description.
         """
-        return {"id": dataset_id, "source": self.SOURCE_TYPE, "units": "Index (0-9)", "description": "Global geomagnetic storm index."}
+        return {"id": dataset_id, "source": SourceType.GFZ_POTSDAM, "units": "Index (0-9)", "description": "Global geomagnetic storm index."}
 
     def get_data(self, dataset_id: str, start_time: datetime, end_time: datetime, **kwargs: Any) -> pd.DataFrame:
         """Fetches index data for the specified time range.

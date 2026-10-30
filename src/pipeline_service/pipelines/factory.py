@@ -8,6 +8,7 @@ from pipeline_service.pipelines.cdaweb import CdawebPipeline
 from pipeline_service.pipelines.gfz import GfzPipeline
 from pipeline_service.pipelines.hapi import HapiPipeline
 from pipeline_service.pipelines.local import LocalPipeline
+from space_weather_analysis.catalog.models import SourceType
 
 logger = logging.getLogger(__name__)
 
@@ -20,12 +21,6 @@ class PipelineFactory:
     It injects the necessary dependencies, such as the database connection
     and storage path, into each created pipeline.
     """
-
-    # Source identifiers used to map jobs to pipeline implementations
-    SOURCE_HAPI = "HAPI"
-    SOURCE_CDAWEB = "FIDO_CDAWEB"
-    SOURCE_GFZ = "GFZ_POTSDAM"
-    SOURCE_LOCAL = "LOCAL"
 
     def __init__(self, db: Database, base_data_path: pathlib.Path) -> None:
         """Initializes the factory with shared dependencies.
@@ -57,19 +52,19 @@ class PipelineFactory:
             ValueError: If the provided source_type does not correspond to
             any registered pipeline implementation.
         """
-        if source_type == self.SOURCE_HAPI:
+        if source_type == SourceType.HAPI:
             logger.info(f"Creating HAPI pipeline for storage at {self.base_data_path}")
             return HapiPipeline(self.db, self.base_data_path)
 
-        if source_type == self.SOURCE_CDAWEB:
+        if source_type == SourceType.FIDO_CDAWEB:
             logger.info(f"Creating CDAWeb pipeline for storage at {self.base_data_path}")
             return CdawebPipeline(self.db, self.base_data_path)
 
-        if source_type == self.SOURCE_GFZ:
+        if source_type == SourceType.GFZ_POTSDAM:
             logger.info(f"Creating GFZ pipeline for storage at {self.base_data_path}")
             return GfzPipeline(self.db, self.base_data_path)
 
-        if source_type == self.SOURCE_LOCAL:
+        if source_type == SourceType.LOCAL:
             return LocalPipeline(self.db, self.base_data_path)
 
         # Logging the error provides context on which invalid type was requested

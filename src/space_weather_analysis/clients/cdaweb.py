@@ -12,7 +12,7 @@ from sunpy.net.cdaweb import attrs as cdaweb_attrs
 from sunpy.net.cdaweb.helpers import get_datasets, get_observatory_groups
 from sunpy.net.fido_factory import UnifiedResponse
 
-from space_weather_analysis.catalog.models import CatalogEntryDict
+from space_weather_analysis.catalog.models import CatalogEntryDict, SourceType
 from space_weather_analysis.clients.base import BaseClient
 from space_weather_analysis.util.resilience import retry_interaction
 
@@ -26,8 +26,6 @@ class CdawebClient(BaseClient):
     as well as the retrieval of data files using the Fido search and fetch
     mechanisms.
     """
-
-    SOURCE_TYPE = "FIDO_CDAWEB"
 
     # --- Discovery Methods ---
 
@@ -108,7 +106,7 @@ class CdawebClient(BaseClient):
                 return None
 
             return {
-                "type": self.SOURCE_TYPE,
+                "type": SourceType.FIDO_CDAWEB,
                 "dataset_id": dataset_id,
                 "source_id": group_name,
                 "time_range": {
@@ -148,7 +146,7 @@ class CdawebClient(BaseClient):
         Returns:
             A dict containing the ID and source type.
         """
-        return {"id": dataset_id, "source": self.SOURCE_TYPE}
+        return {"id": dataset_id, "source": SourceType.FIDO_CDAWEB}
 
     def get_data(self, dataset_id: str, start_time: datetime, end_time: datetime, **kwargs: Any) -> List[pathlib.Path]:
         """Searches Fido for a dataset within a time range and downloads files.

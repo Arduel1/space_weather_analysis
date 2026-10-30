@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple, cast, get_args
 
 import numpy as np
 
+from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.metadata.models import (
     CitationInfo,
     DatasetMetadata,
@@ -83,7 +84,7 @@ def build_hapi_metadata(dataset_id: str, collection: str, info: Dict[str, Any], 
     return DatasetMetadata(
         dataset_id=dataset_id,
         collection=collection,
-        source=SourceInfo(type="HAPI", server_url=server_url),
+        source=SourceInfo(type=SourceType.HAPI, server_url=server_url),
         title=optional_text(info.get("title")),
         description=optional_text(info.get("description")),
         time=TimeInfo(

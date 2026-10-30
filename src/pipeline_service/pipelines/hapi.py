@@ -11,11 +11,12 @@ from pipeline_service.parsing.hapi import convert_hapi_to_timeseries
 from pipeline_service.pipelines.base import BasePipeline, ProgressCallback
 from pipeline_service.util.documents import TransformedDocuments, dataframe_to_documents
 from pipeline_service.util.time import generate_time_chunks
-from space_weather_analysis.catalog.models import CatalogEntryDict
+from space_weather_analysis.catalog.models import CatalogEntryDict, SourceType
 from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
 from space_weather_analysis.clients.hapi import HapiClient
 from space_weather_analysis.coverage.repository import CoverageRepository, MongoCoverageRepository
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
+from space_weather_analysis.metadata.overlays import save_with_overlays
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
 from space_weather_analysis.util.error_handling import log_and_handle_unexpected_failure
 from space_weather_analysis.util.hapi_parameters import MAX_ARRAY_COLUMNS, parameters_too_large_for_columns
@@ -34,7 +35,6 @@ class HapiPipeline(MongoLoader, BasePipeline):
     """
 
     # Identifying string for source tracking in metadata
-    SOURCE_ID = "HAPI"
 
     # Keys hapiclient adds to the /info response to describe its own request, cache files and timing
     HAPICLIENT_REQUEST_KEYS = frozenset(
@@ -66,7 +66,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
         """
         super().__init__(db)
         catalog_repository: CatalogRepository = MongoCatalogRepository(db)
-        hapi_sources = catalog_repository.get_source_map(self.SOURCE_ID)
+        hapi_sources = catalog_repository.get_source_map(SourceType.HAPI)
         logger.info(f"Loaded the HAPI sources of {len(hapi_sources)} datasets from the master catalog.")
         self.client = HapiClient(hapi_sources)
         self.metadata_repository: MetadataRepository = MongoMetadataRepository(db)
@@ -93,7 +93,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
             progress_callback: Optional callback to report progress (0.0 to 1.0) and status message.
             chunk_delta: The duration of each processing chunk. Defaults to 7 days.
         """
-        logger.info(f"Starting Generic {self.SOURCE_ID} Pipeline")
+        logger.info(f"Starting Generic {SourceType.HAPI} Pipeline")
 
         if not self.client.catalog_map:
             logger.error("The master catalog lists no dataset with a HAPI source. Aborting pipeline.")
@@ -158,7 +158,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
                 self._save_metadata(dataset_id, collection_name, latest_info, latest_retrieved_at)
                 self._refresh_coverage(self.coverage_repository, dataset_id, collection_name)
 
-        logger.info(f"Generic {self.SOURCE_ID} Pipeline Finished")
+        logger.info(f"Generic {SourceType.HAPI} Pipeline Finished")
 
     def _resolve_time_range(
         self,
@@ -290,7 +290,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
         """
         logger.info(f"Successfully converted {dataset_id} data to TimeSeries with {len(ts.to_table())} rows.")
 
-        source_url = meta.get("x_server_url", self.SOURCE_ID)
+        source_url = meta.get("x_server_url", SourceType.HAPI)
         documents = self._transform_timeseries_to_docs(ts, source_info=source_url)
 
         collection_name = sanitize_collection_name(dataset_id)
@@ -313,7 +313,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
         try:
             record = build_hapi_metadata(dataset_id, collection_name, server_info, server_url, retrieved_at)
             self.metadata_repository.save_raw(dataset_id, "hapi", server_info, server_url, retrieved_at)
-            self.metadata_repository.save(record)
+            save_with_overlays(self.metadata_repository, [record])
             logger.info(f"Saved metadata of {dataset_id}.")
         except Exception as e:
             logger.error(f"Failed to save metadata of {dataset_id}: {e}", exc_info=True)
