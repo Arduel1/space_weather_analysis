@@ -1,67 +1,79 @@
 import logging
+import pathlib
 from abc import ABC, abstractmethod
-from datetime import datetime
-from typing import Any, Hashable, Mapping, Sequence
+from typing import ClassVar
 
+import pandas as pd
 from pymongo.database import Database
 
 from pipeline_service.database.mongo_loader import MongoLoader
-from pipeline_service.util.documents import TransformedDocuments, rows_to_documents
+from pipeline_service.util.documents import TransformedDocuments
+from space_weather_analysis.util.error_handling import DataProcessingError
 
 logger = logging.getLogger(__name__)
 
 
 class BaseETLProcessor(MongoLoader, ABC):
-    """Abstract base class for local ETL (Extract, Transform, Load) processors.
+    """Base of the processors that load a complete local dataset file into its own collection.
 
-    This class standardizes the workflow for processing local dataset files,
-    providing database loading capabilities via inheritance.
+    The file holds the whole dataset, so every run replaces the content of the collection; the
+    documents are built completely before the stored ones are deleted.
+
+    Attributes:
+        COLLECTION_NAME: The collection holding the documents of the dataset.
     """
 
-    def __init__(self, db: Database) -> None:
-        """Initializes the processor with a database connection.
+    COLLECTION_NAME: ClassVar[str]
+
+    def __init__(self, db: Database, file_path: pathlib.Path) -> None:
+        """Initializes the processor.
 
         Args:
             db: The MongoDB database instance.
+            file_path: The path of the dataset file.
         """
         super().__init__(db)
+        self.file_path = file_path
 
     @abstractmethod
-    def _extract(self) -> Any:
-        """Extracts raw data from the processor's source.
+    def _extract(self) -> pd.DataFrame:
+        """Reads the dataset file.
 
         Returns:
-            The raw data object (usually a DataFrame).
+            The raw rows of the file.
+
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            DataProcessingError: If the file cannot be read.
         """
-        pass
 
     @abstractmethod
-    def _transform(self, raw_data: Any) -> Any:
-        """Transforms raw data into a format suitable for the database.
+    def _transform(self, raw_data: pd.DataFrame) -> TransformedDocuments:
+        """Builds the time series documents of the raw rows.
 
         Args:
-            raw_data: The output from the extraction step.
+            raw_data: The raw rows of the file.
 
         Returns:
-            A list of documents ready for insertion.
+            One document per row with a valid time stamp.
         """
-        pass
 
-    @staticmethod
-    def _build_documents(timestamps: Sequence[datetime], rows: Sequence[Mapping[Hashable, Any]], source_identifier: str) -> TransformedDocuments:
-        """Combines timestamps and data rows into time series documents.
-
-        Args:
-            timestamps: Time of each row.
-            rows: Field values of each row, in the same order as timestamps.
-            source_identifier: String identifying the data source.
+    def run(self) -> int:
+        """Replaces the content of the collection with the documents built from the whole file.
 
         Returns:
-            One document per row with the fields timestamp, metadata and data.
-        """
-        return rows_to_documents(timestamps, rows, source_identifier)
+            The number of stored documents.
 
-    @abstractmethod
-    def run(self) -> None:
-        """Executes the full ETL pipeline: Extract -> Transform -> Load."""
-        pass
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            DataProcessingError: If the file cannot be read or holds no valid row, so the stored documents are kept.
+            pymongo.errors.PyMongoError: If the documents cannot be stored.
+        """
+        documents = self._transform(self._extract())
+        if not documents:
+            raise DataProcessingError(f"{self.file_path} holds no row with a valid time stamp; the stored documents are kept.")
+
+        self._ensure_timeseries_collection(self.COLLECTION_NAME, time_field="timestamp", meta_field="metadata")
+        self._load_data(self.COLLECTION_NAME, documents, clear_collection=True)
+        logger.info("Replaced the content of %s with %d documents.", self.COLLECTION_NAME, len(documents))
+        return len(documents)

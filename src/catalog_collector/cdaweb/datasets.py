@@ -4,11 +4,12 @@ from typing import Any
 
 import requests
 
-from catalog_collector.cdaweb.http import CdawebRequestError, get_json
+from catalog_collector.cdaweb.web_service import get_json
 from space_weather_analysis.catalog.repository import CatalogRepository
 from space_weather_analysis.metadata.normalize import optional_text
 from space_weather_analysis.metadata.overlays.cdas import CdasTimeInterval, cdas_time_interval
 from space_weather_analysis.metadata.overlays.cdaweb import cdas_dataset_id, is_cdaweb_source
+from space_weather_analysis.util.error_handling import DataProcessingError
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +50,13 @@ def fetch_cdas_datasets(session: requests.Session, url: str = CDAS_DATASETS_URL)
         The entries keyed by dataset ID; entries without ID are left out.
 
     Raises:
-        CdawebRequestError: If the download fails or the response is no dataset list; carries the Retry-After wait of HTTP 429 and 503.
+        DataRetrievalError: If the download fails; carries the Retry-After wait of HTTP 429 and 503.
+        DataProcessingError: If the response is no dataset list.
     """
     response = get_json(session, url, CDAS_TIMEOUT, "CDAS dataset list")
     entries = response.get("DatasetDescription") if isinstance(response, dict) else None
     if not isinstance(entries, list):
-        raise CdawebRequestError(f"CDAS dataset list {url} holds no list of datasets")
+        raise DataProcessingError(f"CDAS dataset list {url} holds no list of datasets")
 
     datasets: dict[str, CdasDataset] = {}
     for entry in entries:

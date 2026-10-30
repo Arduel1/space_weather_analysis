@@ -1,12 +1,10 @@
 import logging
-import pathlib
-from typing import Optional
 
 import pandas as pd
-from pymongo.database import Database
 
 from pipeline_service.pipelines.processors.base import BaseETLProcessor
-from pipeline_service.util.documents import TransformedDocuments
+from pipeline_service.util.documents import TransformedDocuments, rows_to_documents
+from space_weather_analysis.util.error_handling import DataProcessingError
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +16,10 @@ class SilsoETL(BaseETLProcessor):
     """
 
     COLLECTION_NAME = "silso_sunspot_daily"
-    DEFAULT_BATCH_SIZE = 5000
+    # Identifies the source and version of the data in the metadata field of every document.
+    SOURCE_IDENTIFIER = "SILSO_V2.0"
 
-    _COLUMN_NAMES = [
+    _COLUMN_NAMES = (
         "year",
         "month",
         "day",
@@ -29,67 +28,52 @@ class SilsoETL(BaseETLProcessor):
         "std_dev",
         "num_observations",
         "indicator",
-    ]
+    )
     # Fields that hold placeholders instead of measurements on days without a sunspot number (-1).
-    _FIELDS_UNSET_ON_MISSING_DAY = ["sunspot_number", "std_dev", "num_observations"]
+    _FIELDS_UNSET_ON_MISSING_DAY = ("sunspot_number", "std_dev", "num_observations")
 
-    def __init__(self, db: Database, file_path: pathlib.Path) -> None:
-        """Initializes the sunspot data ETL processor.
-
-        Args:
-            db: The MongoDB database instance.
-            file_path: Path to the sunspot data CSV file.
-        """
-        super().__init__(db)
-        self.file_path = file_path
-
-    def _extract(self) -> Optional[pd.DataFrame]:
-        """Extracts sunspot data from the local CSV file.
+    def _extract(self) -> pd.DataFrame:
+        """Reads the semicolon-separated SILSO file with every field as text.
 
         Returns:
-            A DataFrame containing the raw data, or None if extraction fails.
-        """
-        logger.info(f"--- Starting Extract for SILSO: {self.file_path} ---")
-        if not self.file_path.exists():
-            logger.error(f"SILSO data file not found at: {self.file_path}")
-            return None
+            The raw rows of the file.
 
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            DataProcessingError: If the file cannot be read.
+        """
+        if not self.file_path.exists():
+            raise FileNotFoundError(f"SILSO data file not found at {self.file_path}")
         try:
-            df = pd.read_csv(
+            raw_data = pd.read_csv(
                 self.file_path,
                 sep=";",
-                names=self._COLUMN_NAMES,
+                names=list(self._COLUMN_NAMES),
                 # Text columns let the transform step convert and validate each field on its own.
                 dtype=str,
                 skipinitialspace=True,
             )
-            logger.info(f"Extracted {len(df)} rows from CSV.")
-            return df
-        except Exception as e:
-            logger.error(f"Error reading SILSO file: {e}", exc_info=True)
-            return None
+        except (OSError, UnicodeDecodeError, pd.errors.ParserError) as error:
+            raise DataProcessingError(f"SILSO data file {self.file_path} cannot be read: {error}") from error
+        logger.info("Extracted %d rows from %s.", len(raw_data), self.file_path)
+        return raw_data
 
-    def _transform(self, raw_data: Optional[pd.DataFrame]) -> TransformedDocuments:
-        """Transforms the raw sunspot DataFrame into MongoDB documents.
+    def _transform(self, raw_data: pd.DataFrame) -> TransformedDocuments:
+        """Builds one document per row with a valid date, omitting the placeholders of days without a sunspot number.
 
         Args:
-            raw_data: The raw data from the extraction step.
+            raw_data: The raw rows of the file.
 
         Returns:
-            A list of formatted dictionaries for MongoDB.
+            The time series documents.
         """
-        if raw_data is None:
-            logger.warning("Transform step skipped as no data was extracted.")
-            return []
-
-        logger.info("--- Starting Transform for SILSO ---")
         # An unparsable value becomes NA in its own column only, so the rest of the row stays usable.
         numeric = raw_data.apply(pd.to_numeric, errors="coerce")
 
-        timestamps_all = pd.to_datetime(numeric[["year", "month", "day"]], errors="coerce")
+        timestamps_all = pd.to_datetime(numeric[["year", "month", "day"]], errors="coerce").dt.tz_localize("UTC")
         has_valid_date = timestamps_all.notna()
         if not has_valid_date.all():
-            logger.warning(f"Skipped {(~has_valid_date).sum()} rows without a valid date.")
+            logger.warning("Skipped %d rows without a valid date.", (~has_valid_date).sum())
         numeric = numeric[has_valid_date]
 
         is_missing = numeric["sunspot_number"] == -1
@@ -110,18 +94,12 @@ class SilsoETL(BaseETLProcessor):
         raw_fields = raw_rows.rename(columns={"indicator": "is_provisional"})[data.columns]
         given = raw_fields.notna()
         invalid = data.isna() & given
-        invalid.loc[is_missing, self._FIELDS_UNSET_ON_MISSING_DAY] = False
+        invalid.loc[is_missing, list(self._FIELDS_UNSET_ON_MISSING_DAY)] = False
         for column, count in invalid.sum().items():
             if count:
-                logger.warning(f"Omitted {count} invalid values in field {column}.")
+                logger.warning("Omitted %d invalid values in field %s.", count, column)
 
-        data_payloads = data.to_dict("records")
-        timestamps = timestamps_all[has_valid_date].to_list()
-
-        documents = self._build_documents(timestamps, data_payloads, "SILSO_V2.0")
-
-        logger.info(f"Transformed {len(documents)} documents.")
-        return documents
+        return rows_to_documents(timestamps_all[has_valid_date].to_list(), data.to_dict("records"), self.SOURCE_IDENTIFIER)
 
     @staticmethod
     def _to_count(values: pd.Series) -> pd.Series:
@@ -134,21 +112,3 @@ class SilsoETL(BaseETLProcessor):
             The values as Int64; fractional values become NA.
         """
         return values.where(values % 1 == 0).astype("Int64")
-
-    def run(self) -> None:
-        """Orchestrates the ETL process for sunspot data."""
-        logger.info("--- Starting ETL process for SILSO ---")
-
-        raw_data_df = self._extract()
-        documents = self._transform(raw_data_df)
-
-        if documents:
-            self._ensure_timeseries_collection(
-                self.COLLECTION_NAME,
-                time_field="timestamp",
-                meta_field="metadata",
-            )
-            # The file holds the complete dataset including revised provisional values, so each run replaces the collection content.
-            self._load_data(self.COLLECTION_NAME, documents, self.DEFAULT_BATCH_SIZE, clear_collection=True)
-
-        logger.info("--- Finished ETL process for SILSO ---")

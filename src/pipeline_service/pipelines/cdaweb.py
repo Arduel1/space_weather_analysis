@@ -1,9 +1,11 @@
 import logging
 import pathlib
 import pickle
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from functools import partial
+from types import MappingProxyType
+from typing import Any, ClassVar
 
 import gridfs
 import pandas as pd
@@ -22,7 +24,8 @@ from pipeline_service.parsing.cdf import (
 )
 from pipeline_service.parsing.file_parser import parse_datafiles
 from pipeline_service.parsing.netcdf import parse_xarray_timestamp
-from pipeline_service.pipelines.base import BasePipeline, ProgressCallback
+from pipeline_service.pipelines.base import METADATA_SAVE_ERRORS, BasePipeline, ProgressCallback
+from pipeline_service.pipelines.report import IngestionReport
 from pipeline_service.util.documents import build_gridfs_reference_document, dataframe_to_documents
 from pipeline_service.util.time import generate_time_chunks
 from space_weather_analysis.catalog.models import SourceType
@@ -49,11 +52,7 @@ logger = logging.getLogger(__name__)
 
 
 class CdawebPipeline(MongoLoader, BasePipeline):
-    """Fetches, downloads, parses and documents CDAWeb data via SunPy/Fido.
-
-    This pipeline relies on the master catalog
-    to discover data sources (Observatory Groups) and processes data
-    in time chunks to handle large datasets.
+    """Ingests CDAWeb datasets chunk by chunk from data files downloaded with SunPy Fido.
 
     CDAWeb files follow the ISTP Metadata Guidelines (International Solar-Terrestrial
     Physics, https://istp-metadata.readthedocs.io/), which define the attributes of each
@@ -64,28 +63,24 @@ class CdawebPipeline(MongoLoader, BasePipeline):
     # Time span of one download and of one check for already stored documents
     CHUNK_DURATION = timedelta(days=7)
     # Time stamp locations from BIN_LOCATION that the metadata record names; any other becomes 'other'
-    ISTP_TIMESTAMP_LOCATIONS: dict[str, TimestampLocation] = {"begin": "begin", "center": "center", "end": "end"}
+    ISTP_TIMESTAMP_LOCATIONS: ClassVar[Mapping[str, TimestampLocation]] = MappingProxyType({"begin": "begin", "center": "center", "end": "end"})
 
-    def __init__(self, db: Database, base_data_path: pathlib.Path, client: CdawebClient | None = None):
+    TIME_FIELD = "timestamp"
+
+    def __init__(self, db: Database, download_dir: pathlib.Path, client: CdawebClient | None = None) -> None:
         """Initializes the pipeline.
 
         Args:
             db: The MongoDB database instance.
-            base_data_path: The root directory for data downloads.
-            client: The client downloading the data files; a new CdawebClient if None.
+            download_dir: The directory the data files are downloaded to.
+            client: The client downloading the data files; a new CdawebClient downloading to download_dir if None.
         """
         super().__init__(db)
-        self.client: CdawebClient = client if client is not None else CdawebClient()
-        self.base_data_dir: pathlib.Path = base_data_path
+        self.client: CdawebClient = client if client is not None else CdawebClient(download_dir)
         self.metadata_repository: MetadataRepository = MongoMetadataRepository(db)
         self.catalog_repository: CatalogRepository = MongoCatalogRepository(db)
         self.coverage_repository: CoverageRepository = MongoCoverageRepository(db)
         self.fs: gridfs.GridFS = gridfs.GridFS(self.db)
-
-        if not self.base_data_dir.exists():
-            self.base_data_dir.mkdir(parents=True)
-            logger.info(f"Created base data directory: {self.base_data_dir}")
-        logger.info(f"Pipeline initialized. Data root: {self.base_data_dir}")
 
     def run(
         self,
@@ -93,175 +88,131 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         start_time: datetime | None,
         end_time: datetime | None,
         progress_callback: ProgressCallback | None = None,
-    ) -> None:
-        """Runs the complete data pipeline orchestration.
-
-        Iterates through time chunks and reports progress.
+    ) -> IngestionReport:
+        """Ingests each dataset in chunks of CHUNK_DURATION, skipping chunks that already hold documents.
 
         Args:
-            datasets: A list of dataset IDs to fetch.
-            start_time: The start time for the data query.
-            end_time: The end time for the data query.
-            progress_callback: Optional callback to report progress and status.
+            datasets: The IDs of the datasets to ingest.
+            start_time: The start of the time range (inclusive).
+            end_time: The end of the time range (exclusive).
+            progress_callback: Receives the progress of the run; None to report nothing.
+
+        Returns:
+            The report with the number of tried chunks and the chunks that failed.
+
+        Raises:
+            ValueError: If start or end time is missing, no dataset is given or a dataset has no FIDO_CDAWEB source in the master catalog.
         """
         if not start_time or not end_time:
-            logger.error("Start time and end time are required for CDAWeb pipeline.")
-            return
-
-        start_time = ensure_aware(start_time)
-        end_time = ensure_aware(end_time)
-
-        logger.info("Starting CDAWeb Pipeline")
-        logger.info(f"Time Range: {start_time} to {end_time}")
-
+            raise ValueError("The CDAWeb pipeline needs a start and an end time.")
         if not datasets:
-            logger.warning("No datasets specified in 'datasets'.")
-            return
+            raise ValueError("The CDAWeb pipeline needs at least one dataset.")
+        group_names = {dataset_id: self._find_fido_group(dataset_id) for dataset_id in datasets}
 
-        time_chunks = generate_time_chunks(start_time, end_time, self.CHUNK_DURATION)
-        total_chunks = len(time_chunks)
-        time_field = "timestamp"
-
-        total_datasets = len(datasets)
-
-        for i, dataset_id in enumerate(datasets):
-            group_name = self._find_fido_group(dataset_id)
-            if not group_name:
-                logger.error(f"Skipping {dataset_id}: Could not find its {SourceType.FIDO_CDAWEB} group in catalog.")
-                continue
-
+        time_chunks = generate_time_chunks(ensure_aware(start_time), ensure_aware(end_time), self.CHUNK_DURATION)
+        report = IngestionReport()
+        for dataset_index, dataset_id in enumerate(datasets):
             collection_name = sanitize_collection_name(dataset_id)
-
-            # Ensure the target collection exists with time-series options
-            self._ensure_timeseries_collection(collection_name, time_field=time_field, meta_field="metadata")
-
-            logger.info(f"Processing dataset {dataset_id} (group {group_name}) for {total_chunks} chunks...")
+            self._ensure_timeseries_collection(collection_name, time_field=self.TIME_FIELD, meta_field="metadata")
+            logger.info("Processing dataset %s (group %s) in %d chunks...", dataset_id, group_names[dataset_id], len(time_chunks))
             skipped_variables_reported = False
             processed_any_chunk = False
 
-            for j, (chunk_start, chunk_stop) in enumerate(time_chunks):
+            for chunk_index, (chunk_start, chunk_stop) in enumerate(time_chunks):
                 self._report_chunk_progress(
-                    progress_callback, i, total_datasets, j, total_chunks, f"Downloading {dataset_id}: Chunk {j + 1}/{total_chunks}"
+                    progress_callback,
+                    dataset_index,
+                    len(datasets),
+                    chunk_index,
+                    len(time_chunks),
+                    f"Downloading {dataset_id}: Chunk {chunk_index + 1}/{len(time_chunks)}",
                 )
-
-                logger.info(f"Checking chunk {j + 1}/{total_chunks}: {chunk_start} to {chunk_stop}")
-
-                # Check if data for this chunk already exists in DB
-                query = {time_field: {"$gte": chunk_start, "$lt": chunk_stop}}
-                if self.db[collection_name].find_one(query, {"_id": 1}):
-                    logger.info("Skipping chunk: Data already exists in DB.")
+                if self.db[collection_name].find_one({self.TIME_FIELD: {"$gte": chunk_start, "$lt": chunk_stop}}, {"_id": 1}):
+                    logger.info("Skipping chunk %s to %s of %s: documents already stored.", chunk_start, chunk_stop, dataset_id)
                     continue
 
-                logger.info("Processing chunk: No data found in DB.")
-                skipped_variables = self._process_dataset(dataset_id, group_name, chunk_start, chunk_stop)
+                skipped_variables = self._ingest_chunk(
+                    report,
+                    dataset_id,
+                    chunk_start,
+                    chunk_stop,
+                    partial(self._process_dataset, dataset_id, group_names[dataset_id], chunk_start, chunk_stop),
+                )
                 processed_any_chunk = True
 
                 # Reported once per dataset, as every chunk skips the same variables
                 if skipped_variables and not skipped_variables_reported:
-                    logger.warning(f"Dataset {dataset_id}: arrays with more than {MAX_ARRAY_COLUMNS} elements are not stored: {skipped_variables}")
+                    logger.warning(
+                        "Dataset %s: arrays with more than %d elements are not stored: %s", dataset_id, MAX_ARRAY_COLUMNS, skipped_variables
+                    )
                     skipped_variables_reported = True
 
             # 1D documents and the GridFS reference documents of N-D data both carry their time in the time field
             if processed_any_chunk:
                 self._refresh_coverage(self.coverage_repository, dataset_id, collection_name)
 
-        logger.info("CDAWeb Pipeline finished.")
+        return report
 
-    def _find_fido_group(self, dataset_id: str) -> str | None:
-        """Reads the source_id of the first FIDO_CDAWEB source of a dataset from the master catalog.
+    def _find_fido_group(self, dataset_id: str) -> str:
+        """Reads the observatory group of the first FIDO_CDAWEB source of a dataset from the master catalog.
 
         Args:
-            dataset_id: The dataset ID to query.
+            dataset_id: The dataset ID.
 
         Returns:
-            The source_id (group name) or None if not found.
+            The group name, the source_id of the source.
+
+        Raises:
+            ValueError: If the master catalog lists no FIDO_CDAWEB source with a group for the dataset.
         """
-        logger.info(f"Querying catalog for {SourceType.FIDO_CDAWEB} source for: {dataset_id}")
-        try:
-            item = self.catalog_repository.get(dataset_id)
+        for source in self.catalog_repository.get_sources(dataset_id, SourceType.FIDO_CDAWEB):
+            group_name = source.get("source_id")
+            if group_name:
+                return group_name
+        raise ValueError(f"The master catalog lists no {SourceType.FIDO_CDAWEB} source for dataset '{dataset_id}'.")
 
-            if not item:
-                logger.error(f"Dataset '{dataset_id}' not found in the master catalog")
-                return None
-
-            for source in item["sources"]:
-                if source.get("type") == SourceType.FIDO_CDAWEB:
-                    source_id = source.get("source_id")
-                    if source_id:
-                        logger.info(f"Found FIDO source for {dataset_id}: {source_id}")
-                        return source_id
-
-            logger.warning(f"No {SourceType.FIDO_CDAWEB} type source found for {dataset_id}")
-            return None
-        except Exception as e:
-            logger.error(f"Error querying catalog for {dataset_id}: {e}", exc_info=True)
-            return None
-
-    def _process_dataset(
-        self,
-        dataset_id: str,
-        group_name: str,
-        start_time: datetime,
-        end_time: datetime,
-    ) -> list[str]:
-        """Runs the full pipeline for a single dataset chunk.
+    def _process_dataset(self, dataset_id: str, group_name: str, start_time: datetime, end_time: datetime) -> list[str]:
+        """Downloads, parses and stores one chunk of a dataset and saves its metadata.
 
         Args:
-            dataset_id: The dataset ID to process.
-            group_name: The group name (for download path).
-            start_time: The start time for the query chunk (inclusive).
-            end_time: The end time for the query chunk (exclusive).
+            dataset_id: The dataset ID.
+            group_name: The observatory group of the dataset, part of the source identifier of the documents.
+            start_time: The start of the chunk (inclusive).
+            end_time: The end of the chunk (exclusive).
 
         Returns:
             The names of the variables left out because they have too many components for columns.
+
+        Raises:
+            DataRetrievalError: If the download failed.
+            pymongo.errors.PyMongoError: If the documents cannot be stored.
         """
-        logger.info(f"Processing Dataset Chunk: {dataset_id} ({start_time} to {end_time})")
+        result = self.client.fetch(dataset_id, start_time, end_time)
+        if result.data is None:
+            logger.info("No data file of %s for %s to %s.", dataset_id, start_time, end_time)
+            return []
 
         opened_datasets: list[xr.Dataset] = []
         skipped_variables: list[str] = []
         stored_column_types: dict[str, DataType | None] = {}
         try:
-            # We construct the download path here to pass it to the client
-            download_dir = self.base_data_dir / group_name / dataset_id
-            download_dir.mkdir(parents=True, exist_ok=True)
-
-            downloaded_files = self.client.get_data(dataset_id, start_time, end_time, download_path=download_dir)
-
-            if not downloaded_files:
-                logger.warning(f"Skipping parse/metadata for {dataset_id}: No files downloaded.")
-                return skipped_variables
-
-            # Convert Path objects to strings if parser expects strings
-            file_paths = [str(p) for p in downloaded_files]
-
-            data_object, file_metadata = parse_datafiles(file_paths, start_time, end_time, variables_to_parse=[])
-
+            data_object, file_metadata = parse_datafiles([str(path) for path in result.data], start_time, end_time, variables_to_parse=[])
             collection_name = sanitize_collection_name(dataset_id)
             source_id = f"{SourceType.FIDO_CDAWEB}/{group_name}"
 
-            if data_object is not None:
-                if isinstance(data_object, GenericTimeSeries):
-                    stored_column_types, skipped_variables = self._handle_1d_data(data_object, collection_name, source_id, file_metadata)
-                elif isinstance(data_object, list):
-                    self._load_nd_data_to_gridfs(data_object, collection_name, source_id, opened_datasets)
-                else:
-                    logger.warning(f"Data object for {dataset_id} was not a recognized type ({type(data_object)}). Cannot load.")
+            if isinstance(data_object, GenericTimeSeries):
+                stored_column_types, skipped_variables = self._handle_1d_data(data_object, collection_name, source_id, file_metadata)
+            elif isinstance(data_object, list):
+                self._load_nd_data_to_gridfs(data_object, collection_name, source_id, opened_datasets)
             else:
-                logger.info(f"No 1D or N-D data could be parsed for {dataset_id} in this chunk.")
+                logger.info("No 1D or N-D data could be parsed for %s in this chunk.", dataset_id)
 
             if file_metadata:
                 self._save_pipeline_metadata(dataset_id, file_metadata, stored_column_types, skipped_variables)
-
-        except Exception as e:
-            logger.error(f"Pipeline step failed for dataset chunk {dataset_id}: {e}", exc_info=True)
         finally:
-            # Cleanup opened xarray datasets to release file handles
-            for ds in opened_datasets:
-                try:
-                    ds.close()
-                except Exception as e_close:
-                    logger.warning(f"Failed to close xarray dataset: {e_close}")
-            logger.info(f"Finished Dataset Chunk: {dataset_id}")
+            # Releases the file handles of the opened xarray datasets
+            for opened_dataset in opened_datasets:
+                opened_dataset.close()
         return skipped_variables
 
     def _handle_1d_data(
@@ -281,14 +232,13 @@ class CdawebPipeline(MongoLoader, BasePipeline):
 
         Returns:
             The value type of each stored column and the names of the variables left out because they have too many components for columns.
-        """
-        logger.info(f"1D data for {collection_name} parsed. Transforming for MongoDB load...")
-        df_to_load, skipped_variables = clean_cdf_columns(data_object.to_dataframe(), file_metadata)
-        logger.info(f"Transforming {len(df_to_load)} DataFrame rows to MongoDB documents...")
-        documents = dataframe_to_documents(df_to_load, source_id)
 
+        Raises:
+            pymongo.errors.PyMongoError: If the documents cannot be stored.
+        """
+        df_to_load, skipped_variables = clean_cdf_columns(data_object.to_dataframe(), file_metadata)
+        documents = dataframe_to_documents(df_to_load, source_id)
         self._load_data(collection_name, documents)
-        logger.info(f"Successfully loaded {len(documents)} documents into collection '{collection_name}'")
         stored_column_types = {str(column_name): column_data_type(df_to_load[column_name]) for column_name in df_to_load.columns}
         return stored_column_types, skipped_variables
 
@@ -307,16 +257,16 @@ class CdawebPipeline(MongoLoader, BasePipeline):
             source_id: Source identifier string.
             opened_datasets: List to track opened datasets for cleanup.
         """
-        logger.info(f"N-D data for {collection_name} parsed. Storing payloads in GridFS...")
+        logger.info("N-D data for %s parsed. Storing payloads in GridFS...", collection_name)
         opened_datasets.extend([ds for ds, _, _ in data_object])
 
         total_loaded = 0
         n_files = len(data_object)
 
         for i, (ds_file, time_dim, time_coord) in enumerate(data_object):
-            logger.info(f"Processing file {i + 1}/{n_files}")
+            logger.info("Processing file %d/%d", i + 1, n_files)
             try:
-                logger.info(f"Found time dimension: '{time_dim}' (coord: '{time_coord}')")
+                logger.info("Found time dimension %s (coordinate %s)", time_dim, time_coord)
 
                 documents_batch: list[dict[str, Any]] = []
                 for doc in self._transform_xarray_to_docs(ds_file, source_id, time_dim, time_coord, collection_name):
@@ -330,10 +280,10 @@ class CdawebPipeline(MongoLoader, BasePipeline):
                     self._load_data(collection_name, documents_batch)
                     total_loaded += len(documents_batch)
 
-            except Exception as e:
-                logger.error(f"Failed to process file {i + 1}: {e}", exc_info=True)
+            except Exception:
+                logger.exception("Failed to process file %d", i + 1)
 
-        logger.info(f"N-D data processing complete. Documents (pointers) loaded: {total_loaded}")
+        logger.info("N-D data processing complete. Documents (pointers) loaded: %d", total_loaded)
 
     def _transform_xarray_to_docs(
         self,
@@ -365,7 +315,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
             timestamp = parse_xarray_timestamp(ts_slice, time_coord, i, allow_fallback=False)
 
             if timestamp is None:
-                logger.warning(f"Timestamp parse returned None for slice index={i}, time_coord='{time_coord}'. Skipping slice.")
+                logger.warning("Timestamp parse returned None for slice index %d, time coordinate %s. Skipping slice.", i, time_coord)
                 continue
 
             timestamp = ensure_aware(timestamp)
@@ -377,7 +327,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
                     data_payload[str(var_name)] = var_data.values.tolist()
                 except Exception as e:
                     # A variable that fails to serialize is left out of the payload, the others are kept
-                    logger.debug(f"Variable '{var_name}' at {timestamp} not serializable, left out of the payload: {e}")
+                    logger.debug("Variable %s at %s not serializable, left out of the payload: %s", var_name, timestamp, e)
 
             try:
                 payload_bytes = pickle.dumps(data_payload)
@@ -390,11 +340,8 @@ class CdawebPipeline(MongoLoader, BasePipeline):
                     timestamp=timestamp,
                     metadata={"collection": collection_name},
                 )
-            except Exception as e:
-                logger.error(
-                    f"Failed to write payload to GridFS for {timestamp}: {e}",
-                    exc_info=True,
-                )
+            except Exception:
+                logger.exception("Failed to write payload to GridFS for %s", timestamp)
                 continue
 
             yield build_gridfs_reference_document(timestamp, gridfs_id, source_info)
@@ -432,7 +379,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         try:
             self.metadata_repository.save_raw(dataset_id, "file", file_metadata, None, retrieved_at)
             save_with_overlays(self.metadata_repository, [record])
-        except Exception:
+        except METADATA_SAVE_ERRORS:
             logger.exception("Failed to save metadata of %s", dataset_id)
 
     @staticmethod

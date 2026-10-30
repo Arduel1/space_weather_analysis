@@ -1,14 +1,17 @@
 import logging
 import math
-import pathlib
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
+from functools import partial
+from types import MappingProxyType
+from typing import Any, ClassVar
 
 import pandas as pd
 from pymongo.database import Database
 
 from pipeline_service.database.mongo_loader import MongoLoader
-from pipeline_service.pipelines.base import BasePipeline, ProgressCallback
+from pipeline_service.pipelines.base import METADATA_SAVE_ERRORS, BasePipeline, ProgressCallback
+from pipeline_service.pipelines.report import IngestionReport
 from pipeline_service.util.documents import dataframe_to_documents
 from pipeline_service.util.time import generate_time_chunks
 from space_weather_analysis.catalog.models import SourceType
@@ -35,78 +38,85 @@ class GfzPipeline(MongoLoader, BasePipeline):
     CHUNK_DURATION = timedelta(days=30)
 
     # Interval length per index, used to tell whether a stored chunk is complete
-    INDEX_CADENCES: Dict[str, timedelta] = {"Kp": timedelta(hours=3)}
+    INDEX_CADENCES: ClassVar[Mapping[str, timedelta]] = MappingProxyType({"Kp": timedelta(hours=3)})
 
-    INDEX_DESCRIPTIONS: Dict[str, str] = {"Kp": "Planetary geomagnetic Kp index, 0 to 9 in steps of one third"}
+    INDEX_DESCRIPTIONS: ClassVar[Mapping[str, str]] = MappingProxyType({"Kp": "Planetary geomagnetic Kp index, 0 to 9 in steps of one third"})
 
     PRELIMINARY_STATUS = "pre"
 
     # Values of the 'status' field and their meaning
-    STATUS_MEANINGS: Dict[str, str] = {"def": "definitive", PRELIMINARY_STATUS: "preliminary"}
+    STATUS_MEANINGS: ClassVar[Mapping[str, str]] = MappingProxyType({"def": "definitive", PRELIMINARY_STATUS: "preliminary"})
 
     TIME_FIELD = "timestamp"
 
-    def __init__(self, db: Database, base_data_path: pathlib.Path):
+    def __init__(self, db: Database, client: GfzClient | None = None) -> None:
         """Initializes the GFZ pipeline.
 
         Args:
-            db: The database connection instance.
-            base_data_path: Root directory for storing downloaded files.
+            db: The MongoDB database instance.
+            client: The client fetching the index values; a new GfzClient if None.
         """
         super().__init__(db)
-        self.base_data_path = base_data_path
-        self.client = GfzClient()
+        self.client = client if client is not None else GfzClient()
         self.metadata_repository: MetadataRepository = MongoMetadataRepository(db)
         self.coverage_repository: CoverageRepository = MongoCoverageRepository(db)
 
     def run(
         self,
-        datasets: List[str],
-        start_time: Optional[datetime],
-        end_time: Optional[datetime],
-        progress_callback: Optional[ProgressCallback] = None,
-    ) -> None:
-        """Executes the download process for the requested GFZ datasets.
+        datasets: list[str],
+        start_time: datetime | None,
+        end_time: datetime | None,
+        progress_callback: ProgressCallback | None = None,
+    ) -> IngestionReport:
+        """Ingests each index in chunks of CHUNK_DURATION.
 
         Args:
-            datasets: List of GFZ index names.
+            datasets: The GFZ index names.
             start_time: Start of the data range (inclusive); a naive value is read as UTC.
             end_time: End of the data range (exclusive); a naive value is read as UTC.
-            progress_callback: Optional callback to report progress.
+            progress_callback: Receives the progress of the run; None to report nothing.
+
+        Returns:
+            The report with the number of tried chunks and the chunks that failed.
+
+        Raises:
+            ValueError: If start or end time is missing, no index is given or GFZ offers an index of no such name.
         """
         if not start_time or not end_time:
-            logger.error("Start and end time are required for GFZ pipeline.")
-            return
+            raise ValueError("The GFZ pipeline needs a start and an end time.")
+        if not datasets:
+            raise ValueError("The GFZ pipeline needs at least one index.")
+        unknown_indices = sorted(set(datasets) - self.client.ALLOWED_INDICES)
+        if unknown_indices:
+            raise ValueError(f"Unknown GFZ indices {unknown_indices}; allowed are {sorted(self.client.ALLOWED_INDICES)}.")
 
         start_time = ensure_aware(start_time)
         end_time = ensure_aware(end_time)
-        total_datasets = len(datasets)
+        report = IngestionReport()
 
-        for i, dataset_id in enumerate(datasets):
-            logger.info(f"Processing GFZ dataset: {dataset_id}")
-
-            # Use chunks to provide granular progress
+        for dataset_index, dataset_id in enumerate(datasets):
             time_chunks = generate_time_chunks(start_time, end_time, self.CHUNK_DURATION)
-            total_chunks = len(time_chunks)
-
             collection_name = sanitize_collection_name(dataset_id)
             self._ensure_timeseries_collection(collection_name, time_field=self.TIME_FIELD, meta_field="metadata")
 
             # Response of the last chunk with data, the source of the dataset metadata
-            latest_response: Optional[pd.DataFrame] = None
-
-            for j, (chunk_start, chunk_stop) in enumerate(time_chunks):
+            latest_response: pd.DataFrame | None = None
+            for chunk_index, (chunk_start, chunk_stop) in enumerate(time_chunks):
                 self._report_chunk_progress(
-                    progress_callback, i, total_datasets, j, total_chunks, f"Dataset {dataset_id}: Processing chunk {j + 1}/{total_chunks}"
+                    progress_callback,
+                    dataset_index,
+                    len(datasets),
+                    chunk_index,
+                    len(time_chunks),
+                    f"Dataset {dataset_id}: Processing chunk {chunk_index + 1}/{len(time_chunks)}",
                 )
-
-                # A failing chunk is logged and the remaining chunks still run
-                try:
-                    chunk_response = self._process_chunk(dataset_id, collection_name, chunk_start, chunk_stop)
-                except Exception as e:
-                    logger.error(f"Failed to process {dataset_id} chunk {chunk_start}-{chunk_stop}: {e}", exc_info=True)
+                if self._is_chunk_complete_and_final(dataset_id, collection_name, chunk_start, chunk_stop):
+                    logger.info("Skipping chunk %s to %s of %s: stored values are complete and definitive.", chunk_start, chunk_stop, dataset_id)
                     continue
 
+                chunk_response = self._ingest_chunk(
+                    report, dataset_id, chunk_start, chunk_stop, partial(self._process_chunk, dataset_id, collection_name, chunk_start, chunk_stop)
+                )
                 if chunk_response is not None:
                     latest_response = chunk_response
 
@@ -114,10 +124,10 @@ class GfzPipeline(MongoLoader, BasePipeline):
                 self._save_metadata(dataset_id, collection_name, latest_response)
                 self._refresh_coverage(self.coverage_repository, dataset_id, collection_name)
 
-    def _process_chunk(self, dataset_id: str, collection_name: str, chunk_start: datetime, chunk_stop: datetime) -> Optional[pd.DataFrame]:
-        """Fetches one chunk and replaces its stored documents, unless the stored chunk is complete and final.
+        return report
 
-        Stored documents stay untouched if the fetch delivers no rows.
+    def _process_chunk(self, dataset_id: str, collection_name: str, chunk_start: datetime, chunk_stop: datetime) -> pd.DataFrame | None:
+        """Fetches one chunk and replaces its stored documents; stored documents stay if the chunk holds no value.
 
         Args:
             dataset_id: The GFZ index name.
@@ -126,27 +136,21 @@ class GfzPipeline(MongoLoader, BasePipeline):
             chunk_stop: End of the chunk (exclusive).
 
         Returns:
-            The fetched response, or None if the chunk was skipped or delivered no rows inside the chunk.
+            The fetched values, or None if GFZ has no value inside the chunk.
+
+        Raises:
+            DataRetrievalError: If the request failed.
+            DataProcessingError: If the response is no index data.
+            pymongo.errors.PyMongoError: If the documents cannot be replaced.
         """
-        if self._is_chunk_complete_and_final(dataset_id, collection_name, chunk_start, chunk_stop):
-            logger.info(f"Skipping {dataset_id} chunk {chunk_start}-{chunk_stop}: stored values are complete and definitive.")
+        result = self.client.fetch(dataset_id, chunk_start, chunk_stop)
+        if result.data is None:
+            logger.info("No value of %s inside chunk %s to %s; stored documents are kept.", dataset_id, chunk_start, chunk_stop)
             return None
 
-        df = self.client.get_data(dataset_id, chunk_start, chunk_stop)
-
-        if df.empty:
-            logger.info(f"No data returned for {dataset_id} in chunk {chunk_start}-{chunk_stop}; stored documents are kept.")
-            return None
-
-        # The API includes the value at chunk_stop, which belongs to the next chunk
-        chunk_rows = df[(df.index >= chunk_start) & (df.index < chunk_stop)]
-        if chunk_rows.empty:
-            logger.info(f"No data inside chunk {chunk_start}-{chunk_stop} for {dataset_id}; stored documents are kept.")
-            return None
-
-        documents = dataframe_to_documents(chunk_rows, f"GFZ_POTSDAM/{dataset_id}")
+        documents = dataframe_to_documents(result.data, f"{SourceType.GFZ_POTSDAM}/{dataset_id}")
         self._replace_time_range(collection_name, self.TIME_FIELD, chunk_start, chunk_stop, documents)
-        return df
+        return result.data
 
     def _is_chunk_complete_and_final(self, dataset_id: str, collection_name: str, chunk_start: datetime, chunk_stop: datetime) -> bool:
         """Tells whether the stored chunk holds one document per interval and no preliminary value.
@@ -164,7 +168,7 @@ class GfzPipeline(MongoLoader, BasePipeline):
         if cadence is None:
             return False
 
-        chunk_filter: Dict[str, Any] = {self.TIME_FIELD: {"$gte": chunk_start, "$lt": chunk_stop}}
+        chunk_filter: dict[str, Any] = {self.TIME_FIELD: {"$gte": chunk_start, "$lt": chunk_stop}}
         collection = self.db[collection_name]
 
         stored_count = collection.count_documents(chunk_filter)
@@ -186,8 +190,8 @@ class GfzPipeline(MongoLoader, BasePipeline):
             collection_name: The collection holding the index.
             response: A fetched response of the index, carrying the response meta in attrs["meta"].
         """
-        meta: Dict[str, Any] = response.attrs.get("meta", {})
-        retrieved_at = datetime.now(timezone.utc)
+        meta: dict[str, Any] = response.attrs.get("meta", {})
+        retrieved_at = datetime.now(UTC)
         description = self.INDEX_DESCRIPTIONS.get(dataset_id, f"GFZ geomagnetic index {dataset_id}")
         cadence = self.INDEX_CADENCES.get(dataset_id)
 
@@ -220,8 +224,8 @@ class GfzPipeline(MongoLoader, BasePipeline):
         )
         try:
             save_with_overlays(self.metadata_repository, [record])
-        except Exception as e:
-            logger.error(f"Failed to save metadata of {dataset_id}: {e}", exc_info=True)
+        except METADATA_SAVE_ERRORS:
+            logger.exception("Failed to save metadata of %s", dataset_id)
 
 
 def count_grid_times(start: datetime, stop: datetime, cadence: timedelta) -> int:
@@ -235,7 +239,7 @@ def count_grid_times(start: datetime, stop: datetime, cadence: timedelta) -> int
     Returns:
         The number of grid times inside the range.
     """
-    day_start = start.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    day_start = start.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     # The first grid time at or after start
     first_grid_time = day_start + math.ceil((start - day_start) / cadence) * cadence
     if first_grid_time >= stop:

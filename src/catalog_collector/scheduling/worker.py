@@ -9,8 +9,9 @@ from urllib.parse import urlsplit
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from catalog_collector.scheduling.models import MetadataTask, PlannedRequest, TaskFailedError
+from catalog_collector.scheduling.models import MetadataTask, PlannedRequest
 from catalog_collector.scheduling.repository import MetadataTaskRepository
+from space_weather_analysis.util.error_handling import DataProcessingError, DataRetrievalError
 
 logger = logging.getLogger(__name__)
 
@@ -147,8 +148,8 @@ class MetadataWorker:
     def _execute(self, task: MetadataTask, kind: TaskKind, host: str) -> None:
         """Runs one task, records its outcome and starts the pause of its host, at least as long as a requested Retry-After.
 
-        A TaskFailedError is an expected provider failure and is logged as warning; any other exception is a bug and
-        is logged with its traceback. Both are retried, so a long-running worker outlives every single task.
+        A DataRetrievalError or DataProcessingError is an expected provider failure and is logged as warning; any other
+        exception is a bug and is logged with its traceback. Both are retried, so a long-running worker outlives every single task.
 
         Args:
             task: The due task.
@@ -159,8 +160,8 @@ class MetadataWorker:
         retry_after = timedelta(0)
         try:
             kind.run(task)
-        except TaskFailedError as e:
-            if e.retry_after_seconds:
+        except (DataRetrievalError, DataProcessingError) as e:
+            if isinstance(e, DataRetrievalError) and e.retry_after_seconds:
                 retry_after = timedelta(seconds=e.retry_after_seconds)
             finished_at, retry_at = self._record_failure(task, kind, e, retry_after)
             logger.warning("Metadata task '%s' failed (%d in a row); retry at %s: %s", task.id, task.consecutive_failures + 1, retry_at, e)

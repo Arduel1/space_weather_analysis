@@ -1,6 +1,6 @@
 import pathlib
-from datetime import datetime, timezone
-from typing import Callable
+from collections.abc import Callable
+from datetime import UTC, datetime
 
 import pytest
 from pymongo.database import Database
@@ -20,34 +20,23 @@ ROWS_PER_INPUT_FILE = 3
 
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    ("missing_collection", "loaded_collection"),
-    [
-        pytest.param(SUNSPOT_COLLECTION, CME_COLLECTION, id="sunspot_file_missing"),
-        pytest.param(CME_COLLECTION, SUNSPOT_COLLECTION, id="cme_file_missing"),
-    ],
+    "collection", [pytest.param(SUNSPOT_COLLECTION, id="sunspot_file_missing"), pytest.param(CME_COLLECTION, id="cme_file_missing")]
 )
-def test_missing_input_file_creates_no_collection_without_raising(
-    db: Database,
-    tmp_path: pathlib.Path,
-    write_dataset_input: WriteDatasetInput,
-    missing_collection: str,
-    loaded_collection: str,
-) -> None:
-    """A dataset without input file creates no collection; the other dataset of the run is still loaded."""
-    write_dataset_input(tmp_path, loaded_collection)
+def test_missing_input_file_is_rejected_and_creates_no_collection(db: Database, tmp_path: pathlib.Path, collection: str) -> None:
+    """A dataset without input file raises FileNotFoundError, which fails the job, and creates no collection."""
+    with pytest.raises(FileNotFoundError):
+        LocalPipeline(db, tmp_path).run([collection])
 
-    LocalPipeline(db, tmp_path).run([SUNSPOT_COLLECTION, CME_COLLECTION])
-
-    assert missing_collection not in db.list_collection_names()
-    assert db[loaded_collection].count_documents({}) == ROWS_PER_INPUT_FILE
+    assert collection not in db.list_collection_names()
 
 
 @pytest.mark.integration
-def test_unknown_dataset_id_creates_nothing_without_raising(db: Database, full_data_dir: pathlib.Path) -> None:
-    """An unknown dataset ID leaves the database unchanged."""
+def test_unknown_dataset_id_is_rejected_and_creates_nothing(db: Database, full_data_dir: pathlib.Path) -> None:
+    """An unknown dataset ID raises ValueError before any processing and leaves the database unchanged."""
     collections_before = set(db.list_collection_names())
 
-    LocalPipeline(db, full_data_dir).run(["not_a_local_dataset"])
+    with pytest.raises(ValueError, match="Unknown local datasets"):
+        LocalPipeline(db, full_data_dir).run(["not_a_local_dataset", SUNSPOT_COLLECTION])
 
     assert set(db.list_collection_names()) == collections_before
 
@@ -80,9 +69,9 @@ def test_local_run_records_coverage_of_stored_documents(db: Database, sunspot_di
     assert coverage.model_dump(exclude={"updated_at"}) == {
         "dataset_id": SUNSPOT_COLLECTION,
         "collection": SUNSPOT_COLLECTION,
-        "first_timestamp": datetime(2001, 3, 14, tzinfo=timezone.utc),
-        "last_timestamp": datetime(2001, 3, 16, tzinfo=timezone.utc),
+        "first_timestamp": datetime(2001, 3, 14, tzinfo=UTC),
+        "last_timestamp": datetime(2001, 3, 16, tzinfo=UTC),
         "document_count": ROWS_PER_INPUT_FILE,
-        "intervals": [{"start": datetime(2001, 3, 14, tzinfo=timezone.utc), "end": datetime(2001, 3, 17, tzinfo=timezone.utc)}],
+        "intervals": [{"start": datetime(2001, 3, 14, tzinfo=UTC), "end": datetime(2001, 3, 17, tzinfo=UTC)}],
         "bucket": "PT24H",
     }

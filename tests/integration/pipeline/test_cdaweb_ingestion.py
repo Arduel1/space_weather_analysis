@@ -10,6 +10,7 @@ from cdflib.epochs import CDFepoch
 from pymongo.database import Database
 
 from pipeline_service.pipelines.cdaweb import CdawebPipeline
+from space_weather_analysis.clients.base import FetchResult
 from space_weather_analysis.clients.cdaweb import CdawebClient
 from space_weather_analysis.metadata.models import DatasetMetadata
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
@@ -125,22 +126,23 @@ class FakeCdawebClient(CdawebClient):
         self.delivers_files = delivers_files
         self.calls: list[tuple[str, datetime, datetime]] = []
 
-    def get_data(self, dataset_id: str, start_time: datetime, end_time: datetime, **kwargs: Any) -> list[pathlib.Path]:
-        """Returns one file per day touching [start_time, end_time], as Fido delivers whole daily files."""
-        self.calls.append((dataset_id, start_time, end_time))
-        if not self.delivers_files:
-            return []
+    def fetch(self, dataset_id: str, start: datetime, stop: datetime) -> FetchResult[list[pathlib.Path]]:
+        """Returns one file per day touching [start, stop], as Fido delivers whole daily files."""
+        self.calls.append((dataset_id, start, stop))
+        if not self.delivers_files or self.download_dir is None:
+            return FetchResult(None)
 
-        download_path = pathlib.Path(kwargs["download_path"])
-        day = start_time.replace(hour=0, minute=0, second=0, microsecond=0)
+        download_path = self.download_dir / dataset_id
+        download_path.mkdir(parents=True, exist_ok=True)
+        day = start.replace(hour=0, minute=0, second=0, microsecond=0)
         file_paths = []
-        while day <= end_time:
+        while day <= stop:
             file_path = download_path / f"{dataset_id.lower()}_{day:%Y%m%d}_v01.cdf"
             if not file_path.exists():
                 _write_daily_cdf(file_path, day, self.bin_location)
             file_paths.append(file_path)
             day += timedelta(days=1)
-        return file_paths
+        return FetchResult(file_paths)
 
 
 @pytest.fixture(autouse=True)
@@ -154,7 +156,8 @@ def _ingest(db: Database, tmp_path: pathlib.Path, client: FakeCdawebClient, star
     if db["master_catalog"].count_documents({"dataset_id": DATASET_ID}) == 0:
         source = {"type": "FIDO_CDAWEB", "source_id": GROUP, "time_range": {"start_time": "2024-01-01T00:00:00Z", "end_time": "2024-01-31T00:00:00Z"}}
         db["master_catalog"].insert_one({"dataset_id": DATASET_ID, "sources": [source]})
-    CdawebPipeline(db, tmp_path / "downloads", client=client).run([DATASET_ID], start, end)
+    client.download_dir = tmp_path / "downloads"
+    CdawebPipeline(db, client.download_dir, client=client).run([DATASET_ID], start, end)
 
 
 def _dataset_metadata(db: Database) -> DatasetMetadata:
@@ -274,7 +277,7 @@ def test_repeated_cdaweb_ingestion_skips_chunks_with_documents(db: Database, tmp
 
 @pytest.mark.integration
 def test_cdaweb_without_downloaded_files_stores_nothing(db: Database, tmp_path: pathlib.Path) -> None:
-    """A chunk without downloaded files stores no documents and no metadata and raises no exception."""
+    """A chunk without data files stores no documents and no metadata and raises no exception."""
     client = FakeCdawebClient(delivers_files=False)
 
     _ingest(db, tmp_path, client)

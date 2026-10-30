@@ -12,24 +12,6 @@ from space_weather_analysis.util.time_utils import UtcDatetime
 SINGLE_REQUEST_TARGET = "all"
 
 
-class TaskFailedError(Exception):
-    """Raised by a task handler whose request did not deliver usable metadata.
-
-    Attributes:
-        retry_after_seconds: The wait the provider asked for before the next request, from its Retry-After header; None if it asked for none.
-    """
-
-    def __init__(self, message: str, retry_after_seconds: float | None = None) -> None:
-        """Initializes the error.
-
-        Args:
-            message: What failed.
-            retry_after_seconds: The wait the provider asked for before the next request.
-        """
-        super().__init__(message)
-        self.retry_after_seconds = retry_after_seconds
-
-
 @dataclass(frozen=True)
 class PlannedRequest:
     """A metadata request the planner of a task kind lists for regular repetition; `sync` turns it into a stored task.

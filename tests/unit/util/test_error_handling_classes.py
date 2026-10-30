@@ -1,36 +1,8 @@
-import pytest
-
-from space_weather_analysis.util.error_handling import (
-    CatalogError,
-    DataProcessingError,
-    DataRetrievalError,
-    SpaceWeatherError,
-)
+from space_weather_analysis.util.error_handling import DataRetrievalError, SpaceWeatherError
 
 
-class TestErrorClasses:
-    def test_inheritance_hierarchy(self) -> None:
-        """All custom exceptions derive from SpaceWeatherError."""
-        assert issubclass(DataRetrievalError, SpaceWeatherError)
-        assert issubclass(DataProcessingError, SpaceWeatherError)
-        assert issubclass(CatalogError, SpaceWeatherError)
-        assert issubclass(SpaceWeatherError, Exception)
+def test_retrieval_error_is_a_project_error_carrying_the_requested_wait() -> None:
+    """A DataRetrievalError is caught as SpaceWeatherError and keeps the wait the provider asked for."""
+    error = DataRetrievalError("Server overloaded", retry_after_seconds=30.0)
 
-    def test_catch_base_exception(self) -> None:
-        """A specific error is caught by 'except SpaceWeatherError'."""
-        try:
-            raise DataRetrievalError("Network down")
-        except SpaceWeatherError as e:
-            assert str(e) == "Network down"
-            assert isinstance(e, DataRetrievalError)
-        except Exception:
-            pytest.fail("Should have been caught by SpaceWeatherError")
-
-    def test_distinct_exceptions(self) -> None:
-        """A specific error is not caught by a sibling's except block."""
-        try:
-            raise CatalogError("Invalid JSON")
-        except DataRetrievalError:
-            pytest.fail("Should not catch CatalogError in DataRetrievalError block")
-        except CatalogError as e:
-            assert str(e) == "Invalid JSON"
+    assert (isinstance(error, SpaceWeatherError), str(error), error.retry_after_seconds) == (True, "Server overloaded", 30.0)

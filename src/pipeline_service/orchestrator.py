@@ -2,168 +2,169 @@ import logging
 import pathlib
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pymongo.database import Database
+from pymongo.errors import PyMongoError
 
 from pipeline_service.pipelines.factory import PipelineFactory
+from pipeline_service.pipelines.report import IngestionReport
+from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
-from space_weather_analysis.jobs.models import Job
+from space_weather_analysis.jobs.models import Job, JobStatus
 from space_weather_analysis.jobs.repository import JobRepository, MongoJobRepository
 
 logger = logging.getLogger(__name__)
 
+# Requests the pipelines reject before ingesting anything: invalid parameters or a missing local file.
+INVALID_REQUEST_ERRORS = (ValueError, FileNotFoundError)
+
 
 class PipelineOrchestrator:
-    """Manages the execution of data pipelines based on manual requests or database jobs.
+    """Runs the pipelines for manual configurations and for the download jobs the frontend stores in MongoDB.
 
-    This class acts as the central controller for the pipeline service. It monitors
-    a MongoDB job queue for asynchronous tasks and accepts direct configuration
-    dictionaries for immediate execution. It delegates the actual data processing
-    to specific pipeline implementations created via a factory.
+    A job ends COMPLETED when at least one of its chunks was ingested or none needed ingesting; the chunks
+    that failed are stored with it as missing chunks. It ends FAILED for an invalid request, when every
+    chunk failed, or on an unexpected error.
     """
 
     POLLING_INTERVAL_SECONDS = 10
-    # Define a default directory for data storage relative to the project root
+    # The data directory of the project, holding the local dataset files and the downloads
     DATA_BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent / "data"
 
-    def __init__(self, db: Database) -> None:
-        """Initializes the orchestrator with a database connection.
+    def __init__(self, db: Database, data_dir: pathlib.Path = DATA_BASE_DIR) -> None:
+        """Initializes the orchestrator.
 
         Args:
-            db (Database): The MongoDB database instance used for job management.
+            db: The MongoDB database instance holding jobs, catalog and data.
+            data_dir: The directory holding the local dataset files and the downloads.
         """
         self.db = db
         self.job_repository: JobRepository = MongoJobRepository(db)
         self.catalog_repository: CatalogRepository = MongoCatalogRepository(db)
-        # Ensure the download directory exists
-        if not self.DATA_BASE_DIR.exists():
-            self.DATA_BASE_DIR.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Created data download directory at {self.DATA_BASE_DIR}")
+        self.pipeline_factory = PipelineFactory(self.db, data_dir)
 
-        # Initialize the factory with the database and the storage path
-        self.pipeline_factory = PipelineFactory(self.db, self.DATA_BASE_DIR)
-
-    def run_manual_jobs(self, manual_jobs: Dict[str, Dict[str, Any]]) -> None:
-        """Executes a set of pipelines defined by a manual configuration dictionary.
+    def run_manual_jobs(self, manual_jobs: dict[SourceType, dict[str, Any]]) -> None:
+        """Runs the pipelines of a manual configuration one after the other; a failing one does not stop the others.
 
         Args:
-            manual_jobs (Dict[str, Dict[str, Any]]): A dictionary mapping source
-                identifiers to their specific configuration parameters.
+            manual_jobs: The configuration per source type, with 'datasets' and optionally 'start_time' and 'end_time'.
         """
-        for source_id, config in manual_jobs.items():
+        for source_type, config in manual_jobs.items():
             datasets = config.get("datasets")
-            start_time = config.get("start_time")
-            end_time = config.get("end_time")
-
             if not datasets:
-                logger.info(f"Skipping manual job for {source_id}: No datasets provided.")
+                logger.info("Skipping manual job for %s: no datasets given.", source_type)
                 continue
-
-            logger.info(f"Starting manual job for source: {source_id}")
-            # Manual jobs don't have a DB job ID, so we pass None
-            self._execute_pipeline(source_id, datasets, start_time, end_time, job_id=None)
+            logger.info("Starting manual job for %s", source_type)
+            try:
+                report = self._execute_pipeline(source_type, datasets, config.get("start_time"), config.get("end_time"), job_id=None)
+            except INVALID_REQUEST_ERRORS as error:
+                logger.warning("Manual job for %s rejected: %s", source_type, error)
+                continue
+            except Exception:
+                # A manual job must not keep the service from serving the job queue
+                logger.exception("Manual job for %s failed", source_type)
+                continue
+            logger.info("Manual job for %s done: %d chunks tried, %d missing.", source_type, report.chunks_total, len(report.gaps))
 
     def run_daemon(self) -> None:
-        """Starts the continuous job processing loop."""
+        """Claims and runs pending jobs until the process ends, polling every POLLING_INTERVAL_SECONDS."""
         logger.info("Pipeline Orchestrator daemon started.")
-
         while True:
             try:
-                job = self.job_repository.claim_next_pending()
-
-                if job:
-                    self._process_job(job)
-                else:
-                    # Wait before the next polling attempt
-                    time.sleep(self.POLLING_INTERVAL_SECONDS)
-
-            except Exception as e:
-                logger.error(f"Unexpected error in daemon loop: {e}", exc_info=True)
+                processed_job = self.process_next_job()
+            except PyMongoError:
+                logger.exception("Claiming or finishing a job failed")
+                processed_job = False
+            if not processed_job:
                 time.sleep(self.POLLING_INTERVAL_SECONDS)
 
-    def _resolve_source_type(self, datasets: List[str]) -> Optional[str]:
-        """Determines the correct pipeline source type for a given list of datasets.
-
-        It queries the master catalog to find the 'type' field associated with the dataset.
-
-        Args:
-            datasets: A list of dataset IDs.
+    def process_next_job(self) -> bool:
+        """Claims the oldest pending job, runs it and stores how it ended.
 
         Returns:
-            The source type string if found, otherwise None.
-        """
-        if not datasets:
-            return None
-
-        dataset_id = datasets[0]
-        sources = self.catalog_repository.get_sources(dataset_id)
-        if not sources:
-            logger.error(f"Dataset {dataset_id} not found in master catalog or no sources defined for it.")
-            return None
-
-        return sources[0].get("type")
-
-    def _process_job(self, job: Job) -> None:
-        """Executes the logic for a single retrieved job.
-
-        Args:
-            job (Job): The claimed job containing execution details.
-        """
-        datasets = job.parameters.datasets
-
-        source_type = job.source_id
-        if not source_type:
-            logger.info(f"Resolving source type for job {job.id}...")
-            source_type = self._resolve_source_type(datasets)
-
-        logger.info(f"Processing job {job.id} for source type {source_type}")
-
-        try:
-            self._execute_pipeline(source_type, datasets, job.parameters.start_time, job.parameters.end_time, job_id=job.id)
-
-            self.job_repository.finish(job.id, "COMPLETED")
-            logger.info(f"Job {job.id} completed successfully.")
-
-        except Exception as e:
-            logger.error(f"Job {job.id} failed: {e}", exc_info=True)
-            self.job_repository.finish(job.id, "FAILED", str(e))
-
-    def _execute_pipeline(
-        self,
-        source_id: Optional[str],
-        datasets: List[str],
-        start_time: Optional[datetime],
-        end_time: Optional[datetime],
-        job_id: Optional[str],
-    ) -> None:
-        """Delegates the execution to a specific pipeline instance.
-
-        Args:
-            source_id (Optional[str]): The source type identifier used to select the pipeline.
-            datasets (List[str]): The list of dataset IDs to process.
-            start_time (Optional[datetime]): The start of the time range.
-            end_time (Optional[datetime]): The end of the time range.
-            job_id (Optional[str]): The ID of the job. If set, progress updates are
-                recorded in the job repository; otherwise they are logged.
+            True if a job was pending.
 
         Raises:
-            ValueError: If the source_id is missing or not supported.
+            pymongo.errors.PyMongoError: If the job cannot be claimed or its end cannot be stored.
         """
-        if not source_id:
-            raise ValueError("Source Type could not be resolved or is missing.")
+        job = self.job_repository.claim_next_pending()
+        if job is None:
+            return False
+        self._process_job(job)
+        return True
 
-        pipeline = self.pipeline_factory.get_pipeline(source_id)
+    def _resolve_source_type(self, datasets: list[str]) -> SourceType:
+        """Reads the source type of the first dataset from the master catalog.
 
-        # Records the progress of database jobs and logs that of manual jobs
+        Args:
+            datasets: The dataset IDs of the job.
+
+        Returns:
+            The source type of the first source of the first dataset.
+
+        Raises:
+            ValueError: If the job has no dataset, the dataset has no source or its source type is unknown.
+        """
+        if not datasets:
+            raise ValueError("The job names no dataset.")
+        sources = self.catalog_repository.get_sources(datasets[0])
+        if not sources:
+            raise ValueError(f"Dataset {datasets[0]} has no source in the master catalog.")
+        return SourceType(sources[0]["type"])
+
+    def _process_job(self, job: Job) -> None:
+        """Runs one claimed job and stores how it ended.
+
+        Args:
+            job: The claimed job.
+        """
+        try:
+            source_type = job.source_type or self._resolve_source_type(job.parameters.datasets)
+            logger.info("Processing job %s for source type %s", job.id, source_type)
+            report = self._execute_pipeline(source_type, job.parameters.datasets, job.parameters.start_time, job.parameters.end_time, job_id=job.id)
+        except INVALID_REQUEST_ERRORS as error:
+            logger.warning("Job %s rejected: %s", job.id, error)
+            self.job_repository.finish(job.id, JobStatus.FAILED, str(error))
+            return
+        except Exception as error:
+            # The daemon must outlive a failing job; the traceback shows the cause
+            logger.exception("Job %s failed", job.id)
+            self.job_repository.finish(job.id, JobStatus.FAILED, f"{type(error).__name__}: {error}")
+            return
+
+        if report.all_failed:
+            logger.warning("Job %s failed: all %d chunks failed.", job.id, report.chunks_total)
+            self.job_repository.finish(job.id, JobStatus.FAILED, f"All {report.chunks_total} chunks failed.", report.gaps)
+            return
+        logger.info("Job %s completed: %d chunks tried, %d missing.", job.id, report.chunks_total, len(report.gaps))
+        self.job_repository.finish(job.id, JobStatus.COMPLETED, missing_chunks=report.gaps)
+
+    def _execute_pipeline(
+        self, source_type: SourceType, datasets: list[str], start_time: datetime | None, end_time: datetime | None, job_id: str | None
+    ) -> IngestionReport:
+        """Runs the pipeline of a source type and reports its progress.
+
+        Args:
+            source_type: The source type selecting the pipeline.
+            datasets: The dataset IDs to ingest.
+            start_time: The start of the time range.
+            end_time: The end of the time range.
+            job_id: The ID of the job whose progress is stored; None to log the progress.
+
+        Returns:
+            The report of the pipeline run.
+        """
+        pipeline = self.pipeline_factory.get_pipeline(source_type)
+
         def progress_callback(progress: float, message: str) -> None:
-            if job_id:
-                try:
-                    self.job_repository.update_progress(job_id, progress, message)
-                except Exception as e:
-                    logger.warning(f"Failed to update progress for job {job_id}: {e}")
-            else:
-                # Log to console for manual jobs
-                logger.info(f"Manual Job Progress: {progress:.1%} - {message}")
+            """Stores the progress of a job or logs that of a manual run."""
+            if job_id is None:
+                logger.info("Manual job progress: %.1f%% - %s", progress * 100, message)
+                return
+            try:
+                self.job_repository.update_progress(job_id, progress, message)
+            except PyMongoError as error:
+                logger.warning("Failed to update the progress of job %s: %s", job_id, error)
 
-        pipeline.run(datasets, start_time, end_time, progress_callback=progress_callback)
+        return pipeline.run(datasets, start_time, end_time, progress_callback=progress_callback)

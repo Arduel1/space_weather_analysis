@@ -6,10 +6,10 @@ import requests
 from pymongo.database import Database
 from pytest_httpserver import HTTPServer
 
-from catalog_collector.cdaweb.http import CdawebRequestError
 from catalog_collector.data_catalog.cdas_availability import CdasAvailabilityRefresher, CdasAvailabilitySummary
 from space_weather_analysis.catalog.models import CatalogEntryDict, MasterCatalogItem
 from space_weather_analysis.catalog.repository import MongoCatalogRepository
+from space_weather_analysis.util.error_handling import DataRetrievalError
 
 CDAS_PATH = "/WS/cdasr/1/dataviews/sp_phys/datasets"
 DATASET_ID = "SYNTH_K0_FIDO"
@@ -92,7 +92,7 @@ def test_overloaded_cdas_leaves_catalog_unchanged_and_names_the_retry_after(db: 
     stored = _save_catalog(db)
     httpserver.expect_request(CDAS_PATH).respond_with_data("Too Many Requests", status=429, headers={"Retry-After": "120"})
 
-    with pytest.raises(CdawebRequestError) as raised:
+    with pytest.raises(DataRetrievalError) as raised:
         _refresh(db, httpserver.url_for(CDAS_PATH))
 
     assert (raised.value.retry_after_seconds, MongoCatalogRepository(db).get_all()) == (120.0, stored)

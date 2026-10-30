@@ -2,7 +2,8 @@ from typing import Any
 
 import requests
 
-from catalog_collector.cdaweb.http import CdawebRequestError, get_json
+from catalog_collector.cdaweb.web_service import get_json
+from space_weather_analysis.util.error_handling import DataProcessingError
 
 # Connect and read timeout in seconds; the largest master files have a few MB.
 MASTER_TIMEOUT = (10.0, 120.0)
@@ -23,13 +24,14 @@ def fetch_master(session: requests.Session, url: str) -> dict[str, Any]:
         The master file as returned by parse_master.
 
     Raises:
-        CdawebRequestError: If the download fails or the response is no master file; carries the Retry-After wait of HTTP 429 and 503.
+        DataRetrievalError: If the download fails; carries the Retry-After wait of HTTP 429 and 503.
+        DataProcessingError: If the response is no master file.
     """
     document = get_json(session, url, MASTER_TIMEOUT, "CDAWeb master file")
     try:
         return parse_master(document)
     except ValueError as e:
-        raise CdawebRequestError(f"CDAWeb master file {url} is malformed: {e}") from e
+        raise DataProcessingError(f"CDAWeb master file {url} is malformed: {e}") from e
 
 
 def parse_master(document: Any) -> dict[str, Any]:

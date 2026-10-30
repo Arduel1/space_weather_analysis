@@ -1,12 +1,13 @@
 import logging
-import pathlib
-from typing import Dict, List, Optional
+from collections.abc import Mapping
+from types import MappingProxyType
+from typing import ClassVar
 
 import pandas as pd
-from pymongo.database import Database
 
 from pipeline_service.pipelines.processors.base import BaseETLProcessor
-from pipeline_service.util.documents import TransformedDocuments
+from pipeline_service.util.documents import TransformedDocuments, rows_to_documents
+from space_weather_analysis.util.error_handling import DataProcessingError
 
 logger = logging.getLogger(__name__)
 
@@ -15,9 +16,10 @@ class CmeETL(BaseETLProcessor):
     """ETL Processor for Coronal Mass Ejection (CME) catalog data."""
 
     COLLECTION_NAME = "cme_catalog"
-    DEFAULT_BATCH_SIZE = 5000
+    # Identifies the source and version of the catalog in the metadata field of every document.
+    SOURCE_IDENTIFIER = "SOHO/LASCO_CDAW_V2.0"
 
-    _NUMERIC_COLUMNS = [
+    _NUMERIC_COLUMNS = (
         "central_pa",
         "width",
         "linear_speed",
@@ -28,73 +30,59 @@ class CmeETL(BaseETLProcessor):
         "mass",
         "kinetic_energy",
         "mpa",
-    ]
+    )
     # Column order of the catalog file; the numeric columns sit between time and remarks.
-    _COLUMN_NAMES = ["date", "time", *_NUMERIC_COLUMNS, "remarks"]
+    _COLUMN_NAMES = ("date", "time", *_NUMERIC_COLUMNS, "remarks")
+    # The catalog file starts with 4 header lines.
+    _HEADER_LINE_COUNT = 4
     # Dash runs that the catalog writes in place of an unknown value.
-    _PLACEHOLDERS = {"----", "------", "-------"}
+    _PLACEHOLDERS = frozenset({"----", "------", "-------"})
     # Columns in which a trailing '*' marks an uncertain value, mapped to the flag field storing that marker.
-    _MARKER_FLAGS = {
-        "accel": "accel_unreliable",
-        "mass": "mass_uncertain",
-        "kinetic_energy": "kinetic_energy_uncertain",
-    }
+    _MARKER_FLAGS: ClassVar[Mapping[str, str]] = MappingProxyType(
+        {
+            "accel": "accel_unreliable",
+            "mass": "mass_uncertain",
+            "kinetic_energy": "kinetic_energy_uncertain",
+        }
+    )
 
-    def __init__(self, db: Database, file_path: pathlib.Path) -> None:
-        """Initializes the CME ETL processor.
-
-        Args:
-            db: The MongoDB database instance.
-            file_path: Path to the CME catalog text file.
-        """
-        super().__init__(db)
-        self.file_path = file_path
-
-    def _extract(self) -> Optional[pd.DataFrame]:
-        """Extracts CME data from the local space-delimited text file.
+    def _extract(self) -> pd.DataFrame:
+        """Splits the rows of the space-delimited catalog file into its columns, all as text.
 
         Returns:
-            A DataFrame containing the raw data, or None if extraction fails.
+            The raw rows of the file.
+
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            DataProcessingError: If the file cannot be read.
         """
-        logger.info(f"--- Starting Extract for LASCO CME: {self.file_path} ---")
         if not self.file_path.exists():
-            logger.error(f"CME catalog file not found at: {self.file_path}")
-            return None
-
+            raise FileNotFoundError(f"CME catalog file not found at {self.file_path}")
         try:
-            parsed_data: List[Dict[str, str]] = []
-            with open(self.file_path, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-                # Skip the header rows (first 4 lines)
-                for line in lines[4:]:
-                    # The remarks are the rest of the line after the 12th column and keep their inner spacing.
-                    parts = line.rstrip().split(maxsplit=12)
-                    if not parts:
-                        continue
-                    # Rows without remarks have 12 parts and get no remarks entry.
-                    parsed_data.append(dict(zip(self._COLUMN_NAMES, parts, strict=False)))
+            lines = self.file_path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError) as error:
+            raise DataProcessingError(f"CME catalog file {self.file_path} cannot be read: {error}") from error
 
-            df = pd.DataFrame(parsed_data, columns=self._COLUMN_NAMES)
-            logger.info(f"Extracted and parsed {len(df)} rows from CME catalog.")
-            return df
-        except Exception as e:
-            logger.error(f"Error reading CME file: {e}", exc_info=True)
-            return None
+        parsed_rows: list[dict[str, str]] = []
+        for line in lines[self._HEADER_LINE_COUNT :]:
+            # The remarks are the rest of the line after the 12th column and keep their inner spacing.
+            parts = line.rstrip().split(maxsplit=12)
+            if not parts:
+                continue
+            # Rows without remarks have 12 parts and get no remarks entry.
+            parsed_rows.append(dict(zip(self._COLUMN_NAMES, parts, strict=False)))
+        logger.info("Extracted %d rows from %s.", len(parsed_rows), self.file_path)
+        return pd.DataFrame(parsed_rows, columns=list(self._COLUMN_NAMES))
 
-    def _transform(self, raw_data: Optional[pd.DataFrame]) -> TransformedDocuments:
-        """Transforms the raw CME DataFrame into MongoDB documents.
+    def _transform(self, raw_data: pd.DataFrame) -> TransformedDocuments:
+        """Builds one document per event with a valid time, with numbers, halo flag and uncertainty flags.
 
         Args:
-            raw_data: The raw data from extraction.
+            raw_data: The raw rows of the file.
 
         Returns:
-            A list of formatted dictionaries for MongoDB.
+            The time series documents.
         """
-        if raw_data is None:
-            logger.warning("Transform step skipped as no data was extracted.")
-            return []
-
-        logger.info("--- Starting Transform for CME Catalog ---")
         for column, flag in self._MARKER_FLAGS.items():
             is_marked = raw_data[column].str.endswith("*", na=False)
             # The flag is stored as true for marked values only; unmarked events get no flag field.
@@ -105,10 +93,10 @@ class CmeETL(BaseETLProcessor):
             raw_data["date"].astype(str) + " " + raw_data["time"].astype(str),
             format="%Y/%m/%d %H:%M:%S",
             errors="coerce",
-        )
+        ).dt.tz_localize("UTC")
         has_valid_timestamp = raw_data["timestamp"].notna()
         if not has_valid_timestamp.all():
-            logger.warning(f"Skipped {(~has_valid_timestamp).sum()} rows without a valid timestamp.")
+            logger.warning("Skipped %d rows without a valid timestamp.", (~has_valid_timestamp).sum())
         raw_data.dropna(subset=["timestamp"], inplace=True)
 
         # Feature engineering
@@ -122,7 +110,7 @@ class CmeETL(BaseETLProcessor):
             # Values that are neither numbers nor placeholders are invalid and omitted like missing ones.
             invalid_count = (numeric.isna() & raw_data[col].notna() & ~is_placeholder).sum()
             if invalid_count:
-                logger.warning(f"Omitted {invalid_count} invalid values in field {col}.")
+                logger.warning("Omitted %d invalid values in field %s.", invalid_count, col)
             raw_data[col] = numeric
 
         data_columns = [
@@ -132,28 +120,4 @@ class CmeETL(BaseETLProcessor):
             "remarks",
         ]
 
-        data_payloads = raw_data[data_columns].to_dict("records")
-        timestamps = raw_data["timestamp"].to_list()
-
-        documents = self._build_documents(timestamps, data_payloads, "SOHO/LASCO_CDAW_V2.0")
-
-        logger.info(f"Transformed {len(documents)} CME documents.")
-        return documents
-
-    def run(self) -> None:
-        """Orchestrates the ETL process for CME data."""
-        logger.info("--- Starting ETL process for CME Catalog ---")
-
-        raw_data_df = self._extract()
-        documents = self._transform(raw_data_df)
-
-        if documents:
-            self._ensure_timeseries_collection(
-                self.COLLECTION_NAME,
-                time_field="timestamp",
-                meta_field="metadata",
-            )
-            # The file holds the complete dataset and records have no unique key, so each run replaces the collection content.
-            self._load_data(self.COLLECTION_NAME, documents, self.DEFAULT_BATCH_SIZE, clear_collection=True)
-
-        logger.info("--- Finished ETL process for CME Catalog ---")
+        return rows_to_documents(raw_data["timestamp"].to_list(), raw_data[data_columns].to_dict("records"), self.SOURCE_IDENTIFIER)

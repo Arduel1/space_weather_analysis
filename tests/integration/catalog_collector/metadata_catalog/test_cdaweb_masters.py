@@ -6,7 +6,6 @@ import requests
 from pymongo.database import Database
 from pytest_httpserver import HTTPServer
 
-from catalog_collector.cdaweb.http import CdawebRequestError
 from catalog_collector.metadata_catalog.cdaweb_masters import CdawebMasterRefresher
 from catalog_collector.metadata_catalog.tasks import plan_cdaweb_masters
 from catalog_collector.scheduling.models import PlannedRequest
@@ -16,6 +15,7 @@ from space_weather_analysis.metadata.hapi import build_hapi_metadata
 from space_weather_analysis.metadata.models import DatasetMetadata, SourceInfo, VariableMetadata
 from space_weather_analysis.metadata.overlays import save_with_overlays
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
+from space_weather_analysis.util.error_handling import DataRetrievalError
 
 CDAWEB_HAPI_URL = "https://cdaweb.gsfc.nasa.gov/hapi"
 CDAS_URL = "https://cdaweb.gsfc.nasa.gov/WS/cdasr/1/dataviews/sp_phys/datasets"
@@ -231,7 +231,7 @@ def test_overloaded_master_server_leaves_metadata_unchanged_and_names_its_wait(d
     stored = _record(db, f"{SPLIT_DATASET}@0")
     httpserver.expect_request(_master_path(SPLIT_DATASET)).respond_with_data("busy", status=503, headers={"Retry-After": "60"})
 
-    with pytest.raises(CdawebRequestError) as raised:
+    with pytest.raises(DataRetrievalError) as raised:
         _refresher(db).refresh(SPLIT_DATASET, httpserver.url_for(_master_path(SPLIT_DATASET)))
 
     assert (raised.value.retry_after_seconds, MongoMetadataRepository(db).get_raw(SPLIT_DATASET, "istp")) == (60.0, None)

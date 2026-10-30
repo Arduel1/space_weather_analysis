@@ -54,7 +54,7 @@ class CdasAvailabilityRefresher:
             The summary.
 
         Raises:
-            CdawebRequestError: If the dataset list cannot be read; the catalog is then left unchanged.
+            DataRetrievalError, DataProcessingError: If the dataset list cannot be read; the catalog is then left unchanged.
         """
         datasets = fetch_cdas_datasets(self.session, self.url)
         fetched_at = datetime.now(UTC)

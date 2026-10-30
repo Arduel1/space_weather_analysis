@@ -9,10 +9,11 @@ from catalog_collector.hapi_mirror.servers import MIRROR_BASE_URL
 from catalog_collector.metadata_catalog.cdas_metadata import CdasMetadataRefresher
 from catalog_collector.metadata_catalog.cdaweb_masters import CdawebMasterRefresher
 from catalog_collector.metadata_catalog.hapi_refresh import MIRROR_INFOS_PATH, MetadataRefresher
-from catalog_collector.scheduling.models import SINGLE_REQUEST_TARGET, MetadataTask, PlannedRequest, TaskFailedError
+from catalog_collector.scheduling.models import SINGLE_REQUEST_TARGET, MetadataTask, PlannedRequest
 from catalog_collector.scheduling.worker import TaskKind
 from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
+from space_weather_analysis.util.error_handling import DataRetrievalError
 
 HAPI_METADATA_KIND = "hapi_mirror_metadata"
 CDAS_METADATA_KIND = "cdas_metadata"
@@ -53,7 +54,7 @@ def hapi_metadata_kind(db: Database, settings: MetadataCatalogTaskSettings, mirr
     def refresh_metadata(_task: MetadataTask) -> None:
         """Refreshes the HAPI metadata from the mirror's full file."""
         if MetadataRefresher(catalog_repository, metadata_repository, base_url).refresh() is None:
-            raise TaskFailedError("HAPI mirror file could not be read")
+            raise DataRetrievalError("HAPI mirror file could not be read")
 
     return TaskKind(
         HAPI_METADATA_KIND,
@@ -79,7 +80,7 @@ def cdas_metadata_kind(db: Database, settings: MetadataCatalogTaskSettings, url:
     session = requests.Session()
 
     def refresh_metadata(_task: MetadataTask) -> None:
-        """Refreshes the CDAS entries and their overlays; a failed request raises CdawebRequestError."""
+        """Refreshes the CDAS entries and their overlays; a failed request raises DataRetrievalError."""
         CdasMetadataRefresher(catalog_repository, metadata_repository, session, url).refresh()
 
     return TaskKind(
@@ -105,7 +106,7 @@ def cdaweb_master_kind(db: Database, settings: MetadataCatalogTaskSettings) -> T
     refresher = CdawebMasterRefresher(catalog_repository, metadata_repository, requests.Session())
 
     def refresh_master(task: MetadataTask) -> None:
-        """Refreshes the master file of the task's dataset; a failed request raises CdawebRequestError."""
+        """Refreshes the master file of the task's dataset; a failed request raises DataRetrievalError."""
         refresher.refresh(task.target, task.url)
 
     return TaskKind(

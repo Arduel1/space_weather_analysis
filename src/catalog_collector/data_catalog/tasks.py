@@ -8,10 +8,11 @@ from catalog_collector.cdaweb.datasets import CDAS_DATASETS_URL
 from catalog_collector.data_catalog.cdas_availability import CdasAvailabilityRefresher
 from catalog_collector.data_catalog.hapi_availability import MIRROR_DATASET_TABLE_PATH, AvailabilityRefresher
 from catalog_collector.hapi_mirror.servers import MIRROR_BASE_URL
-from catalog_collector.scheduling.models import SINGLE_REQUEST_TARGET, MetadataTask, PlannedRequest, TaskFailedError
+from catalog_collector.scheduling.models import SINGLE_REQUEST_TARGET, MetadataTask, PlannedRequest
 from catalog_collector.scheduling.worker import TaskKind
 from space_weather_analysis.catalog.repository import MongoCatalogRepository
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
+from space_weather_analysis.util.error_handling import DataRetrievalError
 
 HAPI_AVAILABILITY_KIND = "hapi_mirror_availability"
 CDAS_AVAILABILITY_KIND = "cdas_availability"
@@ -49,7 +50,7 @@ def hapi_availability_kind(db: Database, settings: DataCatalogTaskSettings, mirr
     def refresh_availability(_task: MetadataTask) -> None:
         """Refreshes the availability of the HAPI sources from the mirror's catalog and dataset table."""
         if AvailabilityRefresher(catalog_repository, metadata_repository, base_url).refresh() is None:
-            raise TaskFailedError("HAPI mirror catalog or dataset table could not be read")
+            raise DataRetrievalError("HAPI mirror catalog or dataset table could not be read")
 
     return TaskKind(
         HAPI_AVAILABILITY_KIND,
@@ -74,7 +75,7 @@ def cdas_availability_kind(db: Database, settings: DataCatalogTaskSettings, url:
     session = requests.Session()
 
     def refresh_availability(_task: MetadataTask) -> None:
-        """Refreshes the availability of the FIDO_CDAWEB sources; a failed request raises CdawebRequestError."""
+        """Refreshes the availability of the FIDO_CDAWEB sources; a failed request raises DataRetrievalError."""
         CdasAvailabilityRefresher(catalog_repository, session, url).refresh()
 
     return TaskKind(

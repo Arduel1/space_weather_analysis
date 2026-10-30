@@ -1,9 +1,11 @@
 import json
 import os
 import pathlib
+import socket
 import tempfile
-from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from pymongo.database import Database
@@ -11,11 +13,12 @@ from pytest_httpserver import HTTPServer
 from werkzeug import Request, Response
 
 from pipeline_service.pipelines.hapi import HapiPipeline
+from pipeline_service.pipelines.report import IngestionReport
 from space_weather_analysis.metadata.models import DatasetMetadata
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
 
-StoredData = Callable[[str, datetime], Dict[str, Any]]
-StoredTimestampsAndMetadata = Callable[[str], List[Tuple[datetime, Dict[str, Any]]]]
+StoredData = Callable[[str, datetime], dict[str, Any]]
+StoredTimestampsAndMetadata = Callable[[str], list[tuple[datetime, dict[str, Any]]]]
 ServeDataset = Callable[..., str]
 
 DATASET_ID = "synthetic_xray_flux_P1M"
@@ -24,11 +27,11 @@ SERVER_PATH = "/hapi"
 # Time range of the dataset in the master catalog; one pipeline chunk covers it.
 CATALOG_START = "2024-03-01T00:00:00Z"
 CATALOG_END = "2024-03-01T06:00:00Z"
-RUN_START = datetime(2024, 3, 1, 0, 0, tzinfo=timezone.utc)
-RUN_END = datetime(2024, 3, 1, 6, 0, tzinfo=timezone.utc)
+RUN_START = datetime(2024, 3, 1, 0, 0, tzinfo=UTC)
+RUN_END = datetime(2024, 3, 1, 6, 0, tzinfo=UTC)
 
 # Parameters modeled on iSWA and the HAPI reference test data, which write "null" for a missing fill or unit.
-XRAY_PARAMETERS: List[Dict[str, Any]] = [
+XRAY_PARAMETERS: list[dict[str, Any]] = [
     {"name": "Time", "type": "isotime", "units": "UTC", "fill": "null", "length": 20},
     {"name": "Short_Wave", "type": "double", "units": "Watts/m^2", "fill": "0"},
     {"name": "Long_Wave", "type": "double", "units": "Watts/m^2", "fill": "0"},
@@ -40,7 +43,7 @@ XRAY_PARAMETERS: List[Dict[str, Any]] = [
     {"name": "scalariso", "type": "isotime", "units": "UTC", "fill": "0001-01-01T00:00:00Z", "length": 20},
     {"name": "vecstr", "type": "string", "units": None, "fill": "-1", "size": [3]},
 ]
-XRAY_INFO: Dict[str, Any] = {
+XRAY_INFO: dict[str, Any] = {
     "HAPI": "3.1",
     "status": {"code": 1200, "message": "OK request successful"},
     "startDate": CATALOG_START,
@@ -56,12 +59,13 @@ XRAY_CSV = (
     "2024-03-01T00:01:00Z,0,2.6e-06,-1,-2147483648,1.6,-9999,3.6,NaN,21,31,11,12,21,22,0001-01-01T00:00:00Z,D,-1,F\n"
     "2024-03-01T00:02:00Z,1.7e-07,2.7e-06,GOES-18,0,1.7,-2.7,3.7,12,22,32,11,12,21,22,2024-03-01T00:02:30Z,G,H,I\n"
 )
-REGULAR_TIME = datetime(2024, 3, 1, 0, 0)
-FILL_TIME = datetime(2024, 3, 1, 0, 1)
-ZERO_FLAG_TIME = datetime(2024, 3, 1, 0, 2)
+# pymongo reads stored times back as naive UTC.
+REGULAR_TIME = RUN_START.replace(tzinfo=None)
+FILL_TIME = REGULAR_TIME + timedelta(minutes=1)
+ZERO_FLAG_TIME = REGULAR_TIME + timedelta(minutes=2)
 ROW_TIMES = [REGULAR_TIME, FILL_TIME, ZERO_FLAG_TIME]
 
-EPOCH_INFO: Dict[str, Any] = {
+EPOCH_INFO: dict[str, Any] = {
     **XRAY_INFO,
     "parameters": [
         {"name": "Epoch", "type": "isotime", "units": "UTC", "fill": None, "length": 20},
@@ -71,7 +75,7 @@ EPOCH_INFO: Dict[str, Any] = {
 EPOCH_CSV = "2024-03-01T00:00:00Z,1.5e-07\n2024-03-01T00:01:00Z,1.6e-07\n"
 
 # A vector and an image above the column limit of 10 elements, which are not stored.
-LARGE_ARRAY_INFO: Dict[str, Any] = {
+LARGE_ARRAY_INFO: dict[str, Any] = {
     **XRAY_INFO,
     "parameters": [
         {"name": "Time", "type": "isotime", "units": "UTC", "fill": None, "length": 20},
@@ -89,14 +93,14 @@ NO_DATA_RESPONSE = {"HAPI": "2.0", "status": {"code": 1406, "message": "No data 
 @pytest.fixture(autouse=True)
 def no_retry_delay(monkeypatch: pytest.MonkeyPatch) -> None:
     """Retries of the HAPI client without waiting time."""
-    monkeypatch.setattr("space_weather_analysis.util.resilience.time.sleep", lambda seconds: None)
+    monkeypatch.setattr("space_weather_analysis.util.resilience.sleep", lambda seconds: None)
 
 
 @pytest.fixture
 def serve_dataset(httpserver: HTTPServer) -> ServeDataset:
     """Function letting the local fake HAPI server serve a dataset under a path and returning the server URL."""
 
-    def serve(path: str = SERVER_PATH, info: Optional[Dict[str, Any]] = None, data: Optional[Response] = None) -> str:
+    def serve(path: str = SERVER_PATH, info: dict[str, Any] | None = None, data: Response | None = None) -> str:
         if info is None:
             info = XRAY_INFO
         if data is None:
@@ -109,7 +113,7 @@ def serve_dataset(httpserver: HTTPServer) -> ServeDataset:
     return serve
 
 
-def _add_catalog_entry(db: Database, server_urls: List[str], extra_fields: Optional[Dict[str, Any]] = None) -> None:
+def _add_catalog_entry(db: Database, server_urls: list[str], extra_fields: dict[str, Any] | None = None) -> None:
     """Inserts the master catalog document listing the given HAPI servers, each with the extra fields, as sources of the dataset."""
     sources = []
     for server_url in server_urls:
@@ -120,23 +124,22 @@ def _add_catalog_entry(db: Database, server_urls: List[str], extra_fields: Optio
 
 def _ingest(
     db: Database,
-    tmp_path: pathlib.Path,
-    server_urls: List[str],
+    server_urls: list[str],
     start: datetime = RUN_START,
     end: datetime = RUN_END,
-    extra_fields: Optional[Dict[str, Any]] = None,
-) -> None:
-    """Registers the servers with the extra source fields in the catalog and runs the HAPI pipeline for the dataset."""
+    extra_fields: dict[str, Any] | None = None,
+) -> IngestionReport:
+    """Registers the servers with the extra source fields in the catalog, runs the HAPI pipeline for the dataset and returns its report."""
     _add_catalog_entry(db, server_urls, extra_fields)
-    HapiPipeline(db, tmp_path).run([DATASET_ID], start, end)
+    return HapiPipeline(db).run([DATASET_ID], start, end)
 
 
-def _requested_paths(httpserver: HTTPServer) -> List[str]:
+def _requested_paths(httpserver: HTTPServer) -> list[str]:
     """Returns the path of every request the fake server received, in order."""
     return [request.path for request, _ in httpserver.log]
 
 
-def _files_below(directory: pathlib.Path) -> Set[pathlib.Path]:
+def _files_below(directory: pathlib.Path) -> set[pathlib.Path]:
     """Returns every file below a directory, or nothing if it does not exist."""
     found_files = set()
     for root, _, file_names in os.walk(directory):
@@ -147,23 +150,21 @@ def _files_below(directory: pathlib.Path) -> Set[pathlib.Path]:
 
 @pytest.mark.integration
 def test_hapi_ingestion_stores_one_document_per_row_at_its_time(
-    db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset, stored_timestamps_and_metadata: StoredTimestampsAndMetadata
+    db: Database, serve_dataset: ServeDataset, stored_timestamps_and_metadata: StoredTimestampsAndMetadata
 ) -> None:
     """Each data row yields one document at its time (naive UTC) with the serving server URL as source."""
     server_url = serve_dataset()
 
-    _ingest(db, tmp_path, [server_url])
+    _ingest(db, [server_url])
 
     # pymongo returns stored datetimes as naive UTC, so the expected times carry no time zone.
     assert stored_timestamps_and_metadata(DATASET_ID) == [(time, {"source": server_url}) for time in ROW_TIMES]
 
 
 @pytest.mark.integration
-def test_hapi_values_and_array_columns_stored_as_given(
-    db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset, stored_data: StoredData
-) -> None:
+def test_hapi_values_and_array_columns_stored_as_given(db: Database, serve_dataset: ServeDataset, stored_data: StoredData) -> None:
     """Vectors get one column per label or index, a 2-D array one per `{name}_{i}_{j}`; integers (also 0), isotimes and strings keep their type."""
-    _ingest(db, tmp_path, [serve_dataset()])
+    _ingest(db, [serve_dataset()])
 
     flags = [stored_data(DATASET_ID, time)["quality_flag"] for time in (REGULAR_TIME, ZERO_FLAG_TIME)]
     assert [(type(flag), flag) for flag in flags] == [(int, 3), (int, 0)]
@@ -192,9 +193,9 @@ def test_hapi_values_and_array_columns_stored_as_given(
 
 
 @pytest.mark.integration
-def test_hapi_fill_values_omit_only_their_fields(db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset, stored_data: StoredData) -> None:
+def test_hapi_fill_values_omit_only_their_fields(db: Database, serve_dataset: ServeDataset, stored_data: StoredData) -> None:
     """Values equal to the fill of their parameter or array element are omitted; the other fields keep their values and types."""
-    _ingest(db, tmp_path, [serve_dataset()])
+    _ingest(db, [serve_dataset()])
 
     data = stored_data(DATASET_ID, FILL_TIME)
     assert data == pytest.approx(
@@ -216,30 +217,31 @@ def test_hapi_fill_values_omit_only_their_fields(db: Database, tmp_path: pathlib
 
 
 @pytest.mark.integration
-def test_hapi_time_parameter_with_other_name_is_ingested(
-    db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset, stored_data: StoredData
-) -> None:
+def test_hapi_time_parameter_with_other_name_is_ingested(db: Database, serve_dataset: ServeDataset, stored_data: StoredData) -> None:
     """A first parameter named other than 'Time' is used as the time of the documents."""
     server_url = serve_dataset(info=EPOCH_INFO, data=Response(EPOCH_CSV, content_type="text/csv"))
 
-    _ingest(db, tmp_path, [server_url])
+    _ingest(db, [server_url])
 
     assert db[DATASET_ID].count_documents({}) == 2
-    assert stored_data(DATASET_ID, datetime(2024, 3, 1, 0, 1)) == pytest.approx({"Short_Wave": 1.6e-07})
+    assert stored_data(DATASET_ID, FILL_TIME) == pytest.approx({"Short_Wave": 1.6e-07})
 
 
 @pytest.mark.integration
-def test_hapi_arrays_above_column_limit_are_not_stored(db: Database, tmp_path: pathlib.Path, httpserver: HTTPServer, stored_data: StoredData) -> None:
+def test_hapi_arrays_above_column_limit_are_not_stored(
+    db: Database, httpserver: HTTPServer, stored_data: StoredData, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Arrays with more than 10 elements are left out of the documents of every chunk and listed in the metadata."""
     httpserver.expect_request(f"{SERVER_PATH}/info", query_string={"id": DATASET_ID}).respond_with_json(LARGE_ARRAY_INFO)
     httpserver.expect_request(f"{SERVER_PATH}/data").respond_with_handler(_large_array_rows_in_requested_range)
 
     # Two chunks with one row each.
+    monkeypatch.setattr(HapiPipeline, "CHUNK_DURATION", timedelta(hours=3))
     _add_catalog_entry(db, [httpserver.url_for(SERVER_PATH)])
-    HapiPipeline(db, tmp_path).run([DATASET_ID], RUN_START, RUN_END, chunk_delta=timedelta(hours=3))
+    HapiPipeline(db).run([DATASET_ID], RUN_START, RUN_END)
 
     assert db[DATASET_ID].count_documents({}) == 2
-    assert stored_data(DATASET_ID, datetime(2024, 3, 1, 4, 0)) == pytest.approx({"Short_Wave": 1.5e-07})
+    assert stored_data(DATASET_ID, REGULAR_TIME + timedelta(hours=4)) == pytest.approx({"Short_Wave": 1.5e-07})
     assert [skipped.name for skipped in _stored_metadata(db).not_stored] == ["spectrum", "image"]
 
 
@@ -258,24 +260,44 @@ def _large_array_rows_in_requested_range(request: Request) -> Response:
         pytest.param(Response("", content_type="text/csv"), id="empty_200"),
     ],
 )
-def test_hapi_no_data_response_stores_nothing(db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset, response: Response) -> None:
+def test_hapi_no_data_response_stores_nothing(db: Database, serve_dataset: ServeDataset, response: Response) -> None:
     """A server answering that no data exists leads to no documents and no exception."""
-    _ingest(db, tmp_path, [serve_dataset(data=response)])
+    _ingest(db, [serve_dataset(data=response)])
 
     assert db[DATASET_ID].count_documents({}) == 0
 
 
 @pytest.mark.integration
 def test_hapi_falls_back_to_next_source_when_first_fails(
-    db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset, stored_timestamps_and_metadata: StoredTimestampsAndMetadata
+    db: Database, serve_dataset: ServeDataset, stored_timestamps_and_metadata: StoredTimestampsAndMetadata
 ) -> None:
     """If the first catalog source answers with HTTP 500, the documents come from the second source."""
     failing_url = serve_dataset(path="/primary/hapi", data=Response("Internal Server Error", status=500))
     mirror_url = serve_dataset(path="/mirror/hapi")
 
-    _ingest(db, tmp_path, [failing_url, mirror_url])
+    _ingest(db, [failing_url, mirror_url])
 
     assert stored_timestamps_and_metadata(DATASET_ID) == [(time, {"source": mirror_url}) for time in ROW_TIMES]
+
+
+def _closed_port_url() -> str:
+    """Returns a local HAPI server URL on a port nobody listens on."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    return f"http://127.0.0.1:{port}{SERVER_PATH}"
+
+
+@pytest.mark.integration
+def test_hapi_unreachable_source_is_retried_and_leaves_a_gap(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A source refusing the connection is asked again before its chunk is reported as gap without stored documents."""
+    retry_waits: list[float] = []
+    monkeypatch.setattr("space_weather_analysis.util.resilience.sleep", retry_waits.append)
+
+    report = _ingest(db, [_closed_port_url()])
+
+    assert [(gap.dataset_id, gap.start, gap.stop) for gap in report.gaps] == [(DATASET_ID, RUN_START, RUN_END)]
+    assert (report.chunks_total, len(retry_waits), db[DATASET_ID].count_documents({})) == (1, 2, 0)
 
 
 @pytest.mark.integration
@@ -287,17 +309,16 @@ def test_hapi_falls_back_to_next_source_when_first_fails(
     ],
 )
 def test_hapi_request_clipped_to_catalog_time_range(
-    db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset, httpserver: HTTPServer, extra_fields: Dict[str, Any], expected_stop: str
+    db: Database, serve_dataset: ServeDataset, httpserver: HTTPServer, extra_fields: dict[str, Any], expected_stop: str
 ) -> None:
     """A range wider than the catalog range is requested from the catalog start to the catalog stop, or to the run end if the source is ongoing."""
     server_url = serve_dataset()
 
     _ingest(
         db,
-        tmp_path,
         [server_url],
-        start=datetime(2024, 2, 29, tzinfo=timezone.utc),
-        end=datetime(2024, 3, 2, tzinfo=timezone.utc),
+        start=datetime(2024, 2, 29, tzinfo=UTC),
+        end=datetime(2024, 3, 2, tzinfo=UTC),
         extra_fields=extra_fields,
     )
 
@@ -306,14 +327,12 @@ def test_hapi_request_clipped_to_catalog_time_range(
 
 
 @pytest.mark.integration
-def test_hapi_chunk_costs_one_info_and_one_data_request_without_files(
-    db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset, httpserver: HTTPServer
-) -> None:
+def test_hapi_chunk_costs_one_info_and_one_data_request_without_files(db: Database, serve_dataset: ServeDataset, httpserver: HTTPServer) -> None:
     """One chunk sends exactly one /info and one /data request, no /capabilities request, and writes no hapiclient cache files."""
     cache_dir = pathlib.Path(tempfile.gettempdir()) / "hapi-data"
     files_before = _files_below(cache_dir)
 
-    _ingest(db, tmp_path, [serve_dataset()])
+    _ingest(db, [serve_dataset()])
 
     assert sorted(_requested_paths(httpserver)) == [f"{SERVER_PATH}/data", f"{SERVER_PATH}/info"]
     assert _files_below(cache_dir) == files_before
@@ -327,12 +346,10 @@ def _stored_metadata(db: Database) -> DatasetMetadata:
 
 
 @pytest.mark.integration
-def test_hapi_metadata_variables_match_stored_fields(
-    db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset, stored_data: StoredData
-) -> None:
-    """The record lists one variable per stored field and the server time stamp location; the raw info has no hapiclient request details."""
+def test_hapi_metadata_variables_match_stored_fields(db: Database, serve_dataset: ServeDataset, stored_data: StoredData) -> None:
+    """The record lists one variable per stored field and the time stamp location; the raw info has its server URL beside it, no hapiclient keys."""
     server_url = serve_dataset()
-    _ingest(db, tmp_path, [server_url])
+    _ingest(db, [server_url])
 
     record = _stored_metadata(db)
     assert {variable.name for variable in record.variables} == set(stored_data(DATASET_ID, REGULAR_TIME))
@@ -345,15 +362,15 @@ def test_hapi_metadata_variables_match_stored_fields(
     raw = MongoMetadataRepository(db).get_raw(DATASET_ID, "hapi")
     assert raw is not None
     assert raw.payload["parameters"] == XRAY_PARAMETERS
-    assert (raw.payload["x_server_url"], "x_dataFile" in raw.payload) == (server_url, False)
+    assert (raw.url, "x_server_url" in raw.payload, "x_dataFile" in raw.payload) == (server_url, False, False)
 
 
 @pytest.mark.integration
-def test_repeated_hapi_ingestion_does_not_duplicate_documents(db: Database, tmp_path: pathlib.Path, serve_dataset: ServeDataset) -> None:
+def test_repeated_hapi_ingestion_does_not_duplicate_documents(db: Database, serve_dataset: ServeDataset) -> None:
     """A second run over the same range keeps one document per data row."""
     server_url = serve_dataset()
-    _ingest(db, tmp_path, [server_url])
+    _ingest(db, [server_url])
 
-    HapiPipeline(db, tmp_path).run([DATASET_ID], RUN_START, RUN_END)
+    HapiPipeline(db).run([DATASET_ID], RUN_START, RUN_END)
 
     assert db[DATASET_ID].count_documents({}) == len(ROW_TIMES)

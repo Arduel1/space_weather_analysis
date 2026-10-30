@@ -8,9 +8,10 @@ from pymongo.database import Database
 
 from catalog_collector.data_catalog.tasks import DataCatalogTaskSettings, hapi_availability_kind
 from catalog_collector.metadata_catalog.tasks import MetadataCatalogTaskSettings, hapi_metadata_kind
-from catalog_collector.scheduling.models import MetadataTask, PlannedRequest, TaskFailedError
+from catalog_collector.scheduling.models import MetadataTask, PlannedRequest
 from catalog_collector.scheduling.repository import MongoMetadataTaskRepository
 from catalog_collector.scheduling.worker import MetadataWorker, TaskKind, WorkerSettings
+from space_weather_analysis.util.error_handling import DataRetrievalError
 
 START = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
 INTERVAL = timedelta(days=1)
@@ -87,7 +88,7 @@ def test_due_task_runs_once_and_is_scheduled_one_jittered_interval_later(db: Dat
 def test_failures_back_off_doubling_and_a_success_resets_them(db: Database) -> None:
     """Each failure doubles the retry delay starting at the backoff setting, and the next success clears the failure state."""
     clock = FakeClock()
-    outcomes = [TaskFailedError("first"), TaskFailedError("second"), None]
+    outcomes = [DataRetrievalError("first"), DataRetrievalError("second"), None]
 
     def run(task: MetadataTask) -> None:
         """Raises the next planned failure or succeeds."""
@@ -175,7 +176,7 @@ def test_retry_after_lengthens_the_retry_delay_and_the_host_pause(db: Database) 
         """Records the run and fails the busy task with a Retry-After of two hours."""
         runs.append(task.target)
         if task.target == "busy":
-            raise TaskFailedError("busy", retry_after_seconds=7200)
+            raise DataRetrievalError("busy", retry_after_seconds=7200)
 
     planned_requests = [PlannedRequest("busy", "https://a.example.org/1"), PlannedRequest("other", "https://a.example.org/2")]
     worker = _worker(db, [_kind(planned_requests, run)], clock)

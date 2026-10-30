@@ -64,7 +64,7 @@ class CdasMetadataRefresher:
             The summary.
 
         Raises:
-            CdawebRequestError: If the dataset list cannot be read; the stored metadata is then left unchanged.
+            DataRetrievalError, DataProcessingError: If the dataset list cannot be read; the stored metadata is then left unchanged.
         """
         datasets = cdaweb_dataset_ids_by_cdas_id(self.catalog_repository)
         cdas_datasets = fetch_cdas_datasets(self.session, self.url)

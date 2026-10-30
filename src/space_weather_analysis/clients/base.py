@@ -1,49 +1,51 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, Mapping, Sequence
+from typing import ClassVar
+
+from space_weather_analysis.catalog.models import SourceType
 
 
-class BaseClient(ABC):
-    """Abstract base class for data provider clients.
+@dataclass(frozen=True)
+class FetchResult[T]:
+    """The answer of a data provider for one dataset and time range.
 
-    This interface unifies the interaction with different space weather data
-    sources. It supports both the discovery phase and the retrieval phase.
+    Attributes:
+        data: The data in the format of the client; None if the provider has no data for the range.
+        source_url: The server that answered; None if the client asked no server.
     """
 
+    data: T | None
+    source_url: str | None = None
+
+
+class DataClient[T](ABC):
+    """The contract by which the pipelines fetch data from a provider.
+
+    Every client fetches the data of one dataset for one time range that starts inclusive and
+    stops exclusive, both given as timezone-aware times. A failed request raises, while a provider
+    answering that it has no data for the range gives a result without data, so callers can tell
+    a gap that is worth fetching again from a range without data.
+
+    Attributes:
+        source_type: The source type of the master catalog the client serves.
+    """
+
+    source_type: ClassVar[SourceType]
+
     @abstractmethod
-    def get_catalog_entries(self) -> Sequence[Mapping[str, Any]]:
-        """Retrieves a list of available datasets or groups from the provider.
-
-        This is primarily used by the Catalog Service for discovery.
-
-        Returns:
-            Sequence[Mapping[str, Any]]: A list of raw dataset entries or groups.
-        """
-        pass
-
-    @abstractmethod
-    def get_dataset_metadata(self, dataset_id: str) -> Dict[str, Any]:
-        """Retrieves detailed metadata for a specific dataset.
+    def fetch(self, dataset_id: str, start: datetime, stop: datetime) -> FetchResult[T]:
+        """Fetches the data of a dataset for a time range.
 
         Args:
-            dataset_id (str): The unique identifier of the dataset.
+            dataset_id: The dataset ID in the master catalog.
+            start: The start of the range (inclusive), timezone-aware.
+            stop: The end of the range (exclusive), timezone-aware.
 
         Returns:
-            Dict[str, Any]: Detailed metadata; the keys depend on the implementation.
+            The data of the range and the server that delivered it.
+
+        Raises:
+            DataRetrievalError: If the request failed; carries the wait the provider asked for, if any.
+            DataProcessingError: If the response cannot be read.
         """
-        pass
-
-    @abstractmethod
-    def get_data(self, dataset_id: str, start_time: datetime, end_time: datetime, **kwargs: Any) -> Any:
-        """Fetches time-series data for the specified dataset and time range.
-
-        Args:
-            dataset_id (str): The unique identifier of the dataset.
-            start_time (datetime): The start of the requested time range.
-            end_time (datetime): The end of the requested time range.
-            **kwargs: Additional provider-specific arguments.
-
-        Returns:
-            Any: The fetched data (structure depends on implementation).
-        """
-        pass

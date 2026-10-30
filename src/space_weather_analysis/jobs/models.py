@@ -1,17 +1,28 @@
-from datetime import datetime
-from typing import Any, Dict, List, Literal, Mapping, Optional
+from collections.abc import Mapping
+from enum import StrEnum
+from typing import Any, Literal
 
 from bson.objectid import ObjectId
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
-from space_weather_analysis.util.time_utils import ensure_aware
+from space_weather_analysis.catalog.models import SourceType
+from space_weather_analysis.util.time_utils import UtcDatetime
 
-# Life cycle of a download job: the frontend creates it as PENDING, the orchestrator claims it
-# as RUNNING and ends it as COMPLETED or FAILED.
-JobStatus = Literal["PENDING", "RUNNING", "COMPLETED", "FAILED"]
+
+class JobStatus(StrEnum):
+    """The life cycle of a download job.
+
+    The frontend creates a job as PENDING, the orchestrator claims it as RUNNING and ends it as COMPLETED or FAILED.
+    """
+
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
 
 # The statuses that end a job.
-FinalJobStatus = Literal["COMPLETED", "FAILED"]
+FinalJobStatus = Literal[JobStatus.COMPLETED, JobStatus.FAILED]
 
 
 class JobParameters(BaseModel):
@@ -23,15 +34,25 @@ class JobParameters(BaseModel):
         end_time: The end of the requested time range; None lets the pipeline choose.
     """
 
-    datasets: List[str] = Field(default_factory=list)
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
+    datasets: list[str] = Field(default_factory=list)
+    start_time: UtcDatetime | None = None
+    end_time: UtcDatetime | None = None
 
-    @field_validator("start_time", "end_time")
-    @classmethod
-    def _times_in_utc(cls, value: Optional[datetime]) -> Optional[datetime]:
-        """Reads naive times as UTC, as MongoDB returns stored times without time zone."""
-        return ensure_aware(value) if value is not None else None
+
+class ChunkGap(BaseModel):
+    """A time range of a dataset that a run could not ingest, so the stored data lack it until a later run fetches it.
+
+    Attributes:
+        dataset_id: The dataset ID.
+        start: The start of the range (inclusive).
+        stop: The end of the range (exclusive).
+        reason: Why the range was not ingested.
+    """
+
+    dataset_id: str
+    start: UtcDatetime
+    stop: UtcDatetime
+    reason: str
 
 
 class Job(BaseModel):
@@ -41,7 +62,7 @@ class Job(BaseModel):
         id: The job ID, the text of the MongoDB ObjectId stored as `_id`.
         status: The current status.
         parameters: What the job ingests.
-        source_id: The source type of the pipeline to run; None lets the orchestrator resolve it from the master catalog.
+        source_type: The source type of the pipeline to run; None lets the orchestrator resolve it from the master catalog.
         created_at: When the job was created.
         started_at: When the orchestrator claimed the job.
         updated_at: When the progress was last reported.
@@ -49,27 +70,23 @@ class Job(BaseModel):
         progress: The share of the work done, from 0.0 to 1.0.
         message: The latest progress message.
         error: The error description of a failed job.
+        missing_chunks: The time ranges a completed job could not ingest.
     """
 
     id: str
     status: JobStatus
     parameters: JobParameters = Field(default_factory=JobParameters)
-    source_id: Optional[str] = None
-    created_at: datetime
-    started_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    source_type: SourceType | None = None
+    created_at: UtcDatetime
+    started_at: UtcDatetime | None = None
+    updated_at: UtcDatetime | None = None
+    completed_at: UtcDatetime | None = None
     progress: float = 0.0
-    message: Optional[str] = None
-    error: Optional[str] = None
+    message: str | None = None
+    error: str | None = None
+    missing_chunks: list[ChunkGap] = Field(default_factory=list)
 
-    @field_validator("created_at", "started_at", "updated_at", "completed_at")
-    @classmethod
-    def _times_in_utc(cls, value: Optional[datetime]) -> Optional[datetime]:
-        """Reads naive times as UTC, as MongoDB returns stored times without time zone."""
-        return ensure_aware(value) if value is not None else None
-
-    def to_document(self) -> Dict[str, Any]:
+    def to_document(self) -> dict[str, Any]:
         """Converts the job into its MongoDB document.
 
         Returns:

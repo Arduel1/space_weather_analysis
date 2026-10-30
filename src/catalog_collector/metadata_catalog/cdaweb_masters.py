@@ -53,7 +53,7 @@ class CdawebMasterRefresher:
             True if the stored master file changed.
 
         Raises:
-            CdawebRequestError: If the master file cannot be read; the stored metadata is then left unchanged.
+            DataRetrievalError, DataProcessingError: If the master file cannot be read; the stored metadata is then left unchanged.
         """
         payload = sanitize_for_bson(fetch_master(self.session, url))
         stored = self.metadata_repository.get_raw(cdas_id, "istp")
