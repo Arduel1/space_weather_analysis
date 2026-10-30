@@ -20,6 +20,10 @@ class DataRetrievalError(SpaceWeatherError):
         self.retry_after_seconds = retry_after_seconds
 
 
+class ResourceNotFoundError(DataRetrievalError):
+    """Raised when a provider answers that the requested document does not exist (HTTP 404)."""
+
+
 class DataProcessingError(SpaceWeatherError):
     """Raised when received or local data cannot be read, converted or stored."""
 

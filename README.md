@@ -37,7 +37,7 @@ The data model follows the physical chain of space weather: phenomena originate 
 The system is a modular monolith: a shared core library (`space_weather_analysis`) plus three separately-runnable components. All components share one codebase and one Docker image and communicate through MongoDB rather than over the network.
 
 - Catalog Collector: discovers available datasets from the providers and builds the master catalog and the dataset metadata. It runs as its own entrypoint because a full discovery pass is long-running.
-- Metadata Worker: a long-running background process that repeats all metadata requests (HAPI metadata mirror, CDAWeb dataset list and per-dataset master files, dataset availability) on a schedule, one request at a time with a random pause per provider host, keeping the last good state when a provider is unreachable.
+- Metadata Worker: a long-running background process that repeats all metadata requests (HAPI metadata mirror, CDAWeb dataset list, per-dataset master files and SPASE records, dataset availability) on a schedule, one request at a time with a random pause per provider host, keeping the last good state when a provider is unreachable.
 - Pipeline Service: fetches, parses, and normalizes data for a dataset and stores it in MongoDB, adding dataset metadata from the source where available. It also processes on-demand fetch jobs requested by the frontend.
 - Frontend: the Streamlit dashboard, which reads the catalog, the dataset metadata, and the time-series data from MongoDB and renders them.
 - MongoDB: the shared data store, holding the dataset catalog, descriptive metadata for each dataset, the per-dataset time-series data, and the fetch-job queue. `mongo-express` provides a web admin UI.
@@ -232,8 +232,9 @@ Tools started outside Docker, such as the notebooks, can load the variables from
 │   ├── space_weather_analysis/ # Shared core library (clients, config, DB, logging, utils)
 │   ├── catalog_collector/      # Collector (main.py) and metadata worker (metadata_worker.py)
 │   │   ├── data_catalog/       # Master catalog: snapshot load, availability, dataset discovery
-│   │   ├── metadata_catalog/   # Dataset metadata: snapshot load, HAPI and CDAS metadata refresh
+│   │   ├── metadata_catalog/   # Dataset metadata: snapshot load, HAPI, CDAS, master file and SPASE metadata refresh
 │   │   ├── cdaweb/             # CDAWeb access: dataset list (CDAS web services) and master files
+│   │   ├── spase/              # SPASE records of the datasets (spase-metadata.org)
 │   │   ├── hapi_mirror/        # Server lookup shared by the HAPI metadata mirror refreshes
 │   │   └── scheduling/         # Task queue and worker for recurring metadata requests
 │   ├── pipeline_service/       # ETL: fetch, parse, normalize, store

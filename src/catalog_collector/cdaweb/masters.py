@@ -2,7 +2,7 @@ from typing import Any
 
 import requests
 
-from catalog_collector.cdaweb.web_service import get_json
+from space_weather_analysis.clients.json_download import download_json
 from space_weather_analysis.util.error_handling import DataProcessingError
 
 # Connect and read timeout in seconds; the largest master files have a few MB.
@@ -27,7 +27,7 @@ def fetch_master(session: requests.Session, url: str) -> dict[str, Any]:
         DataRetrievalError: If the download fails; carries the Retry-After wait of HTTP 429 and 503.
         DataProcessingError: If the response is no master file.
     """
-    document = get_json(session, url, MASTER_TIMEOUT, "CDAWeb master file")
+    document = download_json(session, url, MASTER_TIMEOUT, "CDAWeb master file")
     try:
         return parse_master(document)
     except ValueError as e:
