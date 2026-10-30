@@ -1,11 +1,33 @@
 import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Mapping, Optional
+from typing import Any
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel
 
-from space_weather_analysis.util.time_utils import ensure_aware
+from space_weather_analysis.util.time_utils import UtcDatetime
+
+# The target of a kind that makes one single request instead of one per dataset.
+SINGLE_REQUEST_TARGET = "all"
+
+
+class TaskFailedError(Exception):
+    """Raised by a task handler whose request did not deliver usable metadata.
+
+    Attributes:
+        retry_after_seconds: The wait the provider asked for before the next request, from its Retry-After header; None if it asked for none.
+    """
+
+    def __init__(self, message: str, retry_after_seconds: float | None = None) -> None:
+        """Initializes the error.
+
+        Args:
+            message: What failed.
+            retry_after_seconds: The wait the provider asked for before the next request.
+        """
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
 
 
 @dataclass(frozen=True)
@@ -44,17 +66,11 @@ class MetadataTask(BaseModel):
     url: str
     interval_seconds: int
     active: bool = True
-    next_due_at: datetime
-    last_attempt_at: Optional[datetime] = None
-    last_success_at: Optional[datetime] = None
+    next_due_at: UtcDatetime
+    last_attempt_at: UtcDatetime | None = None
+    last_success_at: UtcDatetime | None = None
     consecutive_failures: int = 0
-    last_error: Optional[str] = None
-
-    @field_validator("next_due_at", "last_attempt_at", "last_success_at")
-    @classmethod
-    def _times_in_utc(cls, value: Optional[datetime]) -> Optional[datetime]:
-        """Reads naive times as UTC, as MongoDB returns stored times without time zone."""
-        return ensure_aware(value) if value is not None else None
+    last_error: str | None = None
 
     @classmethod
     def from_document(cls, document: Mapping[str, Any]) -> "MetadataTask":

@@ -1,6 +1,7 @@
 import pathlib
-from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import numpy as np
 import pytest
@@ -13,14 +14,14 @@ from space_weather_analysis.clients.cdaweb import CdawebClient
 from space_weather_analysis.metadata.models import DatasetMetadata
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
 
-StoredData = Callable[[str, datetime], Dict[str, Any]]
-StoredTimestampsAndMetadata = Callable[[str], List[Tuple[datetime, Dict[str, Any]]]]
+StoredData = Callable[[str, datetime], dict[str, Any]]
+StoredTimestampsAndMetadata = Callable[[str], list[tuple[datetime, dict[str, Any]]]]
 
 DATASET_ID = "SYNTH_MAG_H0"
 GROUP = "SYNTH"
 SOURCE_METADATA = {"source": f"FIDO_CDAWEB/{GROUP}"}
 
-DAY_ONE = datetime(2024, 1, 1, tzinfo=timezone.utc)
+DAY_ONE = datetime(2024, 1, 1, tzinfo=UTC)
 DAY_TWO = DAY_ONE + timedelta(days=1)
 DAY_THREE = DAY_ONE + timedelta(days=2)
 RECORD_INTERVAL = timedelta(hours=6)
@@ -45,12 +46,12 @@ def _record_time(day: datetime, record_number: int) -> datetime:
     return (day + record_number * RECORD_INTERVAL).replace(tzinfo=None)
 
 
-def _write_daily_cdf(path: pathlib.Path, day: datetime, bin_location: Optional[float]) -> None:
+def _write_daily_cdf(path: pathlib.Path, day: datetime, bin_location: float | None) -> None:
     """Writes an ISTP-like CDF file with the four records of a day."""
     record_times = [day + record_number * RECORD_INTERVAL for record_number in range(RECORDS_PER_DAY)]
     epochs = CDFepoch.compute_tt2000([[time.year, time.month, time.day, time.hour, 0, 0, 0, 0, 0] for time in record_times])
 
-    epoch_attributes: Dict[str, Any] = {"FIELDNAM": "Epoch", "VAR_TYPE": "support_data"}
+    epoch_attributes: dict[str, Any] = {"FIELDNAM": "Epoch", "VAR_TYPE": "support_data"}
     if bin_location is not None:
         epoch_attributes["BIN_LOCATION"] = np.float64(bin_location)
 
@@ -107,7 +108,7 @@ def _write_daily_cdf(path: pathlib.Path, day: datetime, bin_location: Optional[f
 
 
 def _write_variable(
-    writer: CdfWriter, name: str, data_type: int, values: np.ndarray, attributes: Dict[str, Any], dimension_sizes: Optional[List[int]] = None
+    writer: CdfWriter, name: str, data_type: int, values: np.ndarray, attributes: dict[str, Any], dimension_sizes: list[int] | None = None
 ) -> None:
     """Writes one record-varying variable with its attributes."""
     specification = {"Variable": name, "Data_Type": data_type, "Num_Elements": 1, "Rec_Vary": True, "Dim_Sizes": dimension_sizes or []}
@@ -117,14 +118,14 @@ def _write_variable(
 class FakeCdawebClient(CdawebClient):
     """CDAWeb client writing synthetic daily CDF files instead of downloading via Fido, recording its calls."""
 
-    def __init__(self, bin_location: Optional[float] = None, delivers_files: bool = True) -> None:
+    def __init__(self, bin_location: float | None = None, delivers_files: bool = True) -> None:
         """Starts without calls; delivers_files False makes every request return no files."""
         super().__init__()
         self.bin_location = bin_location
         self.delivers_files = delivers_files
-        self.calls: List[Tuple[str, datetime, datetime]] = []
+        self.calls: list[tuple[str, datetime, datetime]] = []
 
-    def get_data(self, dataset_id: str, start_time: datetime, end_time: datetime, **kwargs: Any) -> List[pathlib.Path]:
+    def get_data(self, dataset_id: str, start_time: datetime, end_time: datetime, **kwargs: Any) -> list[pathlib.Path]:
         """Returns one file per day touching [start_time, end_time], as Fido delivers whole daily files."""
         self.calls.append((dataset_id, start_time, end_time))
         if not self.delivers_files:
@@ -218,7 +219,7 @@ def test_cdaweb_vector_columns_stored_and_large_array_not_stored(db: Database, t
 
 @pytest.mark.integration
 @pytest.mark.parametrize(("bin_location", "expected_location"), [(None, "center"), (0.0, "begin"), (0.25, "other")])
-def test_cdaweb_metadata_from_istp_attributes(db: Database, tmp_path: pathlib.Path, bin_location: Optional[float], expected_location: str) -> None:
+def test_cdaweb_metadata_from_istp_attributes(db: Database, tmp_path: pathlib.Path, bin_location: float | None, expected_location: str) -> None:
     """Description, units, fill, valid range and VAR_TYPE come from the ISTP attributes; the time stamp location from BIN_LOCATION."""
     _ingest(db, tmp_path, FakeCdawebClient(bin_location=bin_location))
 
@@ -237,7 +238,7 @@ def test_cdaweb_metadata_from_istp_attributes(db: Database, tmp_path: pathlib.Pa
     quality = variables["quality"]
     assert (quality.description, quality.units, quality.fill, quality.dtype) == ("Synthetic quality flag", None, INT_FILL, "integer")
     assert type(quality.fill) is int
-    assert set(flux.field_sources.values()) == {"istp"}
+    assert set(flux.field_sources.values()) == {"file"}
     assert metadata.time.timestamp_location == expected_location
 
 
@@ -249,10 +250,11 @@ def test_cdaweb_metadata_variables_match_stored_fields(db: Database, tmp_path: p
     metadata = _dataset_metadata(db)
     variables = {variable.name: variable for variable in metadata.variables}
     assert set(variables) == set(stored_data(DATASET_ID, _record_time(DAY_ONE, 0)))
-    assert [(variables[name].source_name, variables[name].component) for name in ("B_0", "B_1", "B_2")] == [("B", 0), ("B", 1), ("B", 2)]
+    components = [(variables[name].source_name, variables[name].component, variables[name].element_index) for name in ("B_0", "B_1", "B_2")]
+    assert components == [("B", 0, 0), ("B", 1, 1), ("B", 2, 2)]
     # VALIDMIN of B holds one value per component, so no single valid range applies
     assert variables["B_1"].valid_min is None
-    raw = MongoMetadataRepository(db).get_raw(DATASET_ID, "istp")
+    raw = MongoMetadataRepository(db).get_raw(DATASET_ID, "file")
     assert raw is not None
     assert raw.payload["B"]["VALIDMIN"] == B_VALID_MIN
 

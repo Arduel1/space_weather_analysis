@@ -1,11 +1,10 @@
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import List
+from datetime import UTC, datetime
 
 import requests
 
-from catalog_collector.cdas.datasets import CDAS_DATASETS_URL, fetch_cdas_datasets
+from catalog_collector.cdaweb.datasets import CDAS_DATASETS_URL, fetch_cdas_datasets
 from catalog_collector.data_catalog.availability_state import ONGOING_TOLERANCE, apply_availability, format_utc, mark_missing
 from space_weather_analysis.catalog.models import MasterCatalogItem, SourceType
 from space_weather_analysis.catalog.repository import CatalogRepository
@@ -55,14 +54,14 @@ class CdasAvailabilityRefresher:
             The summary.
 
         Raises:
-            CdasRequestError: If the dataset list cannot be read; the catalog is then left unchanged.
+            CdawebRequestError: If the dataset list cannot be read; the catalog is then left unchanged.
         """
         datasets = fetch_cdas_datasets(self.session, self.url)
-        fetched_at = datetime.now(timezone.utc)
+        fetched_at = datetime.now(UTC)
         checked_at = format_utc(fetched_at)
         ongoing_since = fetched_at - ONGOING_TOLERANCE
         summary = CdasAvailabilitySummary()
-        changed_items: List[MasterCatalogItem] = []
+        changed_items: list[MasterCatalogItem] = []
 
         for item in self.catalog_repository.get_all():
             item_changed = False
@@ -73,11 +72,12 @@ class CdasAvailabilityRefresher:
                 if dataset is None:
                     mark_missing(source, checked_at)
                     summary.missing += 1
-                elif dataset.start is None or dataset.stop is None or dataset.stop_time is None:
+                elif dataset.time_interval is None:
                     summary.unresolved += 1
                     continue
                 else:
-                    apply_availability(source, dataset.start, dataset.stop, dataset.stop_time >= ongoing_since, checked_at)
+                    interval = dataset.time_interval
+                    apply_availability(source, interval.start, interval.stop, interval.stop_time >= ongoing_since, checked_at)
                     summary.refreshed += 1
                     summary.ongoing += int(source["ongoing"])
                 item_changed = True
@@ -86,7 +86,10 @@ class CdasAvailabilityRefresher:
 
         self.catalog_repository.save_many(changed_items)
         logger.info(
-            f"CDAS availability refresh: {summary.refreshed} sources refreshed ({summary.ongoing} ongoing), "
-            f"{summary.missing} missing, {summary.unresolved} without usable time range"
+            "CDAS availability refresh: %d sources refreshed (%d ongoing), %d missing, %d without usable time range",
+            summary.refreshed,
+            summary.ongoing,
+            summary.missing,
+            summary.unresolved,
         )
         return summary

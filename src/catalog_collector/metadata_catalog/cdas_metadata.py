@@ -1,16 +1,15 @@
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Dict, List, Sequence
-from urllib.parse import urlsplit
+from datetime import UTC, datetime
+from itertools import batched
 
 import requests
 
-from catalog_collector.cdas.datasets import CDAS_DATASETS_URL, CdasDataset, fetch_cdas_datasets
-from space_weather_analysis.catalog.models import SourceType
+from catalog_collector.cdaweb.datasets import CDAS_DATASETS_URL, CdasDataset, cdaweb_dataset_ids_by_cdas_id, fetch_cdas_datasets
 from space_weather_analysis.catalog.repository import CatalogRepository
 from space_weather_analysis.metadata.models import RawMetadataRecord
-from space_weather_analysis.metadata.overlays import CDAWEB_HOST, cdas_dataset_id, describes_cdaweb_dataset, save_with_overlays
+from space_weather_analysis.metadata.overlays import resave_cdaweb_records
 from space_weather_analysis.metadata.repository import MetadataRepository, sanitize_for_bson
 
 logger = logging.getLogger(__name__)
@@ -65,46 +64,32 @@ class CdasMetadataRefresher:
             The summary.
 
         Raises:
-            CdasRequestError: If the dataset list cannot be read; the stored metadata is then left unchanged.
+            CdawebRequestError: If the dataset list cannot be read; the stored metadata is then left unchanged.
         """
-        datasets = self._dataset_ids_by_cdas_id()
+        datasets = cdaweb_dataset_ids_by_cdas_id(self.catalog_repository)
         cdas_datasets = fetch_cdas_datasets(self.session, self.url)
-        retrieved_at = datetime.now(timezone.utc)
+        retrieved_at = datetime.now(UTC)
         summary = CdasMetadataSummary()
 
         listed_cdas_ids = [cdas_id for cdas_id in sorted(datasets) if cdas_id in cdas_datasets]
         summary.missing = len(datasets) - len(listed_cdas_ids)
-        for start in range(0, len(listed_cdas_ids), BATCH_SIZE):
-            batch = listed_cdas_ids[start : start + BATCH_SIZE]
+        for batch in batched(listed_cdas_ids, BATCH_SIZE):
             self._refresh_batch(batch, cdas_datasets, datasets, retrieved_at, summary)
 
         logger.info(
-            f"CDAS metadata refresh: {summary.saved} entries saved, {summary.unchanged} unchanged, "
-            f"{summary.missing} not listed, {summary.records_overlaid} records overlaid"
+            "CDAS metadata refresh: %d entries saved, %d unchanged, %d not listed, %d records overlaid",
+            summary.saved,
+            summary.unchanged,
+            summary.missing,
+            summary.records_overlaid,
         )
         return summary
-
-    def _dataset_ids_by_cdas_id(self) -> Dict[str, List[str]]:
-        """Lists the catalog datasets that CDAWeb serves, grouped by their CDAS dataset ID.
-
-        Returns:
-            The catalog dataset IDs keyed by CDAS dataset ID; HAPI splits `{dataset_id}@{index}` share one key.
-        """
-        datasets: Dict[str, List[str]] = {}
-        for item in self.catalog_repository.get_all():
-            for source in item["sources"]:
-                source_type = source.get("type")
-                is_cdaweb_hapi = source_type == SourceType.HAPI and (urlsplit(source.get("source_id", "")).hostname or "").lower() == CDAWEB_HOST
-                if source_type == SourceType.FIDO_CDAWEB or is_cdaweb_hapi:
-                    datasets.setdefault(cdas_dataset_id(item["dataset_id"]), []).append(item["dataset_id"])
-                    break
-        return datasets
 
     def _refresh_batch(
         self,
         batch: Sequence[str],
-        cdas_datasets: Dict[str, CdasDataset],
-        datasets: Dict[str, List[str]],
+        cdas_datasets: dict[str, CdasDataset],
+        datasets: dict[str, list[str]],
         retrieved_at: datetime,
         summary: CdasMetadataSummary,
     ) -> None:
@@ -118,8 +103,8 @@ class CdasMetadataRefresher:
             summary: The summary to count the outcomes in, changed in place.
         """
         stored_raw_records = self.metadata_repository.get_raw_many(batch, "cdas")
-        new_raw_records: List[RawMetadataRecord] = []
-        changed_dataset_ids: List[str] = []
+        new_raw_records: list[RawMetadataRecord] = []
+        changed_dataset_ids: list[str] = []
         for cdas_id in batch:
             payload = sanitize_for_bson(cdas_datasets[cdas_id].entry)
             stored_raw_record = stored_raw_records.get(cdas_id)
@@ -131,9 +116,5 @@ class CdasMetadataRefresher:
 
         # The raw entries come first, as the overlay of the saved records reads them
         self.metadata_repository.save_raw_many(new_raw_records)
-        # Records of another source, such as a second HAPI server, get no overlay and stay as stored
-        stored_records = self.metadata_repository.get_many(changed_dataset_ids).values()
-        records = [record for record in stored_records if describes_cdaweb_dataset(record)]
-        save_with_overlays(self.metadata_repository, records)
         summary.saved += len(new_raw_records)
-        summary.records_overlaid += len(records)
+        summary.records_overlaid += resave_cdaweb_records(self.metadata_repository, changed_dataset_ids)

@@ -1,8 +1,9 @@
 import logging
 import pathlib
 import pickle
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from collections.abc import Generator
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import gridfs
 import pandas as pd
@@ -63,9 +64,9 @@ class CdawebPipeline(MongoLoader, BasePipeline):
     # Time span of one download and of one check for already stored documents
     CHUNK_DURATION = timedelta(days=7)
     # Time stamp locations from BIN_LOCATION that the metadata record names; any other becomes 'other'
-    ISTP_TIMESTAMP_LOCATIONS: Dict[str, TimestampLocation] = {"begin": "begin", "center": "center", "end": "end"}
+    ISTP_TIMESTAMP_LOCATIONS: dict[str, TimestampLocation] = {"begin": "begin", "center": "center", "end": "end"}
 
-    def __init__(self, db: Database, base_data_path: pathlib.Path, client: Optional[CdawebClient] = None):
+    def __init__(self, db: Database, base_data_path: pathlib.Path, client: CdawebClient | None = None):
         """Initializes the pipeline.
 
         Args:
@@ -88,10 +89,10 @@ class CdawebPipeline(MongoLoader, BasePipeline):
 
     def run(
         self,
-        datasets: List[str],
-        start_time: Optional[datetime],
-        end_time: Optional[datetime],
-        progress_callback: Optional[ProgressCallback] = None,
+        datasets: list[str],
+        start_time: datetime | None,
+        end_time: datetime | None,
+        progress_callback: ProgressCallback | None = None,
     ) -> None:
         """Runs the complete data pipeline orchestration.
 
@@ -166,7 +167,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
 
         logger.info("CDAWeb Pipeline finished.")
 
-    def _find_fido_group(self, dataset_id: str) -> Optional[str]:
+    def _find_fido_group(self, dataset_id: str) -> str | None:
         """Reads the source_id of the first FIDO_CDAWEB source of a dataset from the master catalog.
 
         Args:
@@ -202,7 +203,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         group_name: str,
         start_time: datetime,
         end_time: datetime,
-    ) -> List[str]:
+    ) -> list[str]:
         """Runs the full pipeline for a single dataset chunk.
 
         Args:
@@ -216,9 +217,9 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         """
         logger.info(f"Processing Dataset Chunk: {dataset_id} ({start_time} to {end_time})")
 
-        opened_datasets: List[xr.Dataset] = []
-        skipped_variables: List[str] = []
-        stored_column_types: Dict[str, Optional[DataType]] = {}
+        opened_datasets: list[xr.Dataset] = []
+        skipped_variables: list[str] = []
+        stored_column_types: dict[str, DataType | None] = {}
         try:
             # We construct the download path here to pass it to the client
             download_dir = self.base_data_dir / group_name / dataset_id
@@ -268,8 +269,8 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         data_object: GenericTimeSeries,
         collection_name: str,
         source_id: str,
-        file_metadata: Dict[str, Any],
-    ) -> Tuple[Dict[str, Optional[DataType]], List[str]]:
+        file_metadata: dict[str, Any],
+    ) -> tuple[dict[str, DataType | None], list[str]]:
         """Cleans, transforms and loads 1D TimeSeries data into MongoDB.
 
         Args:
@@ -293,10 +294,10 @@ class CdawebPipeline(MongoLoader, BasePipeline):
 
     def _load_nd_data_to_gridfs(
         self,
-        data_object: List[Tuple[xr.Dataset, str, str]],
+        data_object: list[tuple[xr.Dataset, str, str]],
         collection_name: str,
         source_id: str,
-        opened_datasets: List[xr.Dataset],
+        opened_datasets: list[xr.Dataset],
     ) -> None:
         """Loads N-D data by processing files sequentially and storing payloads in GridFS.
 
@@ -317,7 +318,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
             try:
                 logger.info(f"Found time dimension: '{time_dim}' (coord: '{time_coord}')")
 
-                documents_batch: List[Dict[str, Any]] = []
+                documents_batch: list[dict[str, Any]] = []
                 for doc in self._transform_xarray_to_docs(ds_file, source_id, time_dim, time_coord, collection_name):
                     documents_batch.append(doc)
                     if len(documents_batch) >= self.DEFAULT_BATCH_SIZE:
@@ -341,7 +342,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         time_dim: str,
         time_coord: str,
         collection_name: str,
-    ) -> Generator[Dict[str, Any], None, None]:
+    ) -> Generator[dict[str, Any], None, None]:
         """Generator to convert an N-D Dataset into MongoDB documents.
 
         Iterates through the time dimension, serializes each time slice using pickle,
@@ -369,7 +370,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
 
             timestamp = ensure_aware(timestamp)
 
-            data_payload: Dict[str, Any] = {}
+            data_payload: dict[str, Any] = {}
             for var_name in ts_slice.data_vars:
                 try:
                     var_data = ts_slice[var_name]
@@ -401,13 +402,14 @@ class CdawebPipeline(MongoLoader, BasePipeline):
     def _save_pipeline_metadata(
         self,
         dataset_id: str,
-        file_metadata: Dict[str, Any],
-        stored_column_types: Dict[str, Optional[DataType]],
-        skipped_variables: List[str],
+        file_metadata: dict[str, Any],
+        stored_column_types: dict[str, DataType | None],
+        skipped_variables: list[str],
     ) -> None:
-        """Saves the metadata record built from the ISTP attributes and the attributes themselves.
+        """Saves the metadata record built from the ISTP attributes of the data files and the attributes themselves.
 
-        A failing save is logged, as the stored data documents stay valid without metadata.
+        The attributes are of kind "file", as the master file of the dataset, laid over the record as kind "istp",
+        overrides them. A failing save is logged, as the stored data documents stay valid without metadata.
 
         Args:
             dataset_id: The dataset ID.
@@ -415,7 +417,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
             stored_column_types: The value type of each stored column; empty if no column was stored.
             skipped_variables: The names of the variables not stored because they have too many components.
         """
-        retrieved_at = datetime.now(timezone.utc)
+        retrieved_at = datetime.now(UTC)
         location = time_stamp_location(file_metadata)
         record = DatasetMetadata(
             dataset_id=dataset_id,
@@ -424,18 +426,18 @@ class CdawebPipeline(MongoLoader, BasePipeline):
             time=TimeInfo(timestamp_location=self.ISTP_TIMESTAMP_LOCATIONS.get(location, "other")),
             variables=self._istp_variables(file_metadata, stored_column_types),
             not_stored=[SkippedParameter(name=name, reason=f"array with more than {MAX_ARRAY_COLUMNS} elements") for name in skipped_variables],
-            provenance=[MetadataSource(kind="istp", retrieved_at=retrieved_at)],
+            provenance=[MetadataSource(kind="file", retrieved_at=retrieved_at)],
             updated_at=retrieved_at,
         )
         try:
-            self.metadata_repository.save_raw(dataset_id, "istp", file_metadata, None, retrieved_at)
+            self.metadata_repository.save_raw(dataset_id, "file", file_metadata, None, retrieved_at)
             save_with_overlays(self.metadata_repository, [record])
-        except Exception as e:
-            logger.error(f"Failed to save metadata of {dataset_id}: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Failed to save metadata of %s", dataset_id)
 
     @staticmethod
-    def _istp_variables(file_metadata: Dict[str, Any], stored_column_types: Dict[str, Optional[DataType]]) -> List[VariableMetadata]:
-        """Describes each stored column by the ISTP attributes of its CDF variable.
+    def _istp_variables(file_metadata: dict[str, Any], stored_column_types: dict[str, DataType | None]) -> list[VariableMetadata]:
+        """Describes each stored column by the ISTP attributes of its CDF variable in the data files.
 
         Args:
             file_metadata: The attributes of each CDF variable, keyed by its name.
@@ -445,7 +447,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
             One variable per stored column; a column without CDF variable carries only its name and type.
         """
         column_sources = map_columns_to_cdf_variables(stored_column_types, file_metadata)
-        variables: List[VariableMetadata] = []
+        variables: list[VariableMetadata] = []
         for column_name, data_type in stored_column_types.items():
             variable_name, component_index = column_sources.get(column_name, (column_name, None))
             attributes = file_metadata.get(variable_name)
@@ -453,10 +455,11 @@ class CdawebPipeline(MongoLoader, BasePipeline):
                 attributes = {}
             variables.append(
                 VariableMetadata.from_single_source(
-                    "istp",
+                    "file",
                     name=column_name,
                     source_name=variable_name,
                     component=component_index,
+                    element_index=component_index,
                     # FIELDNAM is the short name every ISTP variable carries, used when CATDESC is missing
                     description=cdf_text_attribute(attributes, "CATDESC") or cdf_text_attribute(attributes, "FIELDNAM"),
                     label=cdf_text_attribute(attributes, "LABLAXIS"),
@@ -471,7 +474,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         return variables
 
 
-def column_data_type(column: pd.Series) -> Optional[DataType]:
+def column_data_type(column: pd.Series) -> DataType | None:
     """Names the value type of a stored column.
 
     Args:
@@ -491,7 +494,7 @@ def column_data_type(column: pd.Series) -> Optional[DataType]:
     return None
 
 
-def _numeric_attribute(value: Any) -> Optional[float]:
+def _numeric_attribute(value: Any) -> float | None:
     """Reads a single-valued numeric CDF attribute such as VALIDMIN.
 
     Args:

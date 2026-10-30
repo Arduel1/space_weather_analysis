@@ -1,13 +1,12 @@
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
+from typing import Annotated
+
+from pydantic import AfterValidator
 
 from space_weather_analysis.util.types import TimeRange
 
 logger = logging.getLogger(__name__)
-
-
-# --- Basic Time Utilities ---
 
 
 def ensure_aware(dt: datetime) -> datetime:
@@ -23,26 +22,32 @@ def ensure_aware(dt: datetime) -> datetime:
         datetime: A timezone-aware datetime object (UTC).
     """
     if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
-def parse_iso_time(time_str: str) -> Optional[datetime]:
-    """Safely parses an ISO time string into a timezone-aware datetime.
+# A pydantic field type that reads naive times as UTC, as MongoDB returns stored times without time zone.
+UtcDatetime = Annotated[datetime, AfterValidator(ensure_aware)]
+
+
+def parse_iso_time(time_str: str) -> datetime | None:
+    """Parses an ISO time string into a timezone-aware datetime.
+
+    Provider metadata often holds unparsable time texts, so a failure is logged as warning and returns None.
 
     Args:
         time_str (str): A time string in a format accepted by `datetime.fromisoformat`;
             naive times are treated as UTC.
 
     Returns:
-        Optional[datetime]: A timezone-aware datetime object (UTC), or None if parsing fails.
+        datetime | None: A timezone-aware datetime object (UTC), or None if parsing fails.
     """
     try:
         dt = datetime.fromisoformat(time_str)
-        return ensure_aware(dt)
-    except Exception:
-        logger.error(f"Failed to parse time string: {time_str}", exc_info=True)
+    except (ValueError, TypeError):
+        logger.warning("Failed to parse time string: %r", time_str)
         return None
+    return ensure_aware(dt)
 
 
 def format_iso_duration(duration: timedelta) -> str:
@@ -85,7 +90,7 @@ def calculate_time_intersection(
     range1_end: datetime,
     range2_start: datetime,
     range2_end: datetime,
-) -> Optional[TimeRange]:
+) -> TimeRange | None:
     """Calculates the overlapping period between two time ranges.
 
     All inputs are converted to timezone-aware (UTC) datetimes before calculation
@@ -98,7 +103,7 @@ def calculate_time_intersection(
         range2_end (datetime): End of the second time range.
 
     Returns:
-        Optional[Tuple[datetime, datetime]]: A tuple containing the (start, end)
+        TimeRange | None: A tuple containing the (start, end)
                                              of the overlapping period, or None
                                              if the ranges do not overlap (start >= end).
     """

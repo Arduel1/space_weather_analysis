@@ -1,21 +1,21 @@
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union, get_args
+from datetime import UTC, datetime
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from space_weather_analysis.catalog.models import SourceType
-from space_weather_analysis.util.time_utils import ensure_aware
+from space_weather_analysis.util.time_utils import UtcDatetime
 
 # Where a metadata value comes from:
 # hapi: the /info response of a HAPI server (Heliophysics Application Programmer's Interface, https://hapi-server.org/).
-# istp: the attributes of a CDF file following the ISTP Metadata Guidelines (https://istp-metadata.readthedocs.io/).
+# istp: the CDAWeb master file of a dataset, its authoritative attributes following the ISTP Metadata Guidelines
+#   (International Solar-Terrestrial Physics, https://istp-metadata.readthedocs.io/).
 # spase: a SPASE record (Space Physics Archive Search and Extract, https://spase-group.org/).
 # curated: a value written in the code of this project.
-# file: a value read from a downloaded data file without a metadata standard.
+# file: the attributes of a downloaded data file, which a master file of the dataset overrides.
 # api: the response of a provider API other than HAPI.
 # cdas: the dataset list of CDAS, the CDAWeb Coordinated Data Analysis System web services (https://cdaweb.gsfc.nasa.gov/WebServices/REST/).
 MetadataSourceKind = Literal["hapi", "istp", "spase", "curated", "file", "api", "cdas"]
-METADATA_SOURCE_KINDS: Tuple[str, ...] = get_args(MetadataSourceKind)
 
 # Value types of the stored fields, named like the HAPI parameter types.
 DataType = Literal["double", "integer", "string", "isotime", "boolean"]
@@ -37,8 +37,8 @@ class SourceInfo(BaseModel):
     """
 
     type: SourceType
-    provider: Optional[str] = None
-    server_url: Optional[str] = None
+    provider: str | None = None
+    server_url: str | None = None
 
 
 class TimeInfo(BaseModel):
@@ -51,16 +51,10 @@ class TimeInfo(BaseModel):
         timestamp_location: The position of each time stamp in its measurement interval.
     """
 
-    coverage_start: Optional[datetime] = None
-    coverage_stop: Optional[datetime] = None
-    cadence: Optional[str] = None
-    timestamp_location: Optional[TimestampLocation] = None
-
-    @field_validator("coverage_start", "coverage_stop")
-    @classmethod
-    def _coverage_in_utc(cls, value: Optional[datetime]) -> Optional[datetime]:
-        """Reads naive times as UTC, as MongoDB returns stored times without time zone."""
-        return ensure_aware(value) if value is not None else None
+    coverage_start: UtcDatetime | None = None
+    coverage_stop: UtcDatetime | None = None
+    cadence: str | None = None
+    timestamp_location: TimestampLocation | None = None
 
 
 class CitationInfo(BaseModel):
@@ -74,11 +68,11 @@ class CitationInfo(BaseModel):
         rules_of_use: The terms of use text or URL of the provider.
     """
 
-    doi: Optional[str] = None
-    text: Optional[str] = None
-    acknowledgement: Optional[str] = None
-    license: Optional[str] = None
-    rules_of_use: Optional[str] = None
+    doi: str | None = None
+    text: str | None = None
+    acknowledgement: str | None = None
+    license: str | None = None
+    rules_of_use: str | None = None
 
 
 class LinkInfo(BaseModel):
@@ -90,9 +84,9 @@ class LinkInfo(BaseModel):
         documentation: URLs of further documentation.
     """
 
-    resource_url: Optional[str] = None
-    spase_resource_id: Optional[str] = None
-    documentation: List[str] = Field(default_factory=list)
+    resource_url: str | None = None
+    spase_resource_id: str | None = None
+    documentation: list[str] = Field(default_factory=list)
 
 
 class SkippedParameter(BaseModel):
@@ -118,15 +112,9 @@ class MetadataSource(BaseModel):
     """
 
     kind: MetadataSourceKind
-    url: Optional[str] = None
-    retrieved_at: datetime
-    last_modified: Optional[str] = None
-
-    @field_validator("retrieved_at")
-    @classmethod
-    def _retrieved_at_in_utc(cls, value: datetime) -> datetime:
-        """Reads a naive time as UTC, as MongoDB returns stored times without time zone."""
-        return ensure_aware(value)
+    url: str | None = None
+    retrieved_at: UtcDatetime
+    last_modified: str | None = None
 
 
 class VariableMetadata(BaseModel):
@@ -136,6 +124,7 @@ class VariableMetadata(BaseModel):
         name: The field name in the stored documents.
         source_name: The name of the variable at the provider.
         component: The label or index of the array element this field holds; the flat index for arrays with more than one dimension.
+        element_index: The flat index of the array element this field holds, in the order of the flattened array; None for a scalar.
         description: The description given by the provider.
         label: The short axis or component label given by the provider.
         dtype: The value type of the field.
@@ -152,19 +141,20 @@ class VariableMetadata(BaseModel):
 
     name: str
     source_name: str
-    component: Optional[Union[str, int]] = None
-    description: Optional[str] = None
-    label: Optional[str] = None
-    dtype: Optional[DataType] = None
-    units: Optional[str] = None
-    fill: Optional[Union[str, int, float]] = None
-    valid_min: Optional[float] = None
-    valid_max: Optional[float] = None
-    coordinate_system: Optional[str] = None
-    vector_component: Optional[VectorComponent] = None
-    flag_meanings: Optional[Dict[str, str]] = None
-    var_type: Optional[str] = None
-    field_sources: Dict[str, MetadataSourceKind] = Field(default_factory=dict)
+    component: str | int | None = None
+    element_index: int | None = None
+    description: str | None = None
+    label: str | None = None
+    dtype: DataType | None = None
+    units: str | None = None
+    fill: str | int | float | None = None
+    valid_min: float | None = None
+    valid_max: float | None = None
+    coordinate_system: str | None = None
+    vector_component: VectorComponent | None = None
+    flag_meanings: dict[str, str] | None = None
+    var_type: str | None = None
+    field_sources: dict[str, MetadataSourceKind] = Field(default_factory=dict)
 
     @classmethod
     def from_single_source(cls, kind: MetadataSourceKind, **field_values: Any) -> "VariableMetadata":
@@ -205,23 +195,26 @@ class DatasetMetadata(BaseModel):
     dataset_id: str
     collection: str
     source: SourceInfo
-    title: Optional[str] = None
-    description: Optional[str] = None
+    title: str | None = None
+    description: str | None = None
     time: TimeInfo = Field(default_factory=TimeInfo)
     citation: CitationInfo = Field(default_factory=CitationInfo)
     links: LinkInfo = Field(default_factory=LinkInfo)
-    variables: List[VariableMetadata] = Field(default_factory=list)
-    not_stored: List[SkippedParameter] = Field(default_factory=list)
-    provenance: List[MetadataSource] = Field(default_factory=list)
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    variables: list[VariableMetadata] = Field(default_factory=list)
+    not_stored: list[SkippedParameter] = Field(default_factory=list)
+    provenance: list[MetadataSource] = Field(default_factory=list)
+    updated_at: UtcDatetime = Field(default_factory=lambda: datetime.now(UTC))
 
-    @field_validator("updated_at")
-    @classmethod
-    def _updated_at_in_utc(cls, value: datetime) -> datetime:
-        """Reads a naive time as UTC, as MongoDB returns stored times without time zone."""
-        return ensure_aware(value)
+    def replace_provenance(self, source: MetadataSource) -> None:
+        """Replaces the provenance entry of the source kind, so a source applied again is listed once.
 
-    def to_document(self) -> Dict[str, Any]:
+        Args:
+            source: The source to list.
+        """
+        self.provenance = [entry for entry in self.provenance if entry.kind != source.kind]
+        self.provenance.append(source)
+
+    def to_document(self) -> dict[str, Any]:
         """Converts the record into a MongoDB document with the dataset ID as `_id`.
 
         Times stay datetime objects, so MongoDB stores them as dates.
@@ -234,7 +227,7 @@ class DatasetMetadata(BaseModel):
         return document
 
     @classmethod
-    def from_document(cls, document: Dict[str, Any]) -> "DatasetMetadata":
+    def from_document(cls, document: dict[str, Any]) -> "DatasetMetadata":
         """Builds a record from a document written by to_document.
 
         Args:
@@ -263,12 +256,6 @@ class RawMetadataRecord(BaseModel):
 
     dataset_id: str
     kind: MetadataSourceKind
-    payload: Dict[str, Any]
-    url: Optional[str] = None
-    retrieved_at: datetime
-
-    @field_validator("retrieved_at")
-    @classmethod
-    def _retrieved_at_in_utc(cls, value: datetime) -> datetime:
-        """Reads a naive time as UTC, as MongoDB returns stored times without time zone."""
-        return ensure_aware(value)
+    payload: dict[str, Any]
+    url: str | None = None
+    retrieved_at: UtcDatetime

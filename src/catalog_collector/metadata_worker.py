@@ -3,8 +3,8 @@ import sys
 
 from pydantic import ValidationError
 
-from catalog_collector.data_catalog.tasks import cdas_availability_kind, hapi_availability_kind
-from catalog_collector.metadata_catalog.tasks import cdas_metadata_kind, hapi_metadata_kind
+from catalog_collector.data_catalog.tasks import DataCatalogTaskSettings, cdas_availability_kind, hapi_availability_kind
+from catalog_collector.metadata_catalog.tasks import MetadataCatalogTaskSettings, cdas_metadata_kind, cdaweb_master_kind, hapi_metadata_kind
 from catalog_collector.scheduling.repository import MongoMetadataTaskRepository
 from catalog_collector.scheduling.worker import MetadataWorker, WorkerSettings
 from space_weather_analysis.config.errors import format_settings_error
@@ -23,16 +23,19 @@ def main() -> None:
 
     try:
         worker_settings = WorkerSettings()
+        data_catalog_settings = DataCatalogTaskSettings()
+        metadata_catalog_settings = MetadataCatalogTaskSettings()
     except ValidationError as e:
-        logger.critical(f"Invalid worker settings, check the METADATA_WORKER_* environment variables: {format_settings_error(e)}. Exiting.")
+        logger.critical("Invalid worker settings, check the METADATA_WORKER_* environment variables: %s. Exiting.", format_settings_error(e))
         sys.exit(1)
 
     connection, db = connect_from_environment()
     kinds = [
-        hapi_metadata_kind(db, worker_settings),
-        hapi_availability_kind(db, worker_settings),
-        cdas_metadata_kind(db, worker_settings),
-        cdas_availability_kind(db, worker_settings),
+        hapi_metadata_kind(db, metadata_catalog_settings),
+        hapi_availability_kind(db, data_catalog_settings),
+        cdas_metadata_kind(db, metadata_catalog_settings),
+        cdas_availability_kind(db, data_catalog_settings),
+        cdaweb_master_kind(db, metadata_catalog_settings),
     ]
     try:
         MetadataWorker(MongoMetadataTaskRepository(db), kinds, worker_settings).run_forever()

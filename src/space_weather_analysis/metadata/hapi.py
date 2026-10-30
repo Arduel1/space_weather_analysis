@@ -1,7 +1,7 @@
 import logging
 import re
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple, cast, get_args
+from typing import Any, cast, get_args
 
 import numpy as np
 
@@ -26,12 +26,12 @@ from space_weather_analysis.util.time_utils import parse_iso_time
 logger = logging.getLogger(__name__)
 
 # HAPI parameter types and the value type of the stored field; "float" is a type some servers write in place of "double".
-HAPI_DATA_TYPES: Dict[str, DataType] = {"double": "double", "float": "double", "integer": "integer", "string": "string", "isotime": "isotime"}
+HAPI_DATA_TYPES: dict[str, DataType] = {"double": "double", "float": "double", "integer": "integer", "string": "string", "isotime": "isotime"}
 
 # The HAPI specification defines 'center' as time stamp location if a server gives none.
 DEFAULT_TIMESTAMP_LOCATION: TimestampLocation = "center"
-TIMESTAMP_LOCATIONS: Tuple[str, ...] = get_args(TimestampLocation)
-VECTOR_COMPONENTS: Tuple[str, ...] = get_args(VectorComponent)
+TIMESTAMP_LOCATIONS: tuple[str, ...] = get_args(TimestampLocation)
+VECTOR_COMPONENTS: tuple[str, ...] = get_args(VectorComponent)
 
 SPASE_ID_PREFIX = "spase://"
 # A DOI (Digital Object Identifier, https://www.doi.org/) is "10.", a registrant code, "/" and a suffix,
@@ -41,7 +41,7 @@ DOI_PATTERN = re.compile(r"^(?:https?://(?:dx\.)?doi\.org/|doi:)?(10\.\d{4,9}/\S
 NOT_STORED_REASON = f"array with more than {MAX_ARRAY_COLUMNS} elements"
 
 
-def build_hapi_metadata(dataset_id: str, collection: str, info: Dict[str, Any], server_url: Optional[str], retrieved_at: datetime) -> DatasetMetadata:
+def build_hapi_metadata(dataset_id: str, collection: str, info: dict[str, Any], server_url: str | None, retrieved_at: datetime) -> DatasetMetadata:
     """Builds the metadata record of a dataset from the /info response of a HAPI server.
 
     HAPI (Heliophysics Application Programmer's Interface, https://hapi-server.org/) describes
@@ -67,11 +67,11 @@ def build_hapi_metadata(dataset_id: str, collection: str, info: Dict[str, Any], 
     if not isinstance(parameters, list) or not parameters:
         raise ValueError(f"HAPI info of '{dataset_id}' has no parameters.")
 
-    variables: List[VariableMetadata] = []
-    not_stored: List[SkippedParameter] = []
+    variables: list[VariableMetadata] = []
+    not_stored: list[SkippedParameter] = []
     for parameter in parameters[1:]:
         if not isinstance(parameter, dict) or not parameter.get("name"):
-            logger.warning(f"HAPI info of '{dataset_id}': parameter without name ignored: {parameter}")
+            logger.warning("HAPI info of '%s': parameter without name ignored: %s", dataset_id, parameter)
             continue
         if is_too_large_for_columns(parameter):
             not_stored.append(SkippedParameter(name=str(parameter["name"]), reason=NOT_STORED_REASON))
@@ -110,7 +110,7 @@ def build_hapi_metadata(dataset_id: str, collection: str, info: Dict[str, Any], 
     )
 
 
-def hapi_parameter_variables(parameter: Dict[str, Any]) -> List[VariableMetadata]:
+def hapi_parameter_variables(parameter: dict[str, Any]) -> list[VariableMetadata]:
     """Describes the stored fields of one HAPI parameter.
 
     A scalar parameter yields one variable, an array parameter one per element, named
@@ -125,27 +125,37 @@ def hapi_parameter_variables(parameter: Dict[str, Any]) -> List[VariableMetadata
     """
     size = parameter.get("size")
     element_shape = tuple(size) if size else ()
-    variables = []
-    for column in parameter_columns(parameter):
-        variables.append(
-            VariableMetadata.from_single_source(
-                "hapi",
-                name=column.name,
-                source_name=str(parameter["name"]),
-                component=_component(column, element_shape),
-                description=optional_text(parameter.get("description")),
-                label=column.label or optional_text(element_value(parameter.get("label"), column.element_index, element_shape)),
-                dtype=HAPI_DATA_TYPES.get(str(parameter.get("type"))),
-                units=normalize_units(element_value(parameter.get("units"), column.element_index, element_shape)),
-                fill=_fill_value(parameter.get("fill")),
-                coordinate_system=optional_text(parameter.get("coordinateSystemName")),
-                vector_component=_vector_component(element_value(parameter.get("vectorComponents"), column.element_index, element_shape)),
-            )
-        )
-    return variables
+    return [_column_variable(parameter, column, element_shape) for column in parameter_columns(parameter)]
 
 
-def element_value(value: Any, element_index: Optional[Tuple[int, ...]], element_shape: Tuple[int, ...]) -> Any:
+def _column_variable(parameter: dict[str, Any], column: ParameterColumn, element_shape: tuple[int, ...]) -> VariableMetadata:
+    """Describes the stored field of one column of a HAPI parameter.
+
+    Args:
+        parameter: The definition of the parameter from the /info response.
+        column: The column of the parameter.
+        element_shape: The HAPI 'size' of the parameter, empty for a scalar parameter.
+
+    Returns:
+        The variable, with every set field attributed to the source kind "hapi".
+    """
+    return VariableMetadata.from_single_source(
+        "hapi",
+        name=column.name,
+        source_name=str(parameter["name"]),
+        component=_component(column, element_shape),
+        element_index=_flat_index(column, element_shape),
+        description=optional_text(parameter.get("description")),
+        label=column.label or optional_text(element_value(parameter.get("label"), column.element_index, element_shape)),
+        dtype=HAPI_DATA_TYPES.get(str(parameter.get("type"))),
+        units=normalize_units(element_value(parameter.get("units"), column.element_index, element_shape)),
+        fill=_fill_value(parameter.get("fill")),
+        coordinate_system=optional_text(parameter.get("coordinateSystemName")),
+        vector_component=_vector_component(element_value(parameter.get("vectorComponents"), column.element_index, element_shape)),
+    )
+
+
+def element_value(value: Any, element_index: tuple[int, ...] | None, element_shape: tuple[int, ...]) -> Any:
     """Picks the value of a parameter attribute that applies to one array element.
 
     Args:
@@ -172,7 +182,7 @@ def element_value(value: Any, element_index: Optional[Tuple[int, ...]], element_
     return entry
 
 
-def parse_hapi_time(value: Any) -> Optional[datetime]:
+def parse_hapi_time(value: Any) -> datetime | None:
     """Parses a HAPI time such as startDate or stopDate.
 
     HAPI times are UTC and may be a date with a trailing "Z", which datetime.fromisoformat rejects.
@@ -210,7 +220,7 @@ def hapi_timestamp_location(value: Any) -> TimestampLocation:
     return "other"
 
 
-def doi_from_text(text: Optional[str]) -> Optional[str]:
+def doi_from_text(text: str | None) -> str | None:
     """Extracts a DOI from a text that consists of a DOI.
 
     Args:
@@ -225,7 +235,7 @@ def doi_from_text(text: Optional[str]) -> Optional[str]:
     return match.group(1) if match else None
 
 
-def license_text(value: Any) -> Optional[str]:
+def license_text(value: Any) -> str | None:
     """Converts the HAPI 'licenseURL' into one text.
 
     Args:
@@ -240,7 +250,22 @@ def license_text(value: Any) -> Optional[str]:
     return optional_text(value)
 
 
-def _component(column: ParameterColumn, element_shape: Tuple[int, ...]) -> Optional[Any]:
+def _flat_index(column: ParameterColumn, element_shape: tuple[int, ...]) -> int | None:
+    """Computes the index of a column's element in the flattened array, where the last index varies fastest.
+
+    Args:
+        column: The column of the parameter.
+        element_shape: The HAPI 'size' of the parameter, empty for a scalar parameter.
+
+    Returns:
+        The flat element index, or None for a scalar parameter.
+    """
+    if column.element_index is None:
+        return None
+    return int(np.ravel_multi_index(column.element_index, element_shape))
+
+
+def _component(column: ParameterColumn, element_shape: tuple[int, ...]) -> str | int | None:
     """Names the array element a column holds.
 
     Args:
@@ -257,10 +282,10 @@ def _component(column: ParameterColumn, element_shape: Tuple[int, ...]) -> Optio
         return column.label
     if len(column.element_index) == 1:
         return column.element_index[0]
-    return int(np.ravel_multi_index(column.element_index, element_shape))
+    return _flat_index(column, element_shape)
 
 
-def _fill_value(value: Any) -> Optional[Any]:
+def _fill_value(value: Any) -> str | int | float | None:
     """Converts the HAPI fill value into a stored value.
 
     Args:
@@ -274,7 +299,7 @@ def _fill_value(value: Any) -> Optional[Any]:
     return optional_text(value)
 
 
-def _vector_component(value: Any) -> Optional[Any]:
+def _vector_component(value: Any) -> VectorComponent | None:
     """Checks a vector component against the HAPI 3.1 vocabulary.
 
     Args:
@@ -286,4 +311,4 @@ def _vector_component(value: Any) -> Optional[Any]:
     text = optional_text(value)
     if text is None or text.strip() not in VECTOR_COMPONENTS:
         return None
-    return text.strip()
+    return cast(VectorComponent, text.strip())

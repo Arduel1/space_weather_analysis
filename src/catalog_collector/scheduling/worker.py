@@ -1,15 +1,15 @@
 import logging
 import random
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Callable, Dict, List, Optional, Sequence
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from catalog_collector.scheduling.models import MetadataTask, PlannedRequest
+from catalog_collector.scheduling.models import MetadataTask, PlannedRequest, TaskFailedError
 from catalog_collector.scheduling.repository import MetadataTaskRepository
 
 logger = logging.getLogger(__name__)
@@ -31,8 +31,6 @@ class WorkerSettings(BaseSettings):
         interval_jitter: The share of the interval by which the next run is moved at random, so runs drift apart.
         failure_backoff_seconds: The retry delay after the first failure; it doubles per further failure up to the interval.
         plan_interval_seconds: The time between two comparisons of the planned requests with the stored tasks.
-        hapi_mirror_interval_hours: The time between two reads of a HAPI mirror file.
-        cdas_interval_hours: The time between two reads of the CDAS dataset list.
     """
 
     model_config = SettingsConfigDict(env_prefix="METADATA_WORKER_", frozen=True)
@@ -43,8 +41,6 @@ class WorkerSettings(BaseSettings):
     interval_jitter: float = 0.1
     failure_backoff_seconds: float = 900.0
     plan_interval_seconds: float = 3600.0
-    hapi_mirror_interval_hours: float = 24.0
-    cdas_interval_hours: float = 24.0
 
     @model_validator(mode="after")
     def _pause_range_ordered(self) -> "WorkerSettings":
@@ -67,26 +63,8 @@ class TaskKind:
 
     name: str
     interval: timedelta
-    plan: Callable[[], List[PlannedRequest]]
+    plan: Callable[[], list[PlannedRequest]]
     run: Callable[[MetadataTask], None]
-
-
-class TaskFailedError(Exception):
-    """Raised by a task handler whose request did not deliver usable metadata.
-
-    Attributes:
-        retry_after_seconds: The wait the provider asked for before the next request, from its Retry-After header; None if it asked for none.
-    """
-
-    def __init__(self, message: str, retry_after_seconds: Optional[float] = None) -> None:
-        """Initializes the error.
-
-        Args:
-            message: What failed.
-            retry_after_seconds: The wait the provider asked for before the next request.
-        """
-        super().__init__(message)
-        self.retry_after_seconds = retry_after_seconds
 
 
 class MetadataWorker:
@@ -101,8 +79,8 @@ class MetadataWorker:
         repository: MetadataTaskRepository,
         kinds: Sequence[TaskKind],
         settings: WorkerSettings,
-        clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
-        rng: Optional[random.Random] = None,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        rng: random.Random | None = None,
     ) -> None:
         """Initializes the worker.
 
@@ -114,12 +92,12 @@ class MetadataWorker:
             rng: The random source of pauses and jitter; a new unseeded one if None.
         """
         self.repository = repository
-        self.kinds: Dict[str, TaskKind] = {kind.name: kind for kind in kinds}
+        self.kinds: dict[str, TaskKind] = {kind.name: kind for kind in kinds}
         self.settings = settings
         self.clock = clock
         self.rng = rng or random.Random()
-        self._host_ready_at: Dict[str, datetime] = {}
-        self._next_plan_at: Optional[datetime] = None
+        self._host_ready_at: dict[str, datetime] = {}
+        self._next_plan_at: datetime | None = None
 
     def run_forever(self, sleep: Callable[[float], None] = time.sleep) -> None:
         """Runs due tasks until the process ends, sleeping whenever none can run.
@@ -127,7 +105,7 @@ class MetadataWorker:
         Args:
             sleep: Waits the given number of seconds.
         """
-        logger.info(f"Metadata worker started with kinds {sorted(self.kinds)}.")
+        logger.info("Metadata worker started with kinds %s.", sorted(self.kinds))
         while True:
             if not self.run_once():
                 sleep(self.settings.idle_sleep_seconds)
@@ -143,12 +121,11 @@ class MetadataWorker:
             self._plan(now)
             self._next_plan_at = now + timedelta(seconds=self.settings.plan_interval_seconds)
 
-        for task in self.repository.due(now, DUE_SCAN_LIMIT):
-            kind = self.kinds.get(task.kind)
+        for task in self.repository.due(now, list(self.kinds), DUE_SCAN_LIMIT):
             host = _host(task.url)
-            if kind is None or self._host_ready_at.get(host, now) > now:
+            if self._host_ready_at.get(host, now) > now:
                 continue
-            self._execute(task, kind, host)
+            self._execute(task, self.kinds[task.kind], host)
             return True
         return False
 
@@ -161,13 +138,17 @@ class MetadataWorker:
             now: The current time.
         """
         for kind in self.kinds.values():
+            # A long-running worker must outlive a failing planner; the traceback shows the bug
             try:
                 self.repository.sync(kind.name, kind.plan(), kind.interval, now)
-            except Exception as e:
-                logger.error(f"Planning metadata tasks of kind '{kind.name}' failed; its tasks stay as stored: {e}", exc_info=True)
+            except Exception:
+                logger.exception("Planning metadata tasks of kind '%s' failed; its tasks stay as stored", kind.name)
 
     def _execute(self, task: MetadataTask, kind: TaskKind, host: str) -> None:
         """Runs one task, records its outcome and starts the pause of its host, at least as long as a requested Retry-After.
+
+        A TaskFailedError is an expected provider failure and is logged as warning; any other exception is a bug and
+        is logged with its traceback. Both are retried, so a long-running worker outlives every single task.
 
         Args:
             task: The due task.
@@ -178,23 +159,43 @@ class MetadataWorker:
         retry_after = timedelta(0)
         try:
             kind.run(task)
-        except Exception as e:
-            finished_at = self.clock()
-            if isinstance(e, TaskFailedError) and e.retry_after_seconds:
+        except TaskFailedError as e:
+            if e.retry_after_seconds:
                 retry_after = timedelta(seconds=e.retry_after_seconds)
-            backoff_seconds = self.settings.failure_backoff_seconds * 2**task.consecutive_failures
-            # The provider's Retry-After is never shortened, not even by the interval cap of the backoff
-            retry_at = finished_at + max(min(timedelta(seconds=backoff_seconds), kind.interval), retry_after)
-            self.repository.record_failure(task.id, finished_at, retry_at, str(e)[:MAX_ERROR_LENGTH])
-            logger.warning(f"Metadata task '{task.id}' failed ({task.consecutive_failures + 1} in a row); retry at {retry_at}: {e}", exc_info=True)
+            finished_at, retry_at = self._record_failure(task, kind, e, retry_after)
+            logger.warning("Metadata task '%s' failed (%d in a row); retry at %s: %s", task.id, task.consecutive_failures + 1, retry_at, e)
+        except Exception as e:
+            finished_at, retry_at = self._record_failure(task, kind, e, retry_after)
+            logger.exception(
+                "Metadata task '%s' failed with an unexpected error (%d in a row); retry at %s", task.id, task.consecutive_failures + 1, retry_at
+            )
         else:
             finished_at = self.clock()
             jitter = 1.0 + self.rng.uniform(-self.settings.interval_jitter, self.settings.interval_jitter)
             next_due_at = finished_at + kind.interval * jitter
             self.repository.record_success(task.id, finished_at, next_due_at)
-            logger.info(f"Metadata task '{task.id}' done in {(finished_at - started_at).total_seconds():.1f} s; next run at {next_due_at}.")
+            logger.info("Metadata task '%s' done in %.1f s; next run at %s.", task.id, (finished_at - started_at).total_seconds(), next_due_at)
         pause = timedelta(seconds=self.rng.uniform(self.settings.host_pause_min_seconds, self.settings.host_pause_max_seconds))
         self._host_ready_at[host] = finished_at + max(pause, retry_after)
+
+    def _record_failure(self, task: MetadataTask, kind: TaskKind, error: Exception, retry_after: timedelta) -> tuple[datetime, datetime]:
+        """Records a failed run with its retry time, the backoff for the failures in a row or the requested Retry-After if longer.
+
+        Args:
+            task: The failed task.
+            kind: The kind of the task.
+            error: The exception of the run.
+            retry_after: The wait the provider asked for; zero if it asked for none.
+
+        Returns:
+            When the run ended and when it is retried.
+        """
+        finished_at = self.clock()
+        backoff_seconds = self.settings.failure_backoff_seconds * 2**task.consecutive_failures
+        # The provider's Retry-After is never shortened, not even by the interval cap of the backoff
+        retry_at = finished_at + max(min(timedelta(seconds=backoff_seconds), kind.interval), retry_after)
+        self.repository.record_failure(task.id, finished_at, retry_at, str(error)[:MAX_ERROR_LENGTH])
+        return finished_at, retry_at
 
 
 def _host(url: str) -> str:

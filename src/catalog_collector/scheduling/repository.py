@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 from pymongo import ASCENDING, UpdateOne
 from pymongo.database import Database
@@ -27,11 +28,12 @@ class MetadataTaskRepository(ABC):
         """
 
     @abstractmethod
-    def due(self, now: datetime, limit: int) -> List[MetadataTask]:
-        """Reads the active tasks whose next run is due.
+    def due(self, now: datetime, kinds: Sequence[str], limit: int) -> list[MetadataTask]:
+        """Reads the active tasks of the given kinds whose next run is due.
 
         Args:
             now: The current time.
+            kinds: The kinds a worker can run; tasks of other kinds are left out, so they do not fill the limit.
             limit: The largest number of tasks returned.
 
         Returns:
@@ -39,7 +41,7 @@ class MetadataTaskRepository(ABC):
         """
 
     @abstractmethod
-    def get(self, key: str) -> Optional[MetadataTask]:
+    def get(self, key: str) -> MetadataTask | None:
         """Reads one task.
 
         Args:
@@ -128,20 +130,22 @@ class MongoMetadataTaskRepository(MetadataTaskRepository):
         bulk_write_in_batches(self.collection, operations, self.BATCH_SIZE)
         self.collection.update_many({"kind": kind, "_id": {"$nin": planned_keys}, "active": True}, {"$set": {"active": False}})
 
-    def due(self, now: datetime, limit: int) -> List[MetadataTask]:
-        """Reads the active tasks whose next run is due.
+    def due(self, now: datetime, kinds: Sequence[str], limit: int) -> list[MetadataTask]:
+        """Reads the active tasks of the given kinds whose next run is due.
 
         Args:
             now: The current time.
+            kinds: The kinds a worker can run; tasks of other kinds are left out, so they do not fill the limit.
             limit: The largest number of tasks returned.
 
         Returns:
             The due tasks, the longest overdue first.
         """
-        documents = self.collection.find({"active": True, "next_due_at": {"$lte": now}}).sort("next_due_at", ASCENDING).limit(limit)
+        query = {"active": True, "kind": {"$in": list(kinds)}, "next_due_at": {"$lte": now}}
+        documents = self.collection.find(query).sort("next_due_at", ASCENDING).limit(limit)
         return [MetadataTask.from_document(document) for document in documents]
 
-    def get(self, key: str) -> Optional[MetadataTask]:
+    def get(self, key: str) -> MetadataTask | None:
         """Reads one task.
 
         Args:
@@ -161,7 +165,7 @@ class MongoMetadataTaskRepository(MetadataTaskRepository):
             finished_at: When the run ended.
             next_due_at: The earliest time of the next run.
         """
-        update: Dict[str, Any] = {
+        update: dict[str, Any] = {
             "$set": {"last_attempt_at": finished_at, "last_success_at": finished_at, "next_due_at": next_due_at, "consecutive_failures": 0},
             "$unset": {"last_error": ""},
         }
@@ -176,7 +180,7 @@ class MongoMetadataTaskRepository(MetadataTaskRepository):
             next_due_at: The earliest time of the retry.
             error: The error description.
         """
-        update: Dict[str, Any] = {
+        update: dict[str, Any] = {
             "$set": {"last_attempt_at": finished_at, "next_due_at": next_due_at, "last_error": error},
             "$inc": {"consecutive_failures": 1},
         }

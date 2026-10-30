@@ -1,18 +1,18 @@
 import random
 import socket
-from datetime import datetime, timedelta, timezone
-from typing import Callable, List
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pymongo.database import Database
 
-from catalog_collector.data_catalog.tasks import hapi_availability_kind
-from catalog_collector.metadata_catalog.tasks import hapi_metadata_kind
-from catalog_collector.scheduling.models import MetadataTask, PlannedRequest
+from catalog_collector.data_catalog.tasks import DataCatalogTaskSettings, hapi_availability_kind
+from catalog_collector.metadata_catalog.tasks import MetadataCatalogTaskSettings, hapi_metadata_kind
+from catalog_collector.scheduling.models import MetadataTask, PlannedRequest, TaskFailedError
 from catalog_collector.scheduling.repository import MongoMetadataTaskRepository
-from catalog_collector.scheduling.worker import MetadataWorker, TaskFailedError, TaskKind, WorkerSettings
+from catalog_collector.scheduling.worker import MetadataWorker, TaskKind, WorkerSettings
 
-START = datetime(2026, 10, 30, 12, 0, tzinfo=timezone.utc)
+START = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
 INTERVAL = timedelta(days=1)
 SETTINGS = WorkerSettings(host_pause_min_seconds=30, host_pause_max_seconds=90, interval_jitter=0.1, failure_backoff_seconds=900)
 
@@ -29,12 +29,12 @@ class FakeClock:
         return self.now
 
 
-def _kind(planned_requests: List[PlannedRequest], run: Callable[[MetadataTask], None], name: str = "synthetic") -> TaskKind:
+def _kind(planned_requests: list[PlannedRequest], run: Callable[[MetadataTask], None], name: str = "synthetic") -> TaskKind:
     """Builds a task kind with a fixed plan and the given handler."""
     return TaskKind(name, INTERVAL, lambda: planned_requests, run)
 
 
-def _worker(db: Database, kinds: List[TaskKind], clock: FakeClock) -> MetadataWorker:
+def _worker(db: Database, kinds: list[TaskKind], clock: FakeClock) -> MetadataWorker:
     """Builds a worker on the test database with the fake clock and a seeded random source."""
     return MetadataWorker(MongoMetadataTaskRepository(db), kinds, SETTINGS, clock=clock, rng=random.Random(0))
 
@@ -68,7 +68,7 @@ def test_sync_spreads_first_runs_keeps_state_and_deactivates_unplanned_tasks(db:
 def test_due_task_runs_once_and_is_scheduled_one_jittered_interval_later(db: Database) -> None:
     """A task runs only when due, and its next run lies one interval plus or minus the jitter after the run."""
     clock = FakeClock()
-    runs: List[str] = []
+    runs: list[str] = []
     worker = _worker(db, [_kind([PlannedRequest("all", "https://a.example.org/x")], lambda task: runs.append(task.id))], clock)
     worker.run_once()
     due_at = _stored(db, "synthetic/all").next_due_at
@@ -115,7 +115,7 @@ def test_failures_back_off_doubling_and_a_success_resets_them(db: Database) -> N
 def test_requests_to_one_host_pause_while_other_hosts_run(db: Database) -> None:
     """After a request, its host waits a random pause within the settings, while a due task of another host runs at once."""
     clock = FakeClock()
-    runs: List[str] = []
+    runs: list[str] = []
     planned_requests = [
         PlannedRequest("a1", "https://a.example.org/1"),
         PlannedRequest("a2", "https://A.example.org/2"),
@@ -149,9 +149,13 @@ def test_hapi_mirror_tasks_record_failure_when_the_mirror_is_unreachable(db: Dat
     """Both HAPI mirror tasks are planned, and an unreachable mirror counts as failed run instead of success."""
     clock = FakeClock()
     mirror_base_url = _closed_port_url()
-    worker = _worker(db, [hapi_metadata_kind(db, SETTINGS, mirror_base_url), hapi_availability_kind(db, SETTINGS, mirror_base_url)], clock)
+    kinds = [
+        hapi_metadata_kind(db, MetadataCatalogTaskSettings(), mirror_base_url),
+        hapi_availability_kind(db, DataCatalogTaskSettings(), mirror_base_url),
+    ]
+    worker = _worker(db, kinds, clock)
     worker.run_once()
-    clock.now = START + timedelta(hours=SETTINGS.hapi_mirror_interval_hours)
+    clock.now = START + timedelta(hours=MetadataCatalogTaskSettings().hapi_mirror_interval_hours)
 
     worker.run_once()
     clock.now += timedelta(seconds=SETTINGS.host_pause_max_seconds)
@@ -165,7 +169,7 @@ def test_hapi_mirror_tasks_record_failure_when_the_mirror_is_unreachable(db: Dat
 def test_retry_after_lengthens_the_retry_delay_and_the_host_pause(db: Database) -> None:
     """A failure naming a Retry-After longer than the backoff delays the retry and every request to the same host by that wait."""
     clock = FakeClock()
-    runs: List[str] = []
+    runs: list[str] = []
 
     def run(task: MetadataTask) -> None:
         """Records the run and fails the busy task with a Retry-After of two hours."""
