@@ -6,11 +6,11 @@ The `data/` directory holds the local data files the project reads at runtime. A
 
 - Title: Daily total sunspot number, version 2.0
 - Creator: WDC-SILSO, Royal Observatory of Belgium, Brussels
-- Download: https://www.sidc.be/SILSO/INFO/sndtotcsv.php
-- Reference: Clette, F. and Lefèvre, L. (2015). SILSO Sunspot Number V2.0. WDC-SILSO, Royal Observatory of Belgium. https://doi.org/10.24414/qnza-ac80
+- Download: <https://www.sidc.be/SILSO/INFO/sndtotcsv.php>
+- Reference: Clette, F. and Lefèvre, L. (2015). SILSO Sunspot Number V2.0. WDC-SILSO, Royal Observatory of Belgium. <https://doi.org/10.24414/qnza-ac80>
 - License: [Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)](https://creativecommons.org/licenses/by-nc/4.0/). Commercial use is not permitted.
 - Notes: values from the most recent months are provisional and are revised by SILSO over time.
-- Attribution: Source: WDC-SILSO, Royal Observatory of Belgium, Brussels, https://doi.org/10.24414/qnza-ac80
+- Attribution: Source: WDC-SILSO, Royal Observatory of Belgium, Brussels, <https://doi.org/10.24414/qnza-ac80>
 
 ```bash
 curl -o data/SN_d_tot_V2.0.csv https://www.sidc.be/SILSO/INFO/sndtotcsv.php
@@ -20,12 +20,12 @@ curl -o data/SN_d_tot_V2.0.csv https://www.sidc.be/SILSO/INFO/sndtotcsv.php
 
 - Title: SOHO/LASCO CME Catalog, text version (`univ_all.txt`)
 - Creator: CDAW Data Center, NASA and The Catholic University of America, in cooperation with the Naval Research Laboratory
-- Download: https://cdaw.gsfc.nasa.gov/CME_list/UNIVERSAL_ver2/text_ver/univ_all.txt
+- Download: <https://cdaw.gsfc.nasa.gov/CME_list/UNIVERSAL_ver2/text_ver/univ_all.txt>
 - License: the catalog publishes no formal license; it requests the acknowledgement below.
 - Acknowledgement: "This CME catalog is generated and maintained at the CDAW Data Center by NASA and The Catholic University of America in cooperation with the Naval Research Laboratory. SOHO is a project of international cooperation between ESA and NASA."
 - References:
-  - Yashiro, S., et al. (2004). A catalog of white light coronal mass ejections observed by the SOHO spacecraft. Journal of Geophysical Research, 109, A07105. https://doi.org/10.1029/2003JA010282
-  - Gopalswamy, N., et al. (2009). The SOHO/LASCO CME Catalog. Earth, Moon, and Planets, 104, 295-313. https://doi.org/10.1007/s11038-008-9282-7
+  - Yashiro, S., et al. (2004). A catalog of white light coronal mass ejections observed by the SOHO spacecraft. Journal of Geophysical Research, 109, A07105. <https://doi.org/10.1029/2003JA010282>
+  - Gopalswamy, N., et al. (2009). The SOHO/LASCO CME Catalog. Earth, Moon, and Planets, 104, 295-313. <https://doi.org/10.1007/s11038-008-9282-7>
 
 ```bash
 curl -o data/cme_catalog.txt https://cdaw.gsfc.nasa.gov/CME_list/UNIVERSAL_ver2/text_ver/univ_all.txt
