@@ -1,16 +1,16 @@
 import random
-import socket
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from pymongo.database import Database
 
-from catalog_collector.data_catalog.tasks import DataCatalogTaskSettings, hapi_availability_kind
-from catalog_collector.metadata_catalog.tasks import MetadataCatalogTaskSettings, hapi_metadata_kind
-from catalog_collector.scheduling.models import MetadataTask, PlannedRequest
+from catalog_collector.scheduling.models import MetadataTask, PlannedRequest, TaskKind
 from catalog_collector.scheduling.repository import MongoMetadataTaskRepository
-from catalog_collector.scheduling.worker import MetadataWorker, TaskKind, WorkerSettings
+from catalog_collector.scheduling.worker import MetadataWorker, WorkerSettings
+from catalog_collector.worker_tasks.data_catalog import hapi_availability_kind
+from catalog_collector.worker_tasks.metadata_catalog import hapi_metadata_kind
+from catalog_collector.worker_tasks.settings import TaskIntervalSettings
 from space_weather_analysis.util.error_handling import DataRetrievalError
 
 START = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
@@ -49,7 +49,7 @@ def _stored(db: Database, key: str) -> MetadataTask:
 
 @pytest.mark.integration
 def test_sync_spreads_first_runs_keeps_state_and_deactivates_unplanned_tasks(db: Database) -> None:
-    """New tasks start within one interval, a re-sync keeps their state, and unplanned tasks stay stored but inactive."""
+    """New per-dataset tasks start within one interval, a re-sync keeps their state, and unplanned tasks stay stored but inactive."""
     repository = MongoMetadataTaskRepository(db)
     planned_requests = [PlannedRequest(f"dataset_{index}", "https://a.example.org/x") for index in range(20)]
     repository.sync("synthetic", planned_requests, INTERVAL, START)
@@ -66,21 +66,37 @@ def test_sync_spreads_first_runs_keeps_state_and_deactivates_unplanned_tasks(db:
 
 
 @pytest.mark.integration
+def test_single_request_kind_runs_at_once_after_planning(db: Database) -> None:
+    """A kind with one single request runs in the same round it is planned, while a per-dataset task waits for its spread start."""
+    clock = FakeClock()
+    runs: list[str] = []
+    planned_requests = [PlannedRequest("all", "https://a.example.org/x")]
+    per_dataset = [PlannedRequest("dataset_a", "https://b.example.org/x")]
+    worker = _worker(
+        db, [_kind(planned_requests, lambda task: runs.append(task.id)), _kind(per_dataset, lambda task: runs.append(task.id), "spread")], clock
+    )
+
+    ran = worker.run_once()
+
+    assert (ran, runs, _stored(db, "spread/dataset_a").next_due_at > START) == (True, ["synthetic/all"], True)
+
+
+@pytest.mark.integration
 def test_due_task_runs_once_and_is_scheduled_one_jittered_interval_later(db: Database) -> None:
     """A task runs only when due, and its next run lies one interval plus or minus the jitter after the run."""
     clock = FakeClock()
     runs: list[str] = []
-    worker = _worker(db, [_kind([PlannedRequest("all", "https://a.example.org/x")], lambda task: runs.append(task.id))], clock)
+    worker = _worker(db, [_kind([PlannedRequest("dataset_a", "https://a.example.org/x")], lambda task: runs.append(task.id))], clock)
     worker.run_once()
-    due_at = _stored(db, "synthetic/all").next_due_at
+    due_at = _stored(db, "synthetic/dataset_a").next_due_at
     clock.now = due_at - timedelta(seconds=1)
     ran_before_due = worker.run_once()
 
     clock.now = due_at
     ran_when_due = worker.run_once()
 
-    task = _stored(db, "synthetic/all")
-    assert (ran_before_due, ran_when_due, runs, task.last_success_at) == (False, True, ["synthetic/all"], due_at)
+    task = _stored(db, "synthetic/dataset_a")
+    assert (ran_before_due, ran_when_due, runs, task.last_success_at) == (False, True, ["synthetic/dataset_a"], due_at)
     assert due_at + INTERVAL * 0.9 <= task.next_due_at <= due_at + INTERVAL * 1.1
 
 
@@ -96,20 +112,58 @@ def test_failures_back_off_doubling_and_a_success_resets_them(db: Database) -> N
         if outcome is not None:
             raise outcome
 
-    worker = _worker(db, [_kind([PlannedRequest("all", "https://a.example.org/x")], run)], clock)
+    worker = _worker(db, [_kind([PlannedRequest("dataset_a", "https://a.example.org/x")], run)], clock)
     worker.run_once()
-    retry_delays = []
     clock.now = START + INTERVAL
-    for _ in range(2):
-        worker.run_once()
-        task = _stored(db, "synthetic/all")
-        retry_delays.append((task.next_due_at - clock.now, task.consecutive_failures, task.last_error))
-        clock.now = task.next_due_at + timedelta(seconds=SETTINGS.host_pause_max_seconds)
+    worker.run_once()
+    first_failure = _stored(db, "synthetic/dataset_a")
+    first_delay = first_failure.next_due_at - clock.now
+    clock.now = first_failure.next_due_at + timedelta(seconds=SETTINGS.host_pause_max_seconds)
+    worker.run_once()
+    second_failure = _stored(db, "synthetic/dataset_a")
+    second_delay = second_failure.next_due_at - clock.now
+    clock.now = second_failure.next_due_at + timedelta(seconds=SETTINGS.host_pause_max_seconds)
     worker.run_once()
 
-    assert retry_delays == [(timedelta(seconds=900), 1, "first"), (timedelta(seconds=1800), 2, "second")]
-    task = _stored(db, "synthetic/all")
+    assert [(first_delay, first_failure.consecutive_failures, first_failure.last_error), (second_delay, second_failure.consecutive_failures)] == [
+        (timedelta(seconds=900), 1, "first"),
+        (timedelta(seconds=1800), 2),
+    ]
+    task = _stored(db, "synthetic/dataset_a")
     assert (task.consecutive_failures, task.last_error, task.last_success_at) == (0, None, clock.now)
+
+
+@pytest.mark.integration
+def test_long_failure_run_retries_after_one_interval_without_overflow(db: Database) -> None:
+    """After 40 failures in a row the doubled backoff is capped at the interval instead of overflowing the time arithmetic."""
+    clock = FakeClock()
+
+    def run(task: MetadataTask) -> None:
+        """Fails every run."""
+        raise DataRetrievalError("down")
+
+    worker = _worker(db, [_kind([PlannedRequest("dataset_a", "https://a.example.org/x")], run)], clock)
+    worker.run_once()
+    db["metadata_tasks"].update_one({"_id": "synthetic/dataset_a"}, {"$set": {"consecutive_failures": 40}})
+    clock.now = START + INTERVAL
+
+    worker.run_once()
+
+    task = _stored(db, "synthetic/dataset_a")
+    assert (task.consecutive_failures, task.next_due_at) == (41, clock.now + INTERVAL)
+
+
+@pytest.mark.integration
+def test_empty_plan_keeps_the_stored_tasks_active(db: Database) -> None:
+    """A kind that plans nothing, as before its source data is loaded, leaves its stored tasks active."""
+    clock = FakeClock()
+    planned_requests = [PlannedRequest("dataset_a", "https://a.example.org/x")]
+    _worker(db, [_kind(planned_requests, lambda task: None)], clock).run_once()
+    planned_requests.clear()
+
+    _worker(db, [_kind(planned_requests, lambda task: None)], clock).run_once()
+
+    assert _stored(db, "synthetic/dataset_a").active is True
 
 
 @pytest.mark.integration
@@ -137,26 +191,13 @@ def test_requests_to_one_host_pause_while_other_hosts_run(db: Database) -> None:
     assert ({runs[0][0], runs[1][0]}, sorted(runs)) == ({"a", "b"}, ["a1", "a2", "b1"])
 
 
-def _closed_port_url() -> str:
-    """Returns a local mirror base URL on a port nobody listens on."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
-    return f"http://127.0.0.1:{port}/meta/"
-
-
 @pytest.mark.integration
-def test_hapi_mirror_tasks_record_failure_when_the_mirror_is_unreachable(db: Database) -> None:
-    """Both HAPI mirror tasks are planned, and an unreachable mirror counts as failed run instead of success."""
+def test_hapi_mirror_tasks_record_failure_when_the_mirror_is_unreachable(db: Database, closed_port_url: str) -> None:
+    """Both HAPI mirror tasks are planned and run at once, and an unreachable mirror counts as failed run instead of success."""
     clock = FakeClock()
-    mirror_base_url = _closed_port_url()
-    kinds = [
-        hapi_metadata_kind(db, MetadataCatalogTaskSettings(), mirror_base_url),
-        hapi_availability_kind(db, DataCatalogTaskSettings(), mirror_base_url),
-    ]
+    mirror_base_url = f"{closed_port_url}/meta/"
+    kinds = [hapi_metadata_kind(db, TaskIntervalSettings(), mirror_base_url), hapi_availability_kind(db, TaskIntervalSettings(), mirror_base_url)]
     worker = _worker(db, kinds, clock)
-    worker.run_once()
-    clock.now = START + timedelta(hours=MetadataCatalogTaskSettings().hapi_mirror_interval_hours)
 
     worker.run_once()
     clock.now += timedelta(seconds=SETTINGS.host_pause_max_seconds)

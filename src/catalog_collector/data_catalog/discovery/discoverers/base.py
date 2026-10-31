@@ -1,30 +1,37 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Generator, Optional, Tuple, TypeAlias
+from collections.abc import Iterator
+from typing import Any, ClassVar
 
-from space_weather_analysis.catalog.models import CatalogEntryDict
+from space_weather_analysis.catalog.models import CatalogEntryDict, SourceType
 
-DiscoveryYield: TypeAlias = Tuple[str, CatalogEntryDict, Optional[Dict[str, Any]]]
-"""
-The output unit of discovery processes.
-Structure: (dataset_id, catalog_entry_dictionary, dataset_metadata or None).
-"""
+# The output unit of discovery: dataset ID, catalog entry, and the provider metadata of the dataset or None.
+type DiscoveryYield = tuple[str, CatalogEntryDict, dict[str, Any] | None]
 
 
 class AbstractDiscoverer(ABC):
-    """Abstract Base Class for a catalog discovery strategy.
+    """A discovery strategy that lists the datasets of one source type with their catalog entries.
 
-    Each concrete implementation of this class is responsible for querying
-    a specific type of data source and yielding standardized catalog entries.
+    A source that could not be read is named in failed_source_ids, so the builder does not count its datasets
+    as missing; a failure that leaves nothing discovered raises instead.
+
+    Attributes:
+        source_type: The source type of the entries the discoverer yields.
+        failed_source_ids: The source IDs whose datasets could not be listed in the last run.
     """
 
-    @abstractmethod
-    def discover(self) -> Generator[DiscoveryYield, None, None]:
-        """Runs the discovery process for the specific source.
+    source_type: ClassVar[SourceType]
 
-        This method should yield its findings one by one as a generator
-        to minimize memory usage.
+    def __init__(self) -> None:
+        """Initializes the discoverer without failed sources."""
+        self.failed_source_ids: set[str] = set()
+
+    @abstractmethod
+    def discover(self) -> Iterator[DiscoveryYield]:
+        """Lists the datasets of the source type one by one, so the whole result is never held in memory.
 
         Yields:
-            Generator: A generator of (dataset_id, catalog_entry, metadata) tuples.
+            The dataset ID, catalog entry and provider metadata of each discovered dataset.
+
+        Raises:
+            DataRetrievalError: If nothing could be discovered at all.
         """
-        pass

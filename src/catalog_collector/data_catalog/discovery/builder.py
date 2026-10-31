@@ -1,220 +1,165 @@
 import json
 import logging
 import pathlib
-from typing import Dict, List, Set, Tuple
+from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 
+from hapiclient.util import HAPIError
+
+from catalog_collector.data_catalog.availability_state import mark_missing
 from catalog_collector.data_catalog.discovery.discoverers.base import AbstractDiscoverer
 from catalog_collector.data_catalog.snapshot import CatalogSnapshotLoader
 from catalog_collector.metadata_catalog.snapshot import MetadataSnapshotLoader
 from space_weather_analysis.catalog.models import CatalogEntryDict
+from space_weather_analysis.catalog.repository import CatalogRepository
+from space_weather_analysis.util.error_handling import CatalogError, DataRetrievalError
 
 logger = logging.getLogger(__name__)
 
+# A discovered source is identified by dataset ID, source type and source ID.
+type SourceSignature = tuple[str, str, str]
+
 
 class CatalogBuilder:
-    """Builds a master catalog by orchestrating multiple discovery strategies.
+    """Builds the master catalog file and repository from the results of several discoverers.
 
-    This class iterates over a list of discoverer objects, collects their
-    results, and merges them into a single, sorted master catalog file.
+    Discovery never deletes: a source a completed discoverer no longer lists is kept and only counted as
+    missing, with the same miss count the availability refreshes keep, and the sources of a failed discoverer
+    or failed server stay as they are.
     """
 
     def __init__(
         self,
-        discoverers: List[AbstractDiscoverer],
+        discoverers: Sequence[AbstractDiscoverer],
         catalog_output_path: pathlib.Path,
+        catalog_repository: CatalogRepository,
         catalog_loader: CatalogSnapshotLoader,
         metadata_loader: MetadataSnapshotLoader,
-    ):
-        """Initializes the CatalogBuilder.
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
+        """Initializes the builder.
 
         Args:
-            discoverers (List[AbstractDiscoverer]): A list of concrete
-                discoverer strategy objects.
-            catalog_output_path (pathlib.Path): Path where the generated
-                master catalog JSON will be saved.
-            catalog_loader (CatalogSnapshotLoader): The loader that writes the catalog entries to the DB.
-            metadata_loader (MetadataSnapshotLoader): The loader that writes the discovered metadata to the DB.
+            discoverers: The discovery strategies to run.
+            catalog_output_path: The catalog file to update.
+            catalog_repository: The master catalog, whose sources get the miss counts.
+            catalog_loader: The loader that writes discovered catalog entries.
+            metadata_loader: The loader that writes discovered metadata.
+            clock: Returns the current time in UTC.
         """
         self.discoverers = discoverers
         self.catalog_output_path = catalog_output_path
+        self.catalog_repository = catalog_repository
         self.catalog_loader = catalog_loader
         self.metadata_loader = metadata_loader
-        self.master_catalog: Dict[str, List[CatalogEntryDict]] = {}
-        self.lowercase_id_map: Dict[str, str] = {}
+        self.clock = clock
+        self.master_catalog: dict[str, list[CatalogEntryDict]] = {}
+        self.canonical_ids: dict[str, str] = {}
 
-    def _get_canonical_dataset_key(self, dataset_id: str) -> str:
-        """Finds the existing canonical key for a dataset, ignoring case.
+    def build_catalog(self) -> None:
+        """Runs every discoverer, saves the discovered entries and metadata and writes the catalog file once at the end.
+
+        Raises:
+            CatalogError: If the existing catalog file cannot be read.
+            OSError: If the catalog file cannot be written.
+        """
+        self._load_catalog_file()
+        for discoverer in self.discoverers:
+            name = type(discoverer).__name__
+            logger.info("Running discoverer %s.", name)
+            try:
+                found = self._run(discoverer)
+            except (DataRetrievalError, HAPIError) as e:
+                logger.warning("Discoverer %s failed; the sources of its type stay as they are: %s", name, e)
+                continue
+            self._count_missing(discoverer, found)
+        self._save_catalog_file()
+
+    def _run(self, discoverer: AbstractDiscoverer) -> set[SourceSignature]:
+        """Saves every entry and metadata a discoverer yields.
 
         Args:
-            dataset_id (str): The dataset ID to check.
+            discoverer: The discoverer to run.
 
         Returns:
-            str: The canonical (case-preserved) dataset ID.
+            The signatures of the discovered sources.
         """
-        return self.lowercase_id_map.setdefault(dataset_id.lower(), dataset_id)
+        found: set[SourceSignature] = set()
+        for dataset_id, entry, metadata in discoverer.discover():
+            canonical_id = self.canonical_ids.setdefault(dataset_id.lower(), dataset_id)
+            found.add((canonical_id, entry["type"], entry["source_id"]))
+            if self._update_catalog(canonical_id, entry):
+                self.catalog_loader.upsert_dataset(canonical_id, self.master_catalog[canonical_id])
+            if metadata:
+                self.metadata_loader.upsert_metadata(canonical_id, metadata)
+        return found
 
-    def _update_catalog(
-        self,
-        dataset_id: str,
-        entry: CatalogEntryDict,
-    ) -> bool:
-        """Updates the master catalog with the new entry.
+    def _update_catalog(self, dataset_id: str, entry: CatalogEntryDict) -> bool:
+        """Adds or replaces the entry of one source in the in-memory catalog.
+
+        Args:
+            dataset_id: The canonical dataset ID.
+            entry: The discovered entry.
 
         Returns:
-            bool: True if the catalog was updated, False otherwise.
+            True if the catalog changed.
         """
-        if dataset_id not in self.master_catalog:
-            self.master_catalog[dataset_id] = [entry]
-            return True
-
-        sources = self.master_catalog[dataset_id]
-
-        # Check for duplicates or updates
-        for i, existing_entry in enumerate(sources):
-            if existing_entry["type"] == entry["type"] and existing_entry["source_id"] == entry["source_id"]:
-                # Replace the stored entry if any of its fields differ
-                if existing_entry != entry:
-                    logger.info(f"Updating existing entry for {dataset_id} from {entry['source_id']}")
-                    sources[i] = entry
-                    return True
-
-                # Exact duplicate
-                return False
-
+        sources = self.master_catalog.setdefault(dataset_id, [])
+        for index, existing in enumerate(sources):
+            if existing["type"] == entry["type"] and existing["source_id"] == entry["source_id"]:
+                if existing == entry:
+                    return False
+                sources[index] = entry
+                return True
         sources.append(entry)
         return True
 
-    def _save_catalog_to_file(self) -> None:
-        """Saves the completed catalog dictionary to a JSON file."""
-        try:
-            # logger.debug(f"Sorting {len(self.master_catalog)} unique dataset IDs alphabetically...")
-            sorted_items = sorted(
-                self.master_catalog.items(),
-                key=lambda item: item[0].lower(),
-            )
-            sorted_master_catalog = dict(sorted_items)
+    def _count_missing(self, discoverer: AbstractDiscoverer, found: set[SourceSignature]) -> None:
+        """Counts one more miss for each stored source of the discoverer's type that it did not list.
 
-            self.catalog_output_path.parent.mkdir(parents=True, exist_ok=True)
-
-            with open(self.catalog_output_path, "w", encoding="utf-8") as f:
-                json.dump(sorted_master_catalog, f, indent=2)
-
-            logger.info(f"Catalog saved to: {self.catalog_output_path}")
-
-        except IOError as e:
-            logger.error(f"Failed to write catalog file: {e}", exc_info=True)
-
-    def _load_initial_catalog(self) -> None:
-        """Loads the existing catalog from file if it exists."""
-        if not self.catalog_output_path.exists():
-            return
-
-        try:
-            with open(self.catalog_output_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, dict):
-                    self.master_catalog = data
-                    for key in data.keys():
-                        self.lowercase_id_map[key.lower()] = key
-            logger.info(f"Loaded {len(self.master_catalog)} entries from existing catalog.")
-        except Exception as e:
-            logger.warning(f"Failed to load existing catalog: {e}")
-
-    def build_catalog(self) -> None:
-        """Runs all discovery tasks and saves the universal catalog."""
-        logger.info("--- Starting Universal Catalog Build ---")
-
-        self._load_initial_catalog()
-
-        # Load existing catalog to DB first
-        self.catalog_loader.load_to_db()
-
-        # Track found entries to identify stale ones later
-        # Signature: (dataset_id, source_id, type)
-        found_signatures: Set[Tuple[str, str, str]] = set()
-
-        for discoverer in self.discoverers:
-            logger.info(f"Running discoverer: {discoverer.__class__.__name__}")
-            try:
-                for dataset_id, entry, metadata in discoverer.discover():
-                    # Ensure metadata is valid before processing
-                    if not entry.get("source_id") or not entry.get("type"):
-                        logger.warning(f"Skipping dataset {dataset_id} due to missing metadata in entry.")
-                        continue
-
-                    key_to_use = self._get_canonical_dataset_key(str(dataset_id))
-
-                    # Mark as found
-                    found_signatures.add((key_to_use, entry["source_id"], entry["type"]))
-
-                    if self._update_catalog(key_to_use, entry):
-                        self._save_catalog_to_file()
-                        self.catalog_loader.upsert_dataset(key_to_use, self.master_catalog[key_to_use])
-
-                    # Upsert metadata if available (checked separately from catalog entry)
-                    if metadata:
-                        self.metadata_loader.upsert_metadata(key_to_use, metadata)
-
-            except Exception as e:
-                logger.error(
-                    f"Discoverer {discoverer.__class__.__name__} failed: {e}",
-                    exc_info=True,
-                )
-
-        # Delete existing entries that were not rediscovered
-        self._prune_catalog(found_signatures)
-
-        logger.info("--- Universal Catalog Build Finished ---")
-
-    @staticmethod
-    def _was_found(dataset_id: str, source: CatalogEntryDict, found_signatures: Set[Tuple[str, str, str]]) -> bool:
-        """Checks whether a catalog source was discovered in the current run.
+        Sources of a server or group the discoverer could not read are left out, as their datasets are unknown.
 
         Args:
-            dataset_id: The dataset the source belongs to.
-            source: The catalog entry of the source.
-            found_signatures: Signatures (dataset_id, source_id, type) discovered in the current run.
-
-        Returns:
-            True if the source has a source_id and type and its signature was discovered.
+            discoverer: The completed discoverer.
+            found: The signatures of the sources it listed.
         """
-        source_id = source.get("source_id")
-        source_type = source.get("type")
-        return bool(source_id and source_type and (dataset_id, source_id, source_type) in found_signatures)
+        checked_at = self.clock()
+        for item in self.catalog_repository.get_all():
+            changed = False
+            for source in item["sources"]:
+                if source.get("type") != discoverer.source_type or source.get("source_id") in discoverer.failed_source_ids:
+                    continue
+                if (item["dataset_id"], source["type"], source["source_id"]) not in found:
+                    mark_missing(source, checked_at)
+                    changed = True
+            if changed:
+                self.catalog_repository.save(item)
 
-    def _prune_catalog(self, found_signatures: Set[Tuple[str, str, str]]) -> None:
-        """Removes entries from the catalog that were not found in the current run."""
-        logger.info("--- Pruning Stale Entries ---")
+    def _load_catalog_file(self) -> None:
+        """Reads the existing catalog file into memory; a missing file starts an empty catalog.
 
-        dataset_ids = list(self.master_catalog.keys())
-        modified_datasets = []
-        deleted_datasets = []
+        Raises:
+            CatalogError: If the file exists but is no JSON mapping from dataset ID to sources.
+        """
+        if not self.catalog_output_path.exists():
+            return
+        try:
+            data = json.loads(self.catalog_output_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            raise CatalogError(f"Catalog file {self.catalog_output_path} cannot be read: {e}") from e
+        if not isinstance(data, dict):
+            raise CatalogError(f"Catalog file {self.catalog_output_path} is no mapping from dataset ID to sources.")
+        self.master_catalog = data
+        self.canonical_ids = {dataset_id.lower(): dataset_id for dataset_id in data}
+        logger.info("Loaded %d datasets from the catalog file.", len(self.master_catalog))
 
-        for dataset_id in dataset_ids:
-            sources = self.master_catalog[dataset_id]
-            original_count = len(sources)
+    def _save_catalog_file(self) -> None:
+        """Writes the in-memory catalog to the catalog file, sorted by dataset ID ignoring case.
 
-            # Keep only sources that were found in this run
-            kept_sources = [source for source in sources if self._was_found(dataset_id, source, found_signatures)]
-
-            if not kept_sources:
-                # No sources left, delete dataset entirely
-                del self.master_catalog[dataset_id]
-                deleted_datasets.append(dataset_id)
-                logger.info(f"Pruning: Removing dataset {dataset_id}")
-            elif len(kept_sources) != original_count:
-                # Some sources removed, update dataset
-                self.master_catalog[dataset_id] = kept_sources
-                modified_datasets.append(dataset_id)
-                logger.info(f"Pruning: Updated dataset {dataset_id} (removed {original_count - len(kept_sources)} sources)")
-
-        # Sync changes to File and DB
-        if modified_datasets or deleted_datasets:
-            self._save_catalog_to_file()
-
-            for d_id in modified_datasets:
-                self.catalog_loader.upsert_dataset(d_id, self.master_catalog[d_id])
-
-            for d_id in deleted_datasets:
-                self.catalog_loader.delete_dataset(d_id)
-                self.metadata_loader.delete_metadata(d_id)
+        Raises:
+            OSError: If the file cannot be written.
+        """
+        sorted_catalog = dict(sorted(self.master_catalog.items(), key=lambda item: item[0].lower()))
+        self.catalog_output_path.parent.mkdir(parents=True, exist_ok=True)
+        self.catalog_output_path.write_text(json.dumps(sorted_catalog, indent=2), encoding="utf-8")
+        logger.info("Catalog file %s written with %d datasets.", self.catalog_output_path, len(sorted_catalog))

@@ -1,15 +1,13 @@
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from itertools import batched
 
-import requests
-
-from catalog_collector.cdaweb.datasets import CDAS_DATASETS_URL, CdasDataset, cdaweb_dataset_ids_by_cdas_id, fetch_cdas_datasets
+from catalog_collector.cdaweb.datasets import CDAS_DATASETS_URL, CdasDataset, cdaweb_dataset_ids_by_cdas_id
 from space_weather_analysis.catalog.repository import CatalogRepository
 from space_weather_analysis.metadata.models import RawMetadataRecord
-from space_weather_analysis.metadata.overlays import resave_cdaweb_records
+from space_weather_analysis.metadata.overlays.layering import resave_cdaweb_records
 from space_weather_analysis.metadata.repository import MetadataRepository, sanitize_for_bson
 
 logger = logging.getLogger(__name__)
@@ -42,33 +40,36 @@ class CdasMetadataRefresher:
     """
 
     def __init__(
-        self, catalog_repository: CatalogRepository, metadata_repository: MetadataRepository, session: requests.Session, url: str = CDAS_DATASETS_URL
+        self,
+        catalog_repository: CatalogRepository,
+        metadata_repository: MetadataRepository,
+        url: str = CDAS_DATASETS_URL,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         """Initializes the refresher.
 
         Args:
             catalog_repository: The master catalog naming the CDAWeb datasets.
             metadata_repository: The raw metadata and records to refresh.
-            session: The HTTP session for the request.
-            url: The location of the CDAS dataset list.
+            url: The location of the CDAS dataset list, recorded with the stored entries.
+            clock: Returns the current time in UTC.
         """
         self.catalog_repository = catalog_repository
         self.metadata_repository = metadata_repository
-        self.session = session
         self.url = url
+        self.clock = clock
 
-    def refresh(self) -> CdasMetadataSummary:
+    def refresh(self, cdas_datasets: dict[str, CdasDataset]) -> CdasMetadataSummary:
         """Stores every new or changed CDAS entry of a catalog dataset and saves its records again with the overlay.
+
+        Args:
+            cdas_datasets: The CDAS entries keyed by dataset ID.
 
         Returns:
             The summary.
-
-        Raises:
-            DataRetrievalError, DataProcessingError: If the dataset list cannot be read; the stored metadata is then left unchanged.
         """
         datasets = cdaweb_dataset_ids_by_cdas_id(self.catalog_repository)
-        cdas_datasets = fetch_cdas_datasets(self.session, self.url)
-        retrieved_at = datetime.now(UTC)
+        retrieved_at = self.clock()
         summary = CdasMetadataSummary()
 
         listed_cdas_ids = [cdas_id for cdas_id in sorted(datasets) if cdas_id in cdas_datasets]

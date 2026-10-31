@@ -1,11 +1,17 @@
 from abc import ABC, abstractmethod
-from typing import Any, List, Mapping, Optional, Sequence, cast
+from collections.abc import Mapping, Sequence
+from datetime import datetime
+from typing import Any, cast
 
 from pymongo import ASCENDING, ReplaceOne
 from pymongo.database import Database
 
 from space_weather_analysis.catalog.models import CatalogEntryDict, CatalogMap, MasterCatalogItem
 from space_weather_analysis.database.bulk import bulk_write_in_batches
+from space_weather_analysis.util.time_utils import ensure_aware
+
+# Source fields holding times, which MongoDB returns without time zone.
+SOURCE_TIME_FIELDS = ("availability_checked_at", "missing_since")
 
 
 class CatalogRepository(ABC):
@@ -31,7 +37,7 @@ class CatalogRepository(ABC):
         """
 
     @abstractmethod
-    def get(self, dataset_id: str) -> Optional[MasterCatalogItem]:
+    def get(self, dataset_id: str) -> MasterCatalogItem | None:
         """Reads the catalog item of one dataset.
 
         Args:
@@ -42,7 +48,7 @@ class CatalogRepository(ABC):
         """
 
     @abstractmethod
-    def get_sources(self, dataset_id: str, source_type: Optional[str] = None) -> List[CatalogEntryDict]:
+    def get_sources(self, dataset_id: str, source_type: str | None = None) -> list[CatalogEntryDict]:
         """Reads the sources of one dataset in their stored order.
 
         Args:
@@ -54,7 +60,7 @@ class CatalogRepository(ABC):
         """
 
     @abstractmethod
-    def get_all(self) -> List[MasterCatalogItem]:
+    def get_all(self) -> list[MasterCatalogItem]:
         """Reads every catalog item.
 
         Returns:
@@ -134,7 +140,7 @@ class MongoCatalogRepository(CatalogRepository):
             operations.append(ReplaceOne({"dataset_id": item["dataset_id"]}, document, upsert=True))
         bulk_write_in_batches(self.collection, operations, self.BATCH_SIZE)
 
-    def get(self, dataset_id: str) -> Optional[MasterCatalogItem]:
+    def get(self, dataset_id: str) -> MasterCatalogItem | None:
         """Reads the catalog item of one dataset.
 
         Args:
@@ -146,7 +152,7 @@ class MongoCatalogRepository(CatalogRepository):
         document = self.collection.find_one({"dataset_id": dataset_id}, {"_id": 0})
         return _catalog_item(document) if document else None
 
-    def get_sources(self, dataset_id: str, source_type: Optional[str] = None) -> List[CatalogEntryDict]:
+    def get_sources(self, dataset_id: str, source_type: str | None = None) -> list[CatalogEntryDict]:
         """Reads the sources of one dataset in their stored order.
 
         Args:
@@ -163,7 +169,7 @@ class MongoCatalogRepository(CatalogRepository):
             return item["sources"]
         return _sources_of_type(item["sources"], source_type)
 
-    def get_all(self) -> List[MasterCatalogItem]:
+    def get_all(self) -> list[MasterCatalogItem]:
         """Reads every catalog item.
 
         Returns:
@@ -208,13 +214,17 @@ def _catalog_item(document: Mapping[str, Any]) -> MasterCatalogItem:
         document: The stored document without `_id`.
 
     Returns:
-        The catalog item.
+        The catalog item, with the source times read as UTC.
     """
-    sources = cast(List[CatalogEntryDict], document.get("sources") or [])
+    sources = cast(list[CatalogEntryDict], document.get("sources") or [])
+    for source in sources:
+        for field in SOURCE_TIME_FIELDS:
+            if isinstance(source.get(field), datetime):
+                source[field] = ensure_aware(source[field])  # type: ignore[literal-required]
     return {"dataset_id": document["dataset_id"], "sources": sources}
 
 
-def _sources_of_type(sources: List[CatalogEntryDict], source_type: str) -> List[CatalogEntryDict]:
+def _sources_of_type(sources: list[CatalogEntryDict], source_type: str) -> list[CatalogEntryDict]:
     """Keeps the sources of one type in their order.
 
     Args:

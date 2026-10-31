@@ -1,45 +1,27 @@
 import logging
-from typing import Generator
+from collections.abc import Iterator
 
 from catalog_collector.data_catalog.discovery.discoverers.base import AbstractDiscoverer, DiscoveryYield
+from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.clients.gfz import GfzClient
 
 logger = logging.getLogger(__name__)
 
 
 class GfzDiscoverer(AbstractDiscoverer):
-    """Discovery strategy for GFZ Potsdam datasets.
+    """Lists the GFZ Potsdam indices the GFZ client serves as catalog entries."""
 
-    This class utilizes the GfzClient to retrieve available indices
-    and exposes them as catalog entries for the system.
-    """
+    source_type = SourceType.GFZ_POTSDAM
 
-    def __init__(self) -> None:
-        """Initializes the discoverer with a GFZ client instance."""
-        self.client = GfzClient()
-
-    def discover(self) -> Generator[DiscoveryYield, None, None]:
-        """Retrieves dataset definitions from the GFZ client.
+    def discover(self) -> Iterator[DiscoveryYield]:
+        """Yields one catalog entry per index the GFZ client serves; GFZ offers no metadata to store.
 
         Yields:
-            A tuple containing the dataset ID, the catalog entry dictionary,
-            and the metadata dictionary.
+            The dataset ID, the catalog entry and no metadata.
         """
-        logger.info("Starting discovery for GFZ datasets.")
-
-        try:
-            entries = self.client.get_catalog_entries()
-
-            for entry in entries:
-                dataset_id = entry.get("dataset_id")
-                if not dataset_id:
-                    logger.warning(f"Skipping GFZ entry due to missing dataset_id: {entry}")
-                    continue
-
-                # Retrieve full metadata for this dataset
-                metadata = self.client.get_dataset_metadata(dataset_id)
-
-                yield dataset_id, entry, metadata
-
-        except Exception as e:
-            logger.error(f"Error discovering GFZ datasets: {e}", exc_info=True)
+        for entry in GfzClient.get_catalog_entries():
+            dataset_id = entry.get("dataset_id")
+            if not dataset_id:
+                logger.warning("GFZ entry without dataset ID skipped: %s", entry)
+                continue
+            yield dataset_id, entry, None

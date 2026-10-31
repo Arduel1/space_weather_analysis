@@ -1,162 +1,108 @@
 import logging
 import pathlib
-from typing import Any, Dict, Generator, List
+from collections.abc import Iterator
+from typing import Any
+
+from hapiclient.util import HAPIError
 
 from catalog_collector.data_catalog.discovery.discoverers.base import AbstractDiscoverer, DiscoveryYield
 from space_weather_analysis.catalog.models import CatalogEntryDict, SourceType
 from space_weather_analysis.clients.hapi import HapiClient
+from space_weather_analysis.util.error_handling import DataRetrievalError
 
 logger = logging.getLogger(__name__)
 
+# Servers of the HAPI project that serve synthetic test datasets carry this text in their URL.
+TEST_SERVER_MARKER = "TestData"
+
 
 class HapiDiscoverer(AbstractDiscoverer):
-    """Discovers datasets by querying a list of HAPI-compliant servers."""
+    """Lists the datasets of every HAPI server of a server list as catalog entries with their /info responses."""
 
-    def __init__(
-        self,
-        server_list_path: pathlib.Path,
-        include_test_servers: bool = False,
-    ):
-        """Initializes the HapiDiscoverer.
+    source_type = SourceType.HAPI
+
+    def __init__(self, server_list_path: pathlib.Path, client: HapiClient | None = None, *, include_test_servers: bool = False) -> None:
+        """Initializes the discoverer.
 
         Args:
-            server_list_path (pathlib.Path): Path to the text file
-                                             listing server URLs.
-            include_test_servers (bool): Whether to include servers
-                                         marked as test servers.
+            server_list_path: The text file listing one server URL per line; empty lines and lines starting with '#' are ignored.
+            client: The HAPI client; a new one if None.
+            include_test_servers: Whether servers of synthetic test datasets are queried too.
         """
+        super().__init__()
         self.server_list_path = server_list_path
+        self.client = client or HapiClient()
         self.include_test_servers = include_test_servers
-        # We initialize the client without a DB connection as we only use direct fetch methods
-        self.client = HapiClient()
 
-    def _read_server_list(self) -> List[str]:
-        """Reads and filters the list of server URLs from the text file.
+    def discover(self) -> Iterator[DiscoveryYield]:
+        """Yields the datasets of every listed server; a server whose catalog cannot be read is recorded as failed source.
+
+        Yields:
+            The dataset ID, the catalog entry and the /info response, empty if it could not be read.
+
+        Raises:
+            DataRetrievalError: If the server list cannot be read.
+        """
+        for server_url in self._read_server_list():
+            try:
+                catalog = self.client.fetch_server_catalog(server_url)
+            except (HAPIError, DataRetrievalError) as e:
+                logger.warning("HAPI server %s could not be listed: %s", server_url, e)
+                self.failed_source_ids.add(server_url)
+                continue
+            logger.info("HAPI discovery: %d datasets at %s.", len(catalog), server_url)
+            for dataset in catalog:
+                discovered = self._entry_for_dataset(server_url, dataset)
+                if discovered is not None:
+                    yield discovered
+
+    def _read_server_list(self) -> list[str]:
+        """Reads the server URLs of the server list.
 
         Returns:
-            List[str]: A list of server URLs.
+            The server URLs in file order, without test servers unless they are included.
+
+        Raises:
+            DataRetrievalError: If the server list cannot be read.
         """
-        if not self.server_list_path.exists():
-            logger.error(f"Server list file not found at: {self.server_list_path}")
-            return []
-
-        logger.info(f"Reading server list from: {self.server_list_path}")
-        lines = self.server_list_path.read_text().splitlines()
-
+        try:
+            lines = self.server_list_path.read_text(encoding="utf-8").splitlines()
+        except OSError as e:
+            raise DataRetrievalError(f"HAPI server list {self.server_list_path} cannot be read: {e}") from e
         server_urls = []
         for line in lines:
             url = line.strip()
-            # Skip empty lines or lines that are comments
-            if not url or url.startswith("#"):
+            if not url or url.startswith("#") or (TEST_SERVER_MARKER in url and not self.include_test_servers):
                 continue
-
-            # Skip test servers if not included
-            if "TestData" in url and not self.include_test_servers:
-                logger.info(f"Ignoring TestData server: {url}")
-                continue
-
             server_urls.append(url)
         return server_urls
 
-    def _get_entry_for_dataset(
-        self,
-        server_url: str,
-        dataset: Dict[str, Any],
-    ) -> Generator[DiscoveryYield, None, None]:
-        """Retrieves the metadata for a single dataset as a catalog entry tuple.
+    def _entry_for_dataset(self, server_url: str, dataset: dict[str, Any]) -> DiscoveryYield | None:
+        """Builds the catalog entry of one dataset, taking its time range from the catalog response or else from its /info response.
 
         Args:
-            server_url (str): The URL of the server to query.
-            dataset (Dict[str, Any]): The dataset dictionary from the catalog.
+            server_url: The base URL of the HAPI server.
+            dataset: The dataset entry of the server's /catalog response.
 
-        Yields: A generator yielding a single (dataset_id, entry, metadata) tuple.
+        Returns:
+            The dataset ID, entry and /info response, or None if the dataset has no ID or no time range.
         """
         dataset_id = dataset.get("id")
         if not dataset_id:
-            return
-
-        # Try to get basic info from the catalog entry first
-        start_date = dataset.get("startDate")
-        stop_date = dataset.get("stopDate")
-        info_meta: Dict[str, Any] = {}
-
-        # Fetch metadata from server (/info endpoint)
-        # This provides the description and other details needed for the metadata collection.
+            return None
         try:
-            info_meta = self.client.fetch_dataset_metadata_from_server(dataset_id, server_url) or {}
-        except Exception:
-            logger.warning(f"Could not fetch metadata for {dataset_id} from {server_url}")
-
-        # If dates were missing in catalog, try to fill them from info_meta
-        if start_date and stop_date:
-            logger.info(f"Using metadata from catalog list for '{dataset_id}'.")
-        elif info_meta:
-            logger.info(f"Metadata missing in catalog for '{dataset_id}'. Using /info result.")
-            start_date = info_meta.get("startDate")
-            stop_date = info_meta.get("stopDate")
-
-        if start_date and stop_date:
-            new_entry: CatalogEntryDict = {
-                "type": SourceType.HAPI,
-                "source_id": server_url,
-                "time_range": {
-                    "start_time": str(start_date),
-                    "end_time": str(stop_date),
-                },
-            }
-            logger.info(f"Successfully captured metadata for '{dataset_id}': {start_date} -> {stop_date}")
-            yield dataset_id, new_entry, info_meta
-        else:
-            logger.warning(f"Dataset {dataset_id} on {server_url} has no time range. Skipping.")
-
-    def _discover_datasets_for_server(self, server_url: str) -> Generator[DiscoveryYield, None, None]:
-        """Retrieves the full dataset catalog from a single server.
-
-        Args:
-            server_url (str): The URL of the server to query.
-
-        Yields:
-            Generator of catalog entries from this server.
-        """
-        try:
-            catalog = self.client.fetch_server_catalog(server_url)
-        except Exception:
-            # Error logging is handled in the client
-            return
-
-        total_datasets = len(catalog)
-        logger.info(f"Found {total_datasets} datasets on {server_url} Fetching info...")
-
-        for index, dataset in enumerate(catalog, start=1):
-            dataset_id = dataset.get("id")
-            if not dataset_id:
-                continue
-
-            remaining = total_datasets - index
-            logger.info(f"Processing dataset {index}/{total_datasets}: '{dataset_id}' (Remaining: {remaining})")
-
-            yield from self._get_entry_for_dataset(server_url, dataset)
-
-            if index < total_datasets:
-                next_id = catalog[index].get("id", "Unknown")
-                logger.info(f"Finished '{dataset_id}'. Next up: '{next_id}'")
-
-    def discover(self) -> Generator[DiscoveryYield, None, None]:
-        """Implements the discovery process for HAPI sources.
-
-        Iterates through the list of servers, queries each for its
-        catalog, and yields standardized entries.
-        """
-        server_urls = self._read_server_list()
-        logger.info(f"--- Starting HAPI Source Discovery ({len(server_urls)} servers) ---")
-
-        for server_url in server_urls:
-            try:
-                logger.info(f"Querying catalog from: {server_url}")
-                yield from self._discover_datasets_for_server(server_url)
-            except Exception as e:
-                logger.error(
-                    f"An unexpected error occurred for {server_url}: {e}",
-                    exc_info=True,
-                )
-        logger.info("--- HAPI Source Discovery Finished ---")
+            info = self.client.fetch_dataset_metadata_from_server(dataset_id, server_url) or {}
+        except DataRetrievalError as e:
+            logger.warning("Metadata of %s at %s could not be read: %s", dataset_id, server_url, e)
+            info = {}
+        start_date = dataset.get("startDate") or info.get("startDate")
+        stop_date = dataset.get("stopDate") or info.get("stopDate")
+        if not start_date or not stop_date:
+            logger.debug("Dataset %s at %s has no time range; skipped.", dataset_id, server_url)
+            return None
+        entry: CatalogEntryDict = {
+            "type": SourceType.HAPI,
+            "source_id": server_url,
+            "time_range": {"start_time": str(start_date), "end_time": str(stop_date)},
+        }
+        return dataset_id, entry, info

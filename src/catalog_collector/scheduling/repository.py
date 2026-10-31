@@ -17,8 +17,8 @@ class MetadataTaskRepository(ABC):
     def sync(self, kind: str, planned_requests: Sequence[PlannedRequest], interval: timedelta, now: datetime) -> None:
         """Makes the stored tasks of a kind match the planned requests.
 
-        New requests get a task with its first run spread over the interval; existing tasks keep
-        their schedule and state; tasks no longer planned are deactivated, never deleted.
+        New requests get a task whose first run first_due_time places; existing tasks keep their
+        schedule and state; tasks no longer planned are deactivated, never deleted.
 
         Args:
             kind: The kind of request.
@@ -122,7 +122,7 @@ class MongoMetadataTaskRepository(MetadataTaskRepository):
                             "interval_seconds": interval_seconds,
                             "active": True,
                         },
-                        "$setOnInsert": {"next_due_at": first_due_time(key, interval, now), "consecutive_failures": 0},
+                        "$setOnInsert": {"next_due_at": first_due_time(planned_request, key, interval, now), "consecutive_failures": 0},
                     },
                     upsert=True,
                 )

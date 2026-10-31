@@ -2,14 +2,13 @@ import logging
 import random
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from catalog_collector.scheduling.models import MetadataTask, PlannedRequest
+from catalog_collector.scheduling.models import MetadataTask, TaskKind
 from catalog_collector.scheduling.repository import MetadataTaskRepository
 from space_weather_analysis.util.error_handling import DataProcessingError, DataRetrievalError
 
@@ -20,6 +19,9 @@ DUE_SCAN_LIMIT = 100
 
 # Longest error text kept in a task.
 MAX_ERROR_LENGTH = 500
+
+# Largest doubling of the failure backoff; beyond it the delay already exceeds every task interval.
+MAX_BACKOFF_EXPONENT = 32
 
 
 class WorkerSettings(BaseSettings):
@@ -49,23 +51,6 @@ class WorkerSettings(BaseSettings):
         if self.host_pause_min_seconds > self.host_pause_max_seconds:
             raise ValueError("host_pause_min_seconds must not exceed host_pause_max_seconds")
         return self
-
-
-@dataclass(frozen=True)
-class TaskKind:
-    """One kind of recurring metadata request and how to plan and run it.
-
-    Attributes:
-        name: The kind name stored in each task.
-        interval: The time between two successful runs of a task.
-        plan: Lists the requests the kind currently needs.
-        run: Executes one task; raises on failure, so the worker schedules a retry.
-    """
-
-    name: str
-    interval: timedelta
-    plan: Callable[[], list[PlannedRequest]]
-    run: Callable[[MetadataTask], None]
 
 
 class MetadataWorker:
@@ -133,7 +118,8 @@ class MetadataWorker:
     def _plan(self, now: datetime) -> None:
         """Compares the planned requests of every kind with the stored tasks.
 
-        A kind whose planning fails keeps its stored tasks unchanged.
+        A kind whose planning fails or plans nothing keeps its stored tasks unchanged, as an empty plan
+        mostly means that the data it is planned from is not loaded yet.
 
         Args:
             now: The current time.
@@ -141,7 +127,11 @@ class MetadataWorker:
         for kind in self.kinds.values():
             # A long-running worker must outlive a failing planner; the traceback shows the bug
             try:
-                self.repository.sync(kind.name, kind.plan(), kind.interval, now)
+                planned_requests = kind.plan()
+                if not planned_requests:
+                    logger.warning("Metadata task kind '%s' plans no request; its tasks stay as stored.", kind.name)
+                    continue
+                self.repository.sync(kind.name, planned_requests, kind.interval, now)
             except Exception:
                 logger.exception("Planning metadata tasks of kind '%s' failed; its tasks stay as stored", kind.name)
 
@@ -192,9 +182,11 @@ class MetadataWorker:
             When the run ended and when it is retried.
         """
         finished_at = self.clock()
-        backoff_seconds = self.settings.failure_backoff_seconds * 2**task.consecutive_failures
+        # The cap applies before the delay becomes a timedelta, which cannot hold the doubled delays of long failure runs
+        exponent = min(task.consecutive_failures, MAX_BACKOFF_EXPONENT)
+        backoff_seconds = min(self.settings.failure_backoff_seconds * 2**exponent, kind.interval.total_seconds())
         # The provider's Retry-After is never shortened, not even by the interval cap of the backoff
-        retry_at = finished_at + max(min(timedelta(seconds=backoff_seconds), kind.interval), retry_after)
+        retry_at = finished_at + max(timedelta(seconds=backoff_seconds), retry_after)
         self.repository.record_failure(task.id, finished_at, retry_at, str(error)[:MAX_ERROR_LENGTH])
         return finished_at, retry_at
 

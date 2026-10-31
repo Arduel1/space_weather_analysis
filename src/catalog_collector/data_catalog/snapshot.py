@@ -1,132 +1,124 @@
 import json
 import logging
 import pathlib
-from typing import Any, Dict, List, Optional, Tuple
-
-from pymongo import errors as pymongo_errors
-from pymongo.database import Database
+from typing import Any
 
 from space_weather_analysis.catalog.models import CatalogEntryDict, MasterCatalogItem
-from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
+from space_weather_analysis.catalog.repository import CatalogRepository
+from space_weather_analysis.util.error_handling import CatalogError
 
 logger = logging.getLogger(__name__)
 
-# Source fields the availability refresh maintains; a snapshot reload keeps them for refreshed sources.
+# Source fields the availability refreshes and discovery runs maintain; a snapshot reload keeps them for sources that have them.
 AVAILABILITY_FIELDS = ("time_range", "ongoing", "availability_checked_at", "missing_runs", "missing_since")
 
 
 class CatalogSnapshotLoader:
-    """Loads the master catalog file into MongoDB.
+    """Loads the master catalog file into the catalog repository.
 
-    The loader reads the generated JSON catalog and updates the MongoDB
-    collection, so the central database reflects the latest discovery results.
+    The file maps each dataset ID to its sources; the repository then reflects the file, while the
+    availability state the refreshes found since is kept.
     """
 
-    def __init__(self, db: Database, file_path: pathlib.Path) -> None:
+    def __init__(self, catalog_repository: CatalogRepository, file_path: pathlib.Path) -> None:
         """Initializes the loader.
 
         Args:
-            db: The MongoDB database instance.
+            catalog_repository: The master catalog to load into.
             file_path: Path to the catalog JSON file.
         """
+        self.catalog_repository = catalog_repository
         self.file_path = file_path
-        self.catalog_repository: CatalogRepository = MongoCatalogRepository(db)
-
-    def _load_json(self) -> Optional[List[MasterCatalogItem]]:
-        """Reads and parses the catalog JSON file.
-
-        Returns:
-            Optional[List[MasterCatalogItem]]: List of catalog items or None.
-        """
-        if not self.file_path.exists():
-            logger.error(f"Catalog file not found: {self.file_path}")
-            return None
-
-        try:
-            with open(self.file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            return [{"dataset_id": k, "sources": v} for k, v in data.items()]
-        except Exception as e:
-            logger.error(f"Failed to load JSON catalog: {e}", exc_info=True)
-            return None
-
-    def _get_sortable_key(self, source: CatalogEntryDict) -> Tuple[Any, ...]:
-        """Helper for stable sorting of sources."""
-        tr = source.get("time_range", {})
-        return (
-            source.get("type"),
-            source.get("source_id"),
-            (tr.get("start_time"), tr.get("end_time")),
-        )
 
     def load_to_db(self) -> None:
-        """Upserts catalog entries into the MongoDB collection."""
-        logger.info(f"--- Loading Catalog Cache from {self.file_path} to MongoDB ---")
-        items = self._load_json()
-        if not items:
-            logger.warning("Catalog file is empty or missing. Starting with empty DB.")
-            return
-        logger.info(f"Found {len(items)} datasets in catalog file.")
+        """Saves every dataset of the catalog file, keeping the availability state of stored sources.
 
-        # We sort sources to ensure deterministic comparison/storage if needed
+        Raises:
+            CatalogError: If the file is missing, no JSON or no mapping from dataset ID to sources.
+            pymongo.errors.PyMongoError: If the catalog cannot be written.
+        """
+        items = self._read_file()
+        logger.info("Loading %d datasets from catalog file %s.", len(items), self.file_path)
         for item in items:
-            item["sources"].sort(key=self._get_sortable_key)
+            item["sources"].sort(key=source_sort_key)
+        keep_availability_state(items, self.catalog_repository.get_all())
+        self.catalog_repository.save_many(items)
 
-        self._keep_refreshed_availability(items)
+    def _read_file(self) -> list[MasterCatalogItem]:
+        """Reads and parses the catalog file.
 
+        Returns:
+            One catalog item per dataset of the file.
+
+        Raises:
+            CatalogError: If the file is missing, no JSON or no mapping from dataset ID to sources.
+        """
         try:
-            self.catalog_repository.save_many(items)
-        except pymongo_errors.BulkWriteError as bwe:
-            logger.error(f"Bulk write error: {bwe.details}")
-        except Exception as e:
-            logger.error(f"DB Load failed: {e}", exc_info=True)
+            data: Any = json.loads(self.file_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            raise CatalogError(f"Catalog file {self.file_path} cannot be read: {e}") from e
+        if not isinstance(data, dict) or not all(isinstance(sources, list) for sources in data.values()):
+            raise CatalogError(f"Catalog file {self.file_path} is no mapping from dataset ID to a list of sources.")
+        return [{"dataset_id": dataset_id, "sources": sources} for dataset_id, sources in data.items()]
 
-        logger.info("--- Catalog Load Finished ---")
+    def upsert_dataset(self, dataset_id: str, sources: list[CatalogEntryDict]) -> None:
+        """Saves one discovered dataset with its sources in a fixed order, keeping their availability state.
 
-    def _keep_refreshed_availability(self, items: List[MasterCatalogItem]) -> None:
-        """Carries the availability state of already refreshed sources over into the snapshot items.
-
-        The snapshot holds the time ranges of its creation; a source refreshed from the HAPI mirror keeps
-        its newer time range, ongoing state and miss count, so a collector restart with an unreachable
-        mirror does not fall back to stale ranges.
+        The sources were just discovered, so a miss count they had is reset.
 
         Args:
-            items: The snapshot items, changed in place.
+            dataset_id: The dataset ID.
+            sources: The discovered sources of the dataset.
+
+        Raises:
+            pymongo.errors.PyMongoError: If the dataset cannot be written.
         """
-        refreshed_sources: Dict[Tuple[str, str, str], CatalogEntryDict] = {}
-        for stored_item in self.catalog_repository.get_all():
-            for stored_source in stored_item["sources"]:
-                if "availability_checked_at" in stored_source:
-                    source_key = (stored_item["dataset_id"], stored_source.get("type", ""), stored_source.get("source_id", ""))
-                    refreshed_sources[source_key] = stored_source
+        item: MasterCatalogItem = {"dataset_id": dataset_id, "sources": sorted((source.copy() for source in sources), key=source_sort_key)}
+        stored_item = self.catalog_repository.get(dataset_id)
+        keep_availability_state([item], [stored_item] if stored_item else [])
+        for source in item["sources"]:
+            if "missing_runs" in source:
+                source["missing_runs"] = 0
+            source.pop("missing_since", None)
+        self.catalog_repository.save(item)
 
-        for item in items:
-            for source in item["sources"]:
-                refreshed_source = refreshed_sources.get((item["dataset_id"], source.get("type", ""), source.get("source_id", "")))
-                if refreshed_source is None:
-                    continue
-                for field in AVAILABILITY_FIELDS:
-                    if field in refreshed_source:
-                        source[field] = refreshed_source[field]  # type: ignore[literal-required]
 
-    def upsert_dataset(self, dataset_id: str, sources: List[CatalogEntryDict]) -> None:
-        """Upserts a single dataset entry into MongoDB."""
-        # Sort sources to ensure deterministic storage
-        sorted_sources = sorted(sources, key=self._get_sortable_key)
+def keep_availability_state(items: list[MasterCatalogItem], stored_items: list[MasterCatalogItem]) -> None:
+    """Carries the availability state of stored sources over into new catalog items.
 
-        try:
-            self.catalog_repository.save({"dataset_id": dataset_id, "sources": sorted_sources})
-            logger.info(f"DB Saved: {dataset_id} (Sources: {len(sorted_sources)})")
-        except Exception as e:
-            logger.error(f"Failed to upsert dataset {dataset_id}: {e}")
+    The catalog file holds the time ranges of its creation; a stored source that a refresh or discovery run has
+    updated keeps its newer time range, ongoing state and miss count, so a collector restart with an unreachable
+    provider does not fall back to stale ranges.
 
-    def delete_dataset(self, dataset_id: str) -> None:
-        """Deletes a dataset from the MongoDB collection."""
-        try:
-            if self.catalog_repository.delete(dataset_id):
-                logger.info(f"DB Deleted: {dataset_id}")
-            else:
-                logger.info(f"DB Delete skipped (not found): {dataset_id}")
-        except Exception as e:
-            logger.error(f"Failed to delete dataset {dataset_id}: {e}")
+    Args:
+        items: The new items, changed in place.
+        stored_items: The stored items of the same datasets.
+    """
+    stored_sources: dict[tuple[str, str, str], CatalogEntryDict] = {}
+    for stored_item in stored_items:
+        for stored_source in stored_item["sources"]:
+            if "availability_checked_at" in stored_source or "missing_runs" in stored_source:
+                stored_sources[(stored_item["dataset_id"], stored_source.get("type", ""), stored_source.get("source_id", ""))] = stored_source
+
+    for item in items:
+        for source in item["sources"]:
+            refreshed_source = stored_sources.get((item["dataset_id"], source.get("type", ""), source.get("source_id", "")))
+            if refreshed_source is None:
+                continue
+            for field in AVAILABILITY_FIELDS:
+                if field in refreshed_source:
+                    # TypedDict keys held in a variable are not checked by the type checker
+                    source[field] = refreshed_source[field]  # type: ignore[literal-required]
+
+
+def source_sort_key(source: CatalogEntryDict) -> tuple[Any, ...]:
+    """Orders the sources of a dataset by type, source ID and time range, so stored source lists are deterministic.
+
+    Args:
+        source: A catalog source.
+
+    Returns:
+        The sort key.
+    """
+    time_range = source.get("time_range", {})
+    return (source.get("type"), source.get("source_id"), time_range.get("start_time"), time_range.get("end_time"))

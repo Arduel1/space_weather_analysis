@@ -1,159 +1,156 @@
 import json
 import logging
 import pathlib
-from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from collections.abc import Callable, Iterable
+from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import ValidationError
-from pymongo.database import Database
 
-from catalog_collector.hapi_mirror.servers import first_hapi_servers
-from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
+from catalog_collector.hapi_mirror.servers import describes_hapi_source, first_hapi_servers, normalize_server_url
+from space_weather_analysis.catalog.repository import CatalogRepository
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
 from space_weather_analysis.metadata.models import DatasetMetadata, RawMetadataRecord
-from space_weather_analysis.metadata.overlays import save_with_overlays
-from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
+from space_weather_analysis.metadata.overlays.layering import save_with_overlays
+from space_weather_analysis.metadata.repository import MetadataRepository
+from space_weather_analysis.util.error_handling import CatalogError
 from space_weather_analysis.util.naming import sanitize_collection_name
 
 logger = logging.getLogger(__name__)
 
+# The key under which the HAPI client records the server a /info response came from.
+SERVER_URL_KEY = "x_server_url"
+
 
 class MetadataSnapshotLoader:
-    """Loads the HAPI /info snapshot file and the metadata found by discovery into the metadata repository."""
+    """Loads the HAPI /info snapshot file and the metadata found by discovery into the metadata repository.
 
-    def __init__(self, db: Database, file_path: pathlib.Path) -> None:
+    The snapshot only fills in datasets without stored HAPI metadata, as everything stored since is newer.
+    Records describe the first HAPI server of the dataset in the catalog, the rule every writer of HAPI records
+    follows, and a stored record of another source or server is never replaced.
+    """
+
+    def __init__(
+        self,
+        catalog_repository: CatalogRepository,
+        metadata_repository: MetadataRepository,
+        file_path: pathlib.Path,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
         """Initializes the loader.
 
         Args:
-            db: The MongoDB database instance.
+            catalog_repository: The master catalog naming the HAPI server of each dataset.
+            metadata_repository: The repository to load into.
             file_path: Path to the metadata JSON file.
+            clock: Returns the current time in UTC.
         """
+        self.catalog_repository = catalog_repository
+        self.metadata_repository = metadata_repository
         self.file_path = file_path
-        self.metadata_repository: MetadataRepository = MongoMetadataRepository(db)
-        self.catalog_repository: CatalogRepository = MongoCatalogRepository(db)
+        self.clock = clock
 
     def load_metadata_to_db(self) -> None:
-        """Loads the HAPI /info snapshot file into the metadata repository.
+        """Saves the snapshot entries of datasets without stored HAPI metadata as raw metadata and normalized records.
 
-        The file holds a list of {dataset_id, metadata} entries or a mapping from dataset ID to
-        metadata, where the metadata is the /info response of a HAPI server. Each response is
-        saved as raw metadata of kind "hapi"; datasets with a HAPI source in the master catalog
-        also get a normalized record. Malformed entries are logged and skipped. Datasets whose
-        stored raw metadata was retrieved after the snapshot keep their newer metadata.
+        The file holds a list of {dataset_id, metadata} entries or a mapping from dataset ID to metadata, where the
+        metadata is the /info response of a HAPI server. Datasets with a HAPI source in the catalog also get a
+        normalized record. Malformed entries are logged and skipped.
+
+        Raises:
+            CatalogError: If the file is missing or no JSON.
+            pymongo.errors.PyMongoError: If the metadata cannot be written.
         """
-        if not self.file_path.exists():
-            logger.warning(f"Metadata file not found: {self.file_path}")
-            return
-
-        logger.info(f"--- Loading Metadata Cache from {self.file_path} to MongoDB ---")
         try:
-            with open(self.file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            data: Any = json.loads(self.file_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            raise CatalogError(f"Metadata snapshot file {self.file_path} cannot be read: {e}") from e
 
-            if not data:
-                logger.warning("Metadata file is empty.")
-                return
+        # The snapshot does not record when each response was fetched, so the file time stands in
+        retrieved_at = datetime.fromtimestamp(self.file_path.stat().st_mtime, tz=UTC)
+        snapshot_url = self.file_path.resolve().as_uri()
+        record_servers = first_hapi_servers(self.catalog_repository)
+        stored_dataset_ids = self.metadata_repository.get_raw_dataset_ids("hapi")
 
-            # The snapshot does not record when each response was fetched, so the file time stands in
-            retrieved_at = datetime.fromtimestamp(self.file_path.stat().st_mtime, tz=timezone.utc)
-            hapi_servers = first_hapi_servers(self.catalog_repository)
-            retrieval_times = self.metadata_repository.get_raw_retrieval_times("hapi")
+        new_entries = [(dataset_id, info) for dataset_id, info in _snapshot_entries(data) if dataset_id not in stored_dataset_ids]
+        stored_records = self.metadata_repository.get_many([dataset_id for dataset_id, _ in new_entries])
+        raw_records: list[RawMetadataRecord] = []
+        records: list[DatasetMetadata] = []
+        for dataset_id, info in new_entries:
+            if not isinstance(info, dict):
+                logger.warning("Metadata of '%s' is not a mapping; skipped.", dataset_id)
+                continue
+            raw_records.append(RawMetadataRecord(dataset_id=dataset_id, kind="hapi", payload=info, url=snapshot_url, retrieved_at=retrieved_at))
+            record = self._record(dataset_id, info, record_servers.get(dataset_id), stored_records.get(dataset_id), retrieved_at)
+            if record is not None:
+                records.append(record)
 
-            raw_records: List[RawMetadataRecord] = []
-            records: List[DatasetMetadata] = []
-            kept_count = 0
-            for dataset_id, info in _snapshot_entries(data):
-                if dataset_id in retrieval_times and retrieval_times[dataset_id] > retrieved_at:
-                    kept_count += 1
-                    continue
-                raw_record, record = self._metadata_from_info(dataset_id, info, hapi_servers.get(dataset_id), retrieved_at)
-                if raw_record is not None:
-                    raw_records.append(raw_record)
-                if record is not None:
-                    records.append(record)
+        self.metadata_repository.save_raw_many(raw_records)
+        save_with_overlays(self.metadata_repository, records)
+        logger.info(
+            "Metadata snapshot %s: saved %d raw entries and %d records; %d datasets already had stored HAPI metadata.",
+            self.file_path,
+            len(raw_records),
+            len(records),
+            len(stored_dataset_ids),
+        )
 
-            self.metadata_repository.save_raw_many(raw_records)
-            removed_count = self.metadata_repository.remove_outdated_records()
-            if removed_count:
-                logger.info(f"Removed {removed_count} metadata documents of an outdated shape.")
-            save_with_overlays(self.metadata_repository, records)
-            logger.info(
-                f"Saved {len(raw_records)} raw metadata entries and {len(records)} normalized records; "
-                f"{kept_count} datasets keep metadata newer than the snapshot."
-            )
+    def upsert_metadata(self, dataset_id: str, info: dict[str, Any]) -> None:
+        """Saves the /info response that discovery read from one HAPI server.
 
-        except Exception as e:
-            logger.error(f"Failed to load metadata file: {e}", exc_info=True)
-
-        logger.info("--- Metadata Load Finished ---")
-
-    def _metadata_from_info(
-        self, dataset_id: str, info: Any, catalog_server_url: Optional[str], retrieved_at: datetime
-    ) -> Tuple[Optional[RawMetadataRecord], Optional[DatasetMetadata]]:
-        """Builds the raw metadata and, for a dataset with a HAPI source, the normalized record of one /info response.
+        The response is stored only if it comes from the dataset's first HAPI server in the catalog, the server
+        its record describes; responses of further servers would replace that server's metadata.
 
         Args:
             dataset_id: The dataset ID.
-            info: The /info response as received.
-            catalog_server_url: The HAPI server of the dataset in the master catalog, None if it has no HAPI source.
+            info: The /info response, with the server URL in 'x_server_url'.
+
+        Raises:
+            pymongo.errors.PyMongoError: If the metadata cannot be written.
+        """
+        server_url = info.get(SERVER_URL_KEY)
+        record_server = first_hapi_servers(self.catalog_repository).get(dataset_id)
+        if not server_url or record_server is None or normalize_server_url(record_server) != normalize_server_url(server_url):
+            logger.debug("Metadata of '%s' from %s does not describe the dataset's first HAPI server; not stored.", dataset_id, server_url)
+            return
+        retrieved_at = self.clock()
+        self.metadata_repository.save_raw_many(
+            [RawMetadataRecord(dataset_id=dataset_id, kind="hapi", payload=info, url=server_url, retrieved_at=retrieved_at)]
+        )
+        record = self._record(dataset_id, info, record_server, self.metadata_repository.get(dataset_id), retrieved_at)
+        if record is not None:
+            save_with_overlays(self.metadata_repository, [record])
+
+    @staticmethod
+    def _record(
+        dataset_id: str, info: dict[str, Any], record_server: str | None, stored_record: DatasetMetadata | None, retrieved_at: datetime
+    ) -> DatasetMetadata | None:
+        """Builds the normalized record of one /info response for the dataset's first HAPI server.
+
+        Args:
+            dataset_id: The dataset ID.
+            info: The /info response.
+            record_server: The first HAPI server of the dataset in the catalog; None if the dataset has no HAPI source.
+            stored_record: The stored record of the dataset, if any.
             retrieved_at: When the response was read.
 
         Returns:
-            The raw metadata, or None if the info is no mapping; the normalized record, or None if
-            the dataset has no HAPI source or the info is malformed.
+            The record, or None if the dataset has no HAPI source, a stored record of another source or server ranks
+            above it, or the response cannot be normalized.
         """
-        if not isinstance(info, dict):
-            logger.warning(f"Metadata of '{dataset_id}' is not a mapping; skipped.")
-            return None, None
-
-        # The server the response was fetched from, recorded by the HAPI client, before the first catalog server
-        server_url = info.get("x_server_url") or catalog_server_url
-        raw_record = RawMetadataRecord(dataset_id=dataset_id, kind="hapi", payload=info, url=server_url, retrieved_at=retrieved_at)
-        if catalog_server_url is None:
-            return raw_record, None
-
+        if record_server is None:
+            return None
+        if stored_record is not None and not describes_hapi_source(stored_record, record_server):
+            logger.info("Record of '%s' comes from another source or server and is kept.", dataset_id)
+            return None
         try:
-            record = build_hapi_metadata(dataset_id, sanitize_collection_name(dataset_id), info, server_url, retrieved_at)
+            return build_hapi_metadata(dataset_id, sanitize_collection_name(dataset_id), info, record_server, retrieved_at)
         except (ValueError, ValidationError) as e:
-            logger.warning(f"Metadata of '{dataset_id}' could not be normalized; only the raw metadata is saved: {e}")
-            return raw_record, None
-        return raw_record, record
-
-    def upsert_metadata(self, dataset_id: str, metadata: Dict[str, Any]) -> None:
-        """Saves the metadata a discoverer found for a dataset.
-
-        HAPI /info responses, recognized by their parameters and the server URL the HAPI client
-        adds, are saved as raw metadata and as normalized record; other metadata is not stored.
-
-        Args:
-            dataset_id: The dataset ID.
-            metadata: The metadata yielded by the discoverer.
-        """
-        if not isinstance(metadata.get("parameters"), list) or not metadata.get("x_server_url"):
-            logger.debug(f"Metadata of '{dataset_id}' is no HAPI info; not stored.")
-            return
-
-        retrieved_at = datetime.now(timezone.utc)
-        raw_record, record = self._metadata_from_info(dataset_id, metadata, metadata["x_server_url"], retrieved_at)
-        try:
-            if raw_record is not None:
-                self.metadata_repository.save_raw_many([raw_record])
-            if record is not None:
-                save_with_overlays(self.metadata_repository, [record])
-            logger.info(f"Metadata saved: {dataset_id}")
-        except Exception as e:
-            logger.error(f"Failed to upsert metadata for {dataset_id}: {e}")
-
-    def delete_metadata(self, dataset_id: str) -> None:
-        """Deletes the normalized record and the raw metadata of a dataset."""
-        try:
-            self.metadata_repository.delete(dataset_id)
-            logger.info(f"Metadata Deleted: {dataset_id}")
-        except Exception as e:
-            logger.error(f"Failed to delete metadata for {dataset_id}: {e}")
+            logger.warning("Metadata of '%s' could not be normalized; only the raw metadata is saved: %s", dataset_id, e)
+            return None
 
 
-def _snapshot_entries(data: Any) -> Iterable[Tuple[str, Any]]:
+def _snapshot_entries(data: Any) -> Iterable[tuple[str, Any]]:
     """Lists dataset ID and metadata of each entry of the metadata snapshot.
 
     Args:
@@ -165,11 +162,9 @@ def _snapshot_entries(data: Any) -> Iterable[Tuple[str, Any]]:
     if isinstance(data, dict):
         return list(data.items())
 
-    entries: List[Tuple[str, Any]] = []
+    entries: list[tuple[str, Any]] = []
     for item in data if isinstance(data, list) else []:
-        dataset_id = None
-        if isinstance(item, dict):
-            dataset_id = item.get("dataset_id") or item.get("id")
+        dataset_id = (item.get("dataset_id") or item.get("id")) if isinstance(item, dict) else None
         if not dataset_id:
             logger.warning("Metadata entry without dataset ID skipped.")
             continue

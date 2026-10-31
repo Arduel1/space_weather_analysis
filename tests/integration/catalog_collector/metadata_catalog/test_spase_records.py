@@ -8,13 +8,13 @@ from pytest_httpserver import HTTPServer
 
 from catalog_collector.cdaweb.masters import parse_master
 from catalog_collector.metadata_catalog.spase_records import SpaseRecordRefresher
-from catalog_collector.metadata_catalog.tasks import plan_spase_records
 from catalog_collector.scheduling.models import PlannedRequest
+from catalog_collector.worker_tasks.metadata_catalog import CdawebDatasetPlan, spase_record_url_of_entry
 from space_weather_analysis.catalog.models import MasterCatalogItem, TimeRangeDict
 from space_weather_analysis.catalog.repository import MongoCatalogRepository
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
 from space_weather_analysis.metadata.models import DatasetMetadata
-from space_weather_analysis.metadata.overlays import save_with_overlays
+from space_weather_analysis.metadata.overlays.layering import save_with_overlays
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
 
 CDAWEB_HAPI_URL = "https://cdaweb.gsfc.nasa.gov/hapi"
@@ -131,9 +131,12 @@ def _store(db: Database) -> None:
     save_with_overlays(repository, [build_hapi_metadata(f"{SPLIT_DATASET}@0", SPLIT_DATASET, HAPI_INFO, CDAWEB_HAPI_URL, STORED_AT)])
 
 
-def _refresher(db: Database, now: datetime = STORED_AT) -> SpaseRecordRefresher:
+SPLIT_DATASET_IDS = [f"{SPLIT_DATASET}@0", f"{SPLIT_DATASET}@1"]
+
+
+def _refresher(db: Database, session: requests.Session, now: datetime = STORED_AT) -> SpaseRecordRefresher:
     """Builds a SPASE refresher on the test database with a fixed clock."""
-    return SpaseRecordRefresher(MongoCatalogRepository(db), MongoMetadataRepository(db), requests.Session(), clock=lambda: now)
+    return SpaseRecordRefresher(MongoMetadataRepository(db), session, clock=lambda: now)
 
 
 def _record(db: Database) -> DatasetMetadata:
@@ -165,18 +168,20 @@ def test_plan_lists_one_spase_record_per_cdas_dataset_with_a_spase_id(db: Databa
     """Both HAPI splits share one request at spase-metadata.org, and a dataset whose CDAS entry names no SPASE ID is left out."""
     _store(db)
 
-    planned_requests = plan_spase_records(MongoCatalogRepository(db), MongoMetadataRepository(db))
+    planned_requests = CdawebDatasetPlan(MongoCatalogRepository(db), MongoMetadataRepository(db), spase_record_url_of_entry).plan()
 
     assert planned_requests == [PlannedRequest(SPLIT_DATASET, f"https://spase-metadata.org{SPASE_PATH}")]
 
 
 @pytest.mark.integration
-def test_spase_record_sets_coordinate_system_vector_components_and_cadence(db: Database, httpserver: HTTPServer) -> None:
+def test_spase_record_sets_coordinate_system_vector_components_and_cadence(
+    db: Database, httpserver: HTTPServer, http_session: requests.Session
+) -> None:
     """Without master file, labels, valid ranges, coordinate system and Cartesian components come per element from SPASE."""
     _store(db)
     httpserver.expect_request(SPASE_PATH).respond_with_json(SPASE_RECORD)
 
-    changed = _refresher(db).refresh(SPLIT_DATASET, httpserver.url_for(SPASE_PATH))
+    changed = _refresher(db, http_session).refresh(SPLIT_DATASET, httpserver.url_for(SPASE_PATH), SPLIT_DATASET_IDS)
 
     record = _record(db)
     assert changed is True
@@ -193,13 +198,13 @@ def test_spase_record_sets_coordinate_system_vector_components_and_cadence(db: D
 
 
 @pytest.mark.integration
-def test_master_file_fields_rank_above_the_spase_record(db: Database, httpserver: HTTPServer) -> None:
+def test_master_file_fields_rank_above_the_spase_record(db: Database, httpserver: HTTPServer, http_session: requests.Session) -> None:
     """With a stored master file, labels and valid ranges stay the ISTP ones, while SPASE adds the coordinate system."""
     _store(db)
     MongoMetadataRepository(db).save_raw(SPLIT_DATASET, "istp", parse_master(MASTER), "https://cdaweb.example.org/master.json", STORED_AT)
     httpserver.expect_request(SPASE_PATH).respond_with_json(SPASE_RECORD)
 
-    _refresher(db).refresh(SPLIT_DATASET, httpserver.url_for(SPASE_PATH))
+    _refresher(db, http_session).refresh(SPLIT_DATASET, httpserver.url_for(SPASE_PATH), SPLIT_DATASET_IDS)
 
     assert _vector_fields(_record(db)) == [
         ("B_x", "Bx master", -1.0, 1.0, "GSE", "x", "istp", "spase"),
@@ -209,37 +214,37 @@ def test_master_file_fields_rank_above_the_spase_record(db: Database, httpserver
 
 
 @pytest.mark.integration
-def test_missing_spase_record_stores_nothing(db: Database, httpserver: HTTPServer) -> None:
+def test_missing_spase_record_stores_nothing(db: Database, httpserver: HTTPServer, http_session: requests.Session) -> None:
     """A SPASE ID without record (HTTP 404) changes nothing and is no failure."""
     _store(db)
     stored = _record(db)
     httpserver.expect_request(SPASE_PATH).respond_with_data("not found", status=404)
 
-    changed = _refresher(db).refresh(SPLIT_DATASET, httpserver.url_for(SPASE_PATH))
+    changed = _refresher(db, http_session).refresh(SPLIT_DATASET, httpserver.url_for(SPASE_PATH), SPLIT_DATASET_IDS)
 
     assert (changed, MongoMetadataRepository(db).get_raw(SPLIT_DATASET, "spase"), _record(db)) == (False, None, stored)
 
 
 @pytest.mark.integration
-def test_unchanged_spase_record_is_not_written_again(db: Database, httpserver: HTTPServer) -> None:
+def test_unchanged_spase_record_is_not_written_again(db: Database, httpserver: HTTPServer, http_session: requests.Session) -> None:
     """A SPASE record equal to the stored one keeps the stored raw metadata and its retrieval time."""
     _store(db)
     httpserver.expect_request(SPASE_PATH).respond_with_json(SPASE_RECORD)
     url = httpserver.url_for(SPASE_PATH)
-    _refresher(db).refresh(SPLIT_DATASET, url)
+    _refresher(db, http_session).refresh(SPLIT_DATASET, url, SPLIT_DATASET_IDS)
 
-    changed = _refresher(db, datetime(2026, 10, 8, tzinfo=UTC)).refresh(SPLIT_DATASET, url)
+    changed = _refresher(db, http_session, datetime(2026, 10, 8, tzinfo=UTC)).refresh(SPLIT_DATASET, url, SPLIT_DATASET_IDS)
 
     raw_record = MongoMetadataRepository(db).get_raw(SPLIT_DATASET, "spase")
     assert (changed, raw_record is not None and raw_record.retrieved_at) == (False, STORED_AT)
 
 
 @pytest.mark.integration
-def test_record_rebuilt_from_hapi_keeps_the_spase_fields(db: Database, httpserver: HTTPServer) -> None:
+def test_record_rebuilt_from_hapi_keeps_the_spase_fields(db: Database, httpserver: HTTPServer, http_session: requests.Session) -> None:
     """A record rebuilt from the HAPI info and saved by any writer gets the stored SPASE fields again."""
     _store(db)
     httpserver.expect_request(SPASE_PATH).respond_with_json(SPASE_RECORD)
-    _refresher(db).refresh(SPLIT_DATASET, httpserver.url_for(SPASE_PATH))
+    _refresher(db, http_session).refresh(SPLIT_DATASET, httpserver.url_for(SPASE_PATH), SPLIT_DATASET_IDS)
 
     rebuilt = build_hapi_metadata(f"{SPLIT_DATASET}@0", SPLIT_DATASET, HAPI_INFO, CDAWEB_HAPI_URL, STORED_AT)
     save_with_overlays(MongoMetadataRepository(db), [rebuilt])

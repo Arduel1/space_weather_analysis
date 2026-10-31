@@ -37,8 +37,8 @@ from space_weather_analysis.metadata.models import (
     VariableMetadata,
 )
 from space_weather_analysis.metadata.normalize import normalize_units
-from space_weather_analysis.metadata.overlays import save_with_overlays
 from space_weather_analysis.metadata.overlays.cdaweb import cdas_dataset_id
+from space_weather_analysis.metadata.overlays.layering import save_with_overlays
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
 from space_weather_analysis.util.naming import sanitize_collection_name
 from space_weather_analysis.util.time_utils import ensure_aware

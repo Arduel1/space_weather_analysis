@@ -6,14 +6,15 @@ import requests
 from pymongo.database import Database
 from pytest_httpserver import HTTPServer
 
+from catalog_collector.cdaweb.datasets import master_file_url
 from catalog_collector.metadata_catalog.cdaweb_masters import CdawebMasterRefresher
-from catalog_collector.metadata_catalog.tasks import plan_cdaweb_masters
 from catalog_collector.scheduling.models import PlannedRequest
+from catalog_collector.worker_tasks.metadata_catalog import CdawebDatasetPlan
 from space_weather_analysis.catalog.models import MasterCatalogItem, TimeRangeDict
 from space_weather_analysis.catalog.repository import MongoCatalogRepository
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
 from space_weather_analysis.metadata.models import DatasetMetadata, SourceInfo, VariableMetadata
-from space_weather_analysis.metadata.overlays import save_with_overlays
+from space_weather_analysis.metadata.overlays.layering import save_with_overlays
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
 from space_weather_analysis.util.error_handling import DataRetrievalError
 
@@ -117,9 +118,12 @@ def _store(db: Database, httpserver: HTTPServer) -> None:
     save_with_overlays(repository, [fido_record, split_record])
 
 
-def _refresher(db: Database, now: datetime = STORED_AT) -> CdawebMasterRefresher:
+SPLIT_DATASET_IDS = [f"{SPLIT_DATASET}@0", f"{SPLIT_DATASET}@1"]
+
+
+def _refresher(db: Database, session: requests.Session, now: datetime = STORED_AT) -> CdawebMasterRefresher:
     """Builds a master refresher on the test database with a fixed clock."""
-    return CdawebMasterRefresher(MongoCatalogRepository(db), MongoMetadataRepository(db), requests.Session(), clock=lambda: now)
+    return CdawebMasterRefresher(MongoMetadataRepository(db), session, clock=lambda: now)
 
 
 def _record(db: Database, dataset_id: str) -> DatasetMetadata:
@@ -146,25 +150,29 @@ def _vector_fields(record: DatasetMetadata) -> list[tuple[Any, ...]]:
 
 
 @pytest.mark.integration
-def test_plan_lists_one_master_file_per_cdas_dataset_with_a_link(db: Database, httpserver: HTTPServer) -> None:
+def test_plan_lists_one_master_file_per_cdas_dataset_with_a_link(db: Database, httpserver: HTTPServer, http_session: requests.Session) -> None:
     """Both HAPI splits share one request, and a dataset whose CDAS entry links no master file is left out."""
     _store(db, httpserver)
 
-    planned_requests = plan_cdaweb_masters(MongoCatalogRepository(db), MongoMetadataRepository(db))
+    plan = CdawebDatasetPlan(MongoCatalogRepository(db), MongoMetadataRepository(db), master_file_url)
+    planned_requests = plan.plan()
 
     assert planned_requests == [
         PlannedRequest(SPLIT_DATASET, httpserver.url_for(_master_path(SPLIT_DATASET))),
         PlannedRequest(FIDO_DATASET, httpserver.url_for(_master_path(FIDO_DATASET))),
     ]
+    assert plan.dataset_ids(SPLIT_DATASET) == SPLIT_DATASET_IDS
 
 
 @pytest.mark.integration
-def test_master_file_sets_istp_fields_per_vector_element_while_cdas_keeps_its_fields(db: Database, httpserver: HTTPServer) -> None:
+def test_master_file_sets_istp_fields_per_vector_element_while_cdas_keeps_its_fields(
+    db: Database, httpserver: HTTPServer, http_session: requests.Session
+) -> None:
     """Labels and valid ranges come per element from the master file, while the DOI stays the CDAS one."""
     _store(db, httpserver)
     httpserver.expect_request(_master_path(SPLIT_DATASET)).respond_with_json(SPLIT_MASTER)
 
-    changed = _refresher(db).refresh(SPLIT_DATASET, httpserver.url_for(_master_path(SPLIT_DATASET)))
+    changed = _refresher(db, http_session).refresh(SPLIT_DATASET, httpserver.url_for(_master_path(SPLIT_DATASET)), SPLIT_DATASET_IDS)
 
     record = _record(db, f"{SPLIT_DATASET}@0")
     assert changed is True
@@ -178,12 +186,14 @@ def test_master_file_sets_istp_fields_per_vector_element_while_cdas_keeps_its_fi
 
 
 @pytest.mark.integration
-def test_fido_record_takes_master_attributes_only_where_the_master_sets_them(db: Database, httpserver: HTTPServer) -> None:
+def test_fido_record_takes_master_attributes_only_where_the_master_sets_them(
+    db: Database, httpserver: HTTPServer, http_session: requests.Session
+) -> None:
     """A blank master unit keeps the unit of the data file, while description and valid range come from the master file."""
     _store(db, httpserver)
     httpserver.expect_request(_master_path(FIDO_DATASET)).respond_with_json(FIDO_MASTER)
 
-    _refresher(db).refresh(FIDO_DATASET, httpserver.url_for(_master_path(FIDO_DATASET)))
+    _refresher(db, http_session).refresh(FIDO_DATASET, httpserver.url_for(_master_path(FIDO_DATASET)), [FIDO_DATASET])
 
     flux = _record(db, FIDO_DATASET).variables[0]
     assert (flux.description, flux.units, flux.valid_min, flux.valid_max) == ("Master flux", "cm^-3", 0.0, 100.0)
@@ -198,11 +208,11 @@ def test_fido_record_takes_master_attributes_only_where_the_master_sets_them(db:
 
 
 @pytest.mark.integration
-def test_record_rebuilt_from_hapi_keeps_the_master_fields(db: Database, httpserver: HTTPServer) -> None:
+def test_record_rebuilt_from_hapi_keeps_the_master_fields(db: Database, httpserver: HTTPServer, http_session: requests.Session) -> None:
     """A record rebuilt from the HAPI info and saved by any writer gets the stored master fields again."""
     _store(db, httpserver)
     httpserver.expect_request(_master_path(SPLIT_DATASET)).respond_with_json(SPLIT_MASTER)
-    _refresher(db).refresh(SPLIT_DATASET, httpserver.url_for(_master_path(SPLIT_DATASET)))
+    _refresher(db, http_session).refresh(SPLIT_DATASET, httpserver.url_for(_master_path(SPLIT_DATASET)), SPLIT_DATASET_IDS)
 
     rebuilt = build_hapi_metadata(f"{SPLIT_DATASET}@0", SPLIT_DATASET, HAPI_INFO, CDAWEB_HAPI_URL, STORED_AT)
     save_with_overlays(MongoMetadataRepository(db), [rebuilt])
@@ -211,28 +221,30 @@ def test_record_rebuilt_from_hapi_keeps_the_master_fields(db: Database, httpserv
 
 
 @pytest.mark.integration
-def test_unchanged_master_file_is_not_written_again(db: Database, httpserver: HTTPServer) -> None:
+def test_unchanged_master_file_is_not_written_again(db: Database, httpserver: HTTPServer, http_session: requests.Session) -> None:
     """A master file equal to the stored one keeps the stored raw metadata and its retrieval time."""
     _store(db, httpserver)
     httpserver.expect_request(_master_path(SPLIT_DATASET)).respond_with_json(SPLIT_MASTER)
     url = httpserver.url_for(_master_path(SPLIT_DATASET))
-    _refresher(db).refresh(SPLIT_DATASET, url)
+    _refresher(db, http_session).refresh(SPLIT_DATASET, url, SPLIT_DATASET_IDS)
 
-    changed = _refresher(db, datetime(2026, 10, 8, tzinfo=UTC)).refresh(SPLIT_DATASET, url)
+    changed = _refresher(db, http_session, datetime(2026, 10, 8, tzinfo=UTC)).refresh(SPLIT_DATASET, url, SPLIT_DATASET_IDS)
 
     raw_master = MongoMetadataRepository(db).get_raw(SPLIT_DATASET, "istp")
     assert (changed, raw_master is not None and raw_master.retrieved_at) == (False, STORED_AT)
 
 
 @pytest.mark.integration
-def test_overloaded_master_server_leaves_metadata_unchanged_and_names_its_wait(db: Database, httpserver: HTTPServer) -> None:
+def test_overloaded_master_server_leaves_metadata_unchanged_and_names_its_wait(
+    db: Database, httpserver: HTTPServer, http_session: requests.Session
+) -> None:
     """HTTP 503 with Retry-After stores nothing and passes the wait on to the worker."""
     _store(db, httpserver)
     stored = _record(db, f"{SPLIT_DATASET}@0")
     httpserver.expect_request(_master_path(SPLIT_DATASET)).respond_with_data("busy", status=503, headers={"Retry-After": "60"})
 
     with pytest.raises(DataRetrievalError) as raised:
-        _refresher(db).refresh(SPLIT_DATASET, httpserver.url_for(_master_path(SPLIT_DATASET)))
+        _refresher(db, http_session).refresh(SPLIT_DATASET, httpserver.url_for(_master_path(SPLIT_DATASET)), SPLIT_DATASET_IDS)
 
     assert (raised.value.retry_after_seconds, MongoMetadataRepository(db).get_raw(SPLIT_DATASET, "istp")) == (60.0, None)
     assert _record(db, f"{SPLIT_DATASET}@0") == stored

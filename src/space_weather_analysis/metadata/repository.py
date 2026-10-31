@@ -1,17 +1,18 @@
 import logging
 import math
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 import numpy as np
 from bson import encode
+from pydantic import ValidationError
 from pymongo import ASCENDING, ReplaceOne
 from pymongo.database import Database
 
 from space_weather_analysis.database.bulk import bulk_write_in_batches
 from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSourceKind, RawMetadataRecord
-from space_weather_analysis.util.time_utils import ensure_aware
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ class MetadataRepository(ABC):
         """
 
     @abstractmethod
-    def get(self, dataset_id: str) -> Optional[DatasetMetadata]:
+    def get(self, dataset_id: str) -> DatasetMetadata | None:
         """Reads the record of one dataset.
 
         Args:
@@ -96,18 +97,18 @@ class MetadataRepository(ABC):
         """
 
     @abstractmethod
-    def get_many(self, dataset_ids: Sequence[str]) -> Dict[str, DatasetMetadata]:
-        """Reads the records of many datasets.
+    def get_many(self, dataset_ids: Sequence[str]) -> dict[str, DatasetMetadata]:
+        """Reads the records of many datasets; a record that does not match the schema is logged and left out.
 
         Args:
             dataset_ids: The dataset IDs.
 
         Returns:
-            The records keyed by dataset ID; datasets without record are left out.
+            The readable records keyed by dataset ID; datasets without readable record are left out.
         """
 
     @abstractmethod
-    def find_by_collection(self, collection: str) -> List[DatasetMetadata]:
+    def find_by_collection(self, collection: str) -> list[DatasetMetadata]:
         """Reads the records of the datasets stored in a MongoDB collection.
 
         Args:
@@ -118,7 +119,7 @@ class MetadataRepository(ABC):
         """
 
     @abstractmethod
-    def save_raw(self, dataset_id: str, kind: MetadataSourceKind, payload: Dict[str, Any], url: Optional[str], retrieved_at: datetime) -> None:
+    def save_raw(self, dataset_id: str, kind: MetadataSourceKind, payload: dict[str, Any], url: str | None, retrieved_at: datetime) -> None:
         """Inserts or replaces the raw provider metadata of one dataset and source kind.
 
         Args:
@@ -138,7 +139,7 @@ class MetadataRepository(ABC):
         """
 
     @abstractmethod
-    def get_raw(self, dataset_id: str, kind: MetadataSourceKind) -> Optional[RawMetadataRecord]:
+    def get_raw(self, dataset_id: str, kind: MetadataSourceKind) -> RawMetadataRecord | None:
         """Reads the raw provider metadata of one dataset and source kind.
 
         Args:
@@ -150,7 +151,7 @@ class MetadataRepository(ABC):
         """
 
     @abstractmethod
-    def get_raw_many(self, dataset_ids: Sequence[str], kind: MetadataSourceKind) -> Dict[str, RawMetadataRecord]:
+    def get_raw_many(self, dataset_ids: Sequence[str], kind: MetadataSourceKind) -> dict[str, RawMetadataRecord]:
         """Reads the raw provider metadata of many datasets for one source kind.
 
         Args:
@@ -162,14 +163,14 @@ class MetadataRepository(ABC):
         """
 
     @abstractmethod
-    def get_raw_retrieval_times(self, kind: MetadataSourceKind) -> Dict[str, datetime]:
-        """Reads when the stored raw metadata of one source kind was retrieved, without the payloads.
+    def get_raw_dataset_ids(self, kind: MetadataSourceKind) -> set[str]:
+        """Lists the datasets that have stored raw metadata of one source kind, without reading the payloads.
 
         Args:
             kind: The kind of source.
 
         Returns:
-            The retrieval time in UTC, keyed by dataset ID.
+            The dataset IDs.
         """
 
     @abstractmethod
@@ -178,14 +179,6 @@ class MetadataRepository(ABC):
 
         Args:
             dataset_id: The dataset ID.
-        """
-
-    @abstractmethod
-    def remove_outdated_records(self) -> int:
-        """Removes the stored records written in a document shape older than DatasetMetadata.
-
-        Returns:
-            The number of removed records.
         """
 
 
@@ -238,7 +231,7 @@ class MongoMetadataRepository(MetadataRepository):
         operations = [ReplaceOne({"_id": record.dataset_id}, sanitize_for_bson(record.to_document()), upsert=True) for record in records]
         bulk_write_in_batches(self.records, operations, self.BATCH_SIZE)
 
-    def get(self, dataset_id: str) -> Optional[DatasetMetadata]:
+    def get(self, dataset_id: str) -> DatasetMetadata | None:
         """Reads the record of one dataset.
 
         Args:
@@ -250,19 +243,29 @@ class MongoMetadataRepository(MetadataRepository):
         document = self.records.find_one({"_id": dataset_id})
         return DatasetMetadata.from_document(document) if document else None
 
-    def get_many(self, dataset_ids: Sequence[str]) -> Dict[str, DatasetMetadata]:
-        """Reads the records of many datasets.
+    def get_many(self, dataset_ids: Sequence[str]) -> dict[str, DatasetMetadata]:
+        """Reads the records of many datasets; a record that does not match the schema is logged and left out.
+
+        One unreadable record would otherwise block every other record read with it.
 
         Args:
             dataset_ids: The dataset IDs.
 
         Returns:
-            The records keyed by dataset ID; datasets without record are left out.
+            The readable records keyed by dataset ID; datasets without readable record are left out.
         """
-        documents = self.records.find({"_id": {"$in": list(dataset_ids)}})
-        return {document["_id"]: DatasetMetadata.from_document(document) for document in documents}
+        records: dict[str, DatasetMetadata] = {}
+        unreadable: list[str] = []
+        for document in self.records.find({"_id": {"$in": list(dataset_ids)}}):
+            try:
+                records[document["_id"]] = DatasetMetadata.from_document(document)
+            except ValidationError:
+                unreadable.append(str(document["_id"]))
+        if unreadable:
+            logger.warning("%d stored metadata records do not match the schema and are left out: %s", len(unreadable), unreadable)
+        return records
 
-    def find_by_collection(self, collection: str) -> List[DatasetMetadata]:
+    def find_by_collection(self, collection: str) -> list[DatasetMetadata]:
         """Reads the records of the datasets stored in a MongoDB collection.
 
         Args:
@@ -274,7 +277,7 @@ class MongoMetadataRepository(MetadataRepository):
         documents = self.records.find({"collection": collection}).sort("_id", ASCENDING)
         return [DatasetMetadata.from_document(document) for document in documents]
 
-    def save_raw(self, dataset_id: str, kind: MetadataSourceKind, payload: Dict[str, Any], url: Optional[str], retrieved_at: datetime) -> None:
+    def save_raw(self, dataset_id: str, kind: MetadataSourceKind, payload: dict[str, Any], url: str | None, retrieved_at: datetime) -> None:
         """Inserts or replaces the raw provider metadata of one dataset and source kind.
 
         Args:
@@ -303,14 +306,16 @@ class MongoMetadataRepository(MetadataRepository):
             document_bytes = len(encode(document))
             if document_bytes > self.MAX_DOCUMENT_BYTES:
                 logger.warning(
-                    f"Raw {raw_record.kind} metadata of '{raw_record.dataset_id}' has {document_bytes} bytes, "
-                    f"more than MongoDB stores in one document; not saved."
+                    "Raw %s metadata of '%s' has %d bytes, more than MongoDB stores in one document; not saved.",
+                    raw_record.kind,
+                    raw_record.dataset_id,
+                    document_bytes,
                 )
                 continue
             operations.append(ReplaceOne(key, document, upsert=True))
         bulk_write_in_batches(self.raw_records, operations, self.BATCH_SIZE)
 
-    def get_raw(self, dataset_id: str, kind: MetadataSourceKind) -> Optional[RawMetadataRecord]:
+    def get_raw(self, dataset_id: str, kind: MetadataSourceKind) -> RawMetadataRecord | None:
         """Reads the raw provider metadata of one dataset and source kind.
 
         Args:
@@ -323,7 +328,7 @@ class MongoMetadataRepository(MetadataRepository):
         document = self.raw_records.find_one({"dataset_id": dataset_id, "kind": kind}, {"_id": 0})
         return RawMetadataRecord.model_validate(document) if document else None
 
-    def get_raw_many(self, dataset_ids: Sequence[str], kind: MetadataSourceKind) -> Dict[str, RawMetadataRecord]:
+    def get_raw_many(self, dataset_ids: Sequence[str], kind: MetadataSourceKind) -> dict[str, RawMetadataRecord]:
         """Reads the raw provider metadata of many datasets for one source kind.
 
         Args:
@@ -336,17 +341,16 @@ class MongoMetadataRepository(MetadataRepository):
         documents = self.raw_records.find({"dataset_id": {"$in": list(dataset_ids)}, "kind": kind}, {"_id": 0})
         return {document["dataset_id"]: RawMetadataRecord.model_validate(document) for document in documents}
 
-    def get_raw_retrieval_times(self, kind: MetadataSourceKind) -> Dict[str, datetime]:
-        """Reads when the stored raw metadata of one source kind was retrieved, without the payloads.
+    def get_raw_dataset_ids(self, kind: MetadataSourceKind) -> set[str]:
+        """Lists the datasets that have stored raw metadata of one source kind, without reading the payloads.
 
         Args:
             kind: The kind of source.
 
         Returns:
-            The retrieval time in UTC, keyed by dataset ID.
+            The dataset IDs.
         """
-        documents = self.raw_records.find({"kind": kind}, {"_id": 0, "dataset_id": 1, "retrieved_at": 1})
-        return {document["dataset_id"]: ensure_aware(document["retrieved_at"]) for document in documents}
+        return {str(dataset_id) for dataset_id in self.raw_records.distinct("dataset_id", {"kind": kind})}
 
     def delete(self, dataset_id: str) -> None:
         """Removes the record and all raw metadata of one dataset.
@@ -356,15 +360,3 @@ class MongoMetadataRepository(MetadataRepository):
         """
         self.records.delete_one({"_id": dataset_id})
         self.raw_records.delete_many({"dataset_id": dataset_id})
-
-    def remove_outdated_records(self) -> int:
-        """Removes the documents in 'dataset_metadata' that lack the 'collection' field of DatasetMetadata.
-
-        Such documents use an older document shape; one with a `dataset_id` field but another `_id`
-        blocks the normalized record of the same dataset through the unique index on `dataset_id`.
-
-        Returns:
-            The number of removed documents.
-        """
-        result = self.records.delete_many({"collection": {"$exists": False}})
-        return result.deleted_count

@@ -3,16 +3,12 @@ import sys
 
 from pydantic import ValidationError
 
-from catalog_collector.data_catalog.tasks import DataCatalogTaskSettings, cdas_availability_kind, hapi_availability_kind
-from catalog_collector.metadata_catalog.tasks import (
-    MetadataCatalogTaskSettings,
-    cdas_metadata_kind,
-    cdaweb_master_kind,
-    hapi_metadata_kind,
-    spase_record_kind,
-)
 from catalog_collector.scheduling.repository import MongoMetadataTaskRepository
 from catalog_collector.scheduling.worker import MetadataWorker, WorkerSettings
+from catalog_collector.worker_tasks.cdas_dataset_list import cdas_dataset_list_kind
+from catalog_collector.worker_tasks.data_catalog import hapi_availability_kind
+from catalog_collector.worker_tasks.metadata_catalog import cdaweb_master_kind, hapi_metadata_kind, spase_record_kind
+from catalog_collector.worker_tasks.settings import TaskIntervalSettings
 from space_weather_analysis.config.errors import format_settings_error
 from space_weather_analysis.database.connection import connect_from_environment
 from space_weather_analysis.logging.config import setup_logging
@@ -29,20 +25,18 @@ def main() -> None:
 
     try:
         worker_settings = WorkerSettings()
-        data_catalog_settings = DataCatalogTaskSettings()
-        metadata_catalog_settings = MetadataCatalogTaskSettings()
+        interval_settings = TaskIntervalSettings()
     except ValidationError as e:
         logger.critical("Invalid worker settings, check the METADATA_WORKER_* environment variables: %s. Exiting.", format_settings_error(e))
         sys.exit(1)
 
     connection, db = connect_from_environment()
     kinds = [
-        hapi_metadata_kind(db, metadata_catalog_settings),
-        hapi_availability_kind(db, data_catalog_settings),
-        cdas_metadata_kind(db, metadata_catalog_settings),
-        cdas_availability_kind(db, data_catalog_settings),
-        cdaweb_master_kind(db, metadata_catalog_settings),
-        spase_record_kind(db, metadata_catalog_settings),
+        hapi_metadata_kind(db, interval_settings),
+        hapi_availability_kind(db, interval_settings),
+        cdas_dataset_list_kind(db, interval_settings),
+        cdaweb_master_kind(db, interval_settings),
+        spase_record_kind(db, interval_settings),
     ]
     try:
         MetadataWorker(MongoMetadataTaskRepository(db), kinds, worker_settings).run_forever()

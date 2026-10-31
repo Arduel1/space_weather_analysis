@@ -18,7 +18,7 @@ from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.clients.gfz import GfzClient
 from space_weather_analysis.coverage.repository import CoverageRepository, MongoCoverageRepository
 from space_weather_analysis.metadata.models import CitationInfo, DatasetMetadata, MetadataSource, SourceInfo, TimeInfo, VariableMetadata
-from space_weather_analysis.metadata.overlays import save_with_overlays
+from space_weather_analysis.metadata.overlays.layering import save_with_overlays
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
 from space_weather_analysis.util.naming import sanitize_collection_name
 from space_weather_analysis.util.time_utils import ensure_aware, format_iso_duration

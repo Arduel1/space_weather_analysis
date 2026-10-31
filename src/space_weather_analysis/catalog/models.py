@@ -1,5 +1,6 @@
+from datetime import datetime
 from enum import StrEnum
-from typing import Dict, List, NotRequired, TypeAlias, TypedDict
+from typing import NotRequired, TypedDict
 
 
 class TimeRangeDict(TypedDict):
@@ -43,13 +44,12 @@ class CatalogEntryDict(TypedDict):
         dataset_id: Optional dataset identifier, added by some discoverers.
         description: Optional human-readable description of the dataset.
         ongoing: Whether the source still receives new data, so its stop time moves forward; set by the
-            availability refresh from the HAPI metadata mirror.
-        availability_checked_at: When the availability refresh last found the dataset at its source,
-            as ISO 8601 UTC time.
-        missing_runs: How many availability refreshes in a row did not find the dataset at its server;
+            availability refreshes.
+        availability_checked_at: When an availability refresh last found the dataset at its source, in UTC.
+        missing_runs: How many refreshes or discovery runs in a row did not find the dataset at its source;
             0 once it is found again.
-        missing_since: When the availability refresh first missed the dataset in the current run of
-            misses, as ISO 8601 UTC time; absent while the dataset is found.
+        missing_since: When a refresh or discovery run first missed the dataset in the current run of misses,
+            in UTC; absent while the dataset is found.
     """
 
     type: str
@@ -58,9 +58,9 @@ class CatalogEntryDict(TypedDict):
     dataset_id: NotRequired[str]
     description: NotRequired[str]
     ongoing: NotRequired[bool]
-    availability_checked_at: NotRequired[str]
+    availability_checked_at: NotRequired[datetime]
     missing_runs: NotRequired[int]
-    missing_since: NotRequired[str]
+    missing_since: NotRequired[datetime]
 
 
 class MasterCatalogItem(TypedDict):
@@ -74,12 +74,8 @@ class MasterCatalogItem(TypedDict):
     """
 
     dataset_id: str
-    sources: List[CatalogEntryDict]
+    sources: list[CatalogEntryDict]
 
 
-CatalogMap: TypeAlias = Dict[str, List[CatalogEntryDict]]
-"""
-A mapping for fast catalog lookups.
-Key: dataset_id
-Value: List of available sources (CatalogEntryDict).
-"""
+# The sources of each dataset, keyed by dataset ID, for fast catalog lookups.
+type CatalogMap = dict[str, list[CatalogEntryDict]]

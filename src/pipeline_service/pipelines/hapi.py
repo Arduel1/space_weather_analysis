@@ -18,7 +18,7 @@ from space_weather_analysis.catalog.repository import CatalogRepository, MongoCa
 from space_weather_analysis.clients.hapi import HapiClient
 from space_weather_analysis.coverage.repository import CoverageRepository, MongoCoverageRepository
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
-from space_weather_analysis.metadata.overlays import save_with_overlays
+from space_weather_analysis.metadata.overlays.layering import save_with_overlays
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
 from space_weather_analysis.util.error_handling import DataProcessingError
 from space_weather_analysis.util.hapi_parameters import MAX_ARRAY_COLUMNS, parameters_too_large_for_columns

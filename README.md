@@ -36,7 +36,7 @@ The data model follows the physical chain of space weather: phenomena originate 
 
 The system is a modular monolith: a shared core library (`space_weather_analysis`) plus three separately-runnable components. All components share one codebase and one Docker image and communicate through MongoDB rather than over the network.
 
-- Catalog Collector: discovers available datasets from the providers and builds the master catalog and the dataset metadata. It runs as its own entrypoint because a full discovery pass is long-running.
+- Catalog Collector: loads the master catalog and the dataset metadata from the snapshot files in `data/` and exits with an error if they cannot be loaded. The discovery of all provider datasets is switched off by default (`CATALOG_COLLECTOR_DISCOVERY_ENABLED`), as a full pass takes hours; it never deletes catalog entries, it only counts sources a provider no longer lists.
 - Metadata Worker: a long-running background process that repeats all metadata requests (HAPI metadata mirror, CDAWeb dataset list, per-dataset master files and SPASE records, dataset availability) on a schedule, one request at a time with a random pause per provider host, keeping the last good state when a provider is unreachable.
 - Pipeline Service: fetches, parses, and normalizes data for a dataset and stores it in MongoDB, adding dataset metadata from the source where available. It also processes on-demand fetch jobs requested by the frontend.
 - Frontend: the Streamlit dashboard, which reads the catalog, the dataset metadata, and the time-series data from MongoDB and renders them.
@@ -235,8 +235,9 @@ Tools started outside Docker, such as the notebooks, can load the variables from
 │   │   ├── metadata_catalog/   # Dataset metadata: snapshot load, HAPI, CDAS, master file and SPASE metadata refresh
 │   │   ├── cdaweb/             # CDAWeb access: dataset list (CDAS web services) and master files
 │   │   ├── spase/              # SPASE records of the datasets (spase-metadata.org)
-│   │   ├── hapi_mirror/        # Server lookup shared by the HAPI metadata mirror refreshes
-│   │   └── scheduling/         # Task queue and worker for recurring metadata requests
+│   │   ├── hapi_mirror/        # HAPI metadata mirror files and the server lookup shared by its refreshes
+│   │   ├── scheduling/         # Task queue and worker for recurring metadata requests
+│   │   └── worker_tasks/       # Task kinds the metadata worker runs, with their intervals
 │   ├── pipeline_service/       # ETL: fetch, parse, normalize, store
 │   └── streamlit_app/          # Streamlit dashboard and plots
 └── tests/                      # Unit tests (tests/unit) and integration tests (tests/integration)

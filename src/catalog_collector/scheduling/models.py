@@ -1,5 +1,5 @@
 import hashlib
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -84,13 +84,15 @@ def task_key(kind: str, target: str) -> str:
     return f"{kind}/{target}"
 
 
-def first_due_time(key: str, interval: timedelta, now: datetime) -> datetime:
-    """Places the first run of a new task at a fixed point within its interval.
+def first_due_time(planned_request: PlannedRequest, key: str, interval: timedelta, now: datetime) -> datetime:
+    """Places the first run of a new task.
 
-    The offset comes from a hash of the key, so the tasks of one kind spread evenly over the
-    interval instead of all running at once, and a task keeps its offset across restarts.
+    A kind with one single request runs at once, as nothing competes with it. The tasks of a kind with
+    one request per dataset start at a fixed point within their interval: the offset comes from a hash
+    of the key, so they spread evenly instead of all running at once, and keep their offset across restarts.
 
     Args:
+        planned_request: The request the task repeats.
         key: The task key.
         interval: The time between two runs.
         now: The current time.
@@ -98,6 +100,25 @@ def first_due_time(key: str, interval: timedelta, now: datetime) -> datetime:
     Returns:
         The time of the first run, at most one interval after now.
     """
+    if planned_request.target == SINGLE_REQUEST_TARGET:
+        return now
     interval_seconds = max(int(interval.total_seconds()), 1)
     offset_seconds = int(hashlib.sha256(key.encode("utf-8")).hexdigest(), 16) % interval_seconds
     return now + timedelta(seconds=offset_seconds)
+
+
+@dataclass(frozen=True)
+class TaskKind:
+    """One kind of recurring metadata request and how to plan and run it.
+
+    Attributes:
+        name: The kind name stored in each task.
+        interval: The time between two successful runs of a task.
+        plan: Lists the requests the kind currently needs.
+        run: Executes one task; raises on failure, so the worker schedules a retry.
+    """
+
+    name: str
+    interval: timedelta
+    plan: Callable[[], list[PlannedRequest]]
+    run: Callable[[MetadataTask], None]

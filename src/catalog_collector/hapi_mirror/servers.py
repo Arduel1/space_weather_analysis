@@ -1,12 +1,8 @@
-from typing import Any, Dict, Optional, Set, Tuple
+from typing import Any
 
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.catalog.repository import CatalogRepository
 from space_weather_analysis.metadata.models import DatasetMetadata
-
-# The HAPI project (Heliophysics Application Programmer's Interface, https://hapi-server.org/) runs a mirror
-# that fetches the /catalog and /info responses of all known HAPI servers every night and publishes them as files.
-MIRROR_BASE_URL = "https://hapi-server.org/meta/"
 
 
 def describes_hapi_source(record: DatasetMetadata, server_url: str) -> bool:
@@ -43,7 +39,7 @@ def normalize_server_url(url: str) -> str:
     return normalized.rstrip("/")
 
 
-def index_mirror_servers(catalogs: Dict[str, Any]) -> Tuple[Dict[str, str], Dict[str, Set[str]]]:
+def index_mirror_servers(catalogs: dict[str, Any]) -> tuple[dict[str, str], dict[str, set[str]]]:
     """Reads base URL and listed dataset IDs of each server from a mirror file with one entry per server.
 
     Args:
@@ -55,8 +51,8 @@ def index_mirror_servers(catalogs: Dict[str, Any]) -> Tuple[Dict[str, str], Dict
     Raises:
         AttributeError: If a server entry lacks its expected structure.
     """
-    server_ids_by_url: Dict[str, str] = {}
-    listed_datasets: Dict[str, Set[str]] = {}
+    server_ids_by_url: dict[str, str] = {}
+    listed_datasets: dict[str, set[str]] = {}
     for server_id, server_entry in catalogs.items():
         server_url = server_entry.get("about", {}).get("x_url")
         if server_url:
@@ -66,7 +62,7 @@ def index_mirror_servers(catalogs: Dict[str, Any]) -> Tuple[Dict[str, str], Dict
     return server_ids_by_url, listed_datasets
 
 
-def mirror_server_id(server_url: str, dataset_id: str, server_ids_by_url: Dict[str, str], listed_datasets: Dict[str, Set[str]]) -> Optional[str]:
+def mirror_server_id(server_url: str, dataset_id: str, server_ids_by_url: dict[str, str], listed_datasets: dict[str, set[str]]) -> str | None:
     """Finds the mirror server ID of a catalog server.
 
     Some servers are reachable under several paths of the same host, and the mirror lists only one of them
@@ -97,8 +93,11 @@ def mirror_server_id(server_url: str, dataset_id: str, server_ids_by_url: Dict[s
     return server_id
 
 
-def first_hapi_servers(catalog_repository: CatalogRepository) -> Dict[str, str]:
-    """Reads the first HAPI server of each dataset from the master catalog, the server its metadata record describes.
+def first_hapi_servers(catalog_repository: CatalogRepository) -> dict[str, str]:
+    """Reads the first HAPI server of each dataset from the master catalog, the one server its HAPI metadata record describes.
+
+    Every writer of HAPI records builds them for this server, so the snapshot load, the mirror refresh and the coverage
+    sync agree on which record belongs to which source; the server a response came from is kept only in the raw metadata.
 
     Args:
         catalog_repository: The master catalog.
@@ -106,7 +105,7 @@ def first_hapi_servers(catalog_repository: CatalogRepository) -> Dict[str, str]:
     Returns:
         The base URL of the first HAPI source, keyed by dataset ID; datasets without HAPI source are left out.
     """
-    hapi_servers: Dict[str, str] = {}
+    hapi_servers: dict[str, str] = {}
     for dataset_id, sources in catalog_repository.get_source_map(SourceType.HAPI).items():
         for source in sources:
             if source.get("source_id"):
