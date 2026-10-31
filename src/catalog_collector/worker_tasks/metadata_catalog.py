@@ -15,6 +15,7 @@ from catalog_collector.scheduling.models import SINGLE_REQUEST_TARGET, MetadataT
 from catalog_collector.spase.records import spase_record_url
 from catalog_collector.worker_tasks.settings import TaskIntervalSettings
 from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
+from space_weather_analysis.metadata.models import MetadataSourceKind
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
 
 HAPI_METADATA_KIND = "hapi_mirror_metadata"
@@ -57,7 +58,7 @@ class CdawebDatasetPlan:
         """
         self.dataset_ids_by_cdas_id = cdaweb_dataset_ids_by_cdas_id(self.catalog_repository)
         cdas_ids = sorted(self.dataset_ids_by_cdas_id)
-        raw_cdas_entries = self.metadata_repository.get_raw_many(cdas_ids, "cdas")
+        raw_cdas_entries = self.metadata_repository.get_raw_many(cdas_ids, MetadataSourceKind.CDAS)
         planned_requests: list[PlannedRequest] = []
         for cdas_id in cdas_ids:
             raw_cdas_entry = raw_cdas_entries.get(cdas_id)

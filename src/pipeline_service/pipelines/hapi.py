@@ -18,6 +18,7 @@ from space_weather_analysis.catalog.repository import CatalogRepository, MongoCa
 from space_weather_analysis.clients.hapi import HapiClient
 from space_weather_analysis.coverage.repository import CoverageRepository, MongoCoverageRepository
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
+from space_weather_analysis.metadata.models import MetadataSourceKind
 from space_weather_analysis.metadata.overlays.layering import save_with_overlays
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
 from space_weather_analysis.util.error_handling import DataProcessingError
@@ -257,7 +258,7 @@ class HapiPipeline(MongoLoader, BasePipeline):
         server_info = {key: value for key, value in fetched_info.info.items() if key not in self.HAPICLIENT_REQUEST_KEYS}
         try:
             record = build_hapi_metadata(dataset_id, collection_name, server_info, fetched_info.server_url, fetched_info.retrieved_at)
-            self.metadata_repository.save_raw(dataset_id, "hapi", server_info, fetched_info.server_url, fetched_info.retrieved_at)
+            self.metadata_repository.save_raw(dataset_id, MetadataSourceKind.HAPI, server_info, fetched_info.server_url, fetched_info.retrieved_at)
             save_with_overlays(self.metadata_repository, [record])
         except METADATA_SAVE_ERRORS:
             logger.exception("Failed to save metadata of %s", dataset_id)

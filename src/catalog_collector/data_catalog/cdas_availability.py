@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class CdasAvailabilityRefresher:
-    """Keeps the time range of the CDAWeb sources (FIDO_CDAWEB) current from the CDAS dataset list.
+    """Keeps the time range of the CDAWeb sources (CDAWEB) current from the CDAS dataset list.
 
     Sources whose dataset CDAS no longer lists are kept and only counted as missing.
     """
@@ -33,7 +33,7 @@ class CdasAvailabilityRefresher:
         self.clock = clock
 
     def refresh(self, cdas_datasets: dict[str, CdasDataset]) -> AvailabilitySummary:
-        """Updates the availability of every FIDO_CDAWEB source of the catalog from the read dataset list.
+        """Updates the availability of every CDAWEB source of the catalog from the read dataset list.
 
         Args:
             cdas_datasets: The CDAS entries keyed by dataset ID.
@@ -53,7 +53,7 @@ class CdasAvailabilityRefresher:
             return SourceLookup(LookupOutcome.FOUND, interval.start, interval.stop, interval.stop_time)
 
         checked_at = self.clock()
-        summary = refresh_sources(self.catalog_repository, SourceType.FIDO_CDAWEB, lookup, checked_at, checked_at - ONGOING_TOLERANCE)
+        summary = refresh_sources(self.catalog_repository, SourceType.CDAWEB, lookup, checked_at, checked_at - ONGOING_TOLERANCE)
         logger.info(
             "CDAS availability refresh: %d sources refreshed (%d ongoing), %d missing, %d without usable time range",
             summary.refreshed,

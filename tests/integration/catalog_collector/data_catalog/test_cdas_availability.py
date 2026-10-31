@@ -12,14 +12,14 @@ from catalog_collector.data_catalog.cdas_availability import CdasAvailabilityRef
 from space_weather_analysis.catalog.models import CatalogEntryDict, MasterCatalogItem
 from space_weather_analysis.catalog.repository import MongoCatalogRepository
 
-DATASET_ID = "SYNTH_K0_FIDO"
+DATASET_ID = "SYNTH_K0_CDAWEB"
 CATALOG_TIME_RANGE = {"start_time": "2016-07-26T00:00:00Z", "end_time": "2026-01-11T00:00:00Z"}
 CDAS_START = "2016-07-26T00:00:00.000Z"
 
 
 def _source() -> CatalogEntryDict:
-    """Builds a FIDO_CDAWEB catalog source with the snapshot time range."""
-    return cast(CatalogEntryDict, {"type": "FIDO_CDAWEB", "source_id": "SYNTH", "time_range": dict(CATALOG_TIME_RANGE)})
+    """Builds a CDAWEB catalog source with the snapshot time range."""
+    return cast(CatalogEntryDict, {"type": "CDAWEB", "source_id": "SYNTH", "time_range": dict(CATALOG_TIME_RANGE)})
 
 
 def _entries(stop_dates: dict[str, str]) -> list[dict[str, Any]]:

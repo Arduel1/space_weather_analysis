@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 
-from space_weather_analysis.metadata.models import DatasetMetadata
+from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSourceKind
 from space_weather_analysis.metadata.overlays.cdas import apply_cdas_overlay
 from space_weather_analysis.metadata.overlays.cdaweb import cdas_dataset_id, describes_cdaweb_dataset
 from space_weather_analysis.metadata.overlays.istp import apply_istp_overlay
@@ -23,9 +23,9 @@ def save_with_overlays(metadata_repository: MetadataRepository, records: Sequenc
     cdaweb_records = [record for record in records if describes_cdaweb_dataset(record)]
     if cdaweb_records:
         cdas_ids = sorted({cdas_dataset_id(record.dataset_id) for record in cdaweb_records})
-        raw_spase_records = metadata_repository.get_raw_many(cdas_ids, "spase")
-        raw_masters = metadata_repository.get_raw_many(cdas_ids, "istp")
-        raw_cdas_entries = metadata_repository.get_raw_many(cdas_ids, "cdas")
+        raw_spase_records = metadata_repository.get_raw_many(cdas_ids, MetadataSourceKind.SPASE)
+        raw_masters = metadata_repository.get_raw_many(cdas_ids, MetadataSourceKind.ISTP)
+        raw_cdas_entries = metadata_repository.get_raw_many(cdas_ids, MetadataSourceKind.CDAS)
         for record in cdaweb_records:
             cdas_id = cdas_dataset_id(record.dataset_id)
             raw_spase_record = raw_spase_records.get(cdas_id)

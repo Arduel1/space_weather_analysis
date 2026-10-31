@@ -6,7 +6,9 @@ from space_weather_analysis.metadata.normalize import optional_text
 
 # SPASE (Space Physics Archive Search and Extract, https://spase-group.org/) ranks below curated and ISTP metadata
 # and above HAPI and data file metadata, so it only replaces fields that are unset or come from these sources or itself.
-REPLACEABLE_SOURCES: frozenset[MetadataSourceKind | None] = frozenset({None, "hapi", "file", "spase"})
+REPLACEABLE_SOURCES: frozenset[MetadataSourceKind | None] = frozenset(
+    {None, MetadataSourceKind.HAPI, MetadataSourceKind.FILE, MetadataSourceKind.SPASE}
+)
 
 # SPASE names the elements of a Cartesian vector by their axis; HAPI names them x, y and z.
 CARTESIAN_REPRESENTATION = "Cartesian"
@@ -36,7 +38,7 @@ def apply_spase_overlay(record: DatasetMetadata, payload: dict[str, Any], retrie
     cadence = optional_text(payload.get("cadence"))
     if cadence:
         record.time.cadence = cadence
-    record.replace_provenance(MetadataSource(kind="spase", url=url, retrieved_at=retrieved_at))
+    record.replace_provenance(MetadataSource(kind=MetadataSourceKind.SPASE, url=url, retrieved_at=retrieved_at))
 
 
 def _apply_parameter(variable: VariableMetadata, parameter: dict[str, Any]) -> None:
@@ -61,7 +63,7 @@ def _apply_parameter(variable: VariableMetadata, parameter: dict[str, Any]) -> N
     for field_name, value in field_values.items():
         if value is not None and variable.field_sources.get(field_name) in REPLACEABLE_SOURCES:
             setattr(variable, field_name, value)
-            variable.field_sources[field_name] = "spase"
+            variable.field_sources[field_name] = MetadataSourceKind.SPASE
 
 
 def _element(parameter: dict[str, Any], element_index: int | None) -> dict[str, Any] | None:

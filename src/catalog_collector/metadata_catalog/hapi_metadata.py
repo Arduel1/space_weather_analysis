@@ -12,7 +12,7 @@ from catalog_collector.hapi_mirror.files import MIRROR_BASE_URL, MIRROR_INFOS_PA
 from catalog_collector.hapi_mirror.servers import describes_hapi_source, first_hapi_servers, index_mirror_servers, mirror_server_id
 from space_weather_analysis.catalog.repository import CatalogRepository
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
-from space_weather_analysis.metadata.models import DatasetMetadata, RawMetadataRecord
+from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSourceKind, RawMetadataRecord
 from space_weather_analysis.metadata.overlays.layering import save_with_overlays
 from space_weather_analysis.metadata.repository import MetadataRepository, sanitize_for_bson
 from space_weather_analysis.util.error_handling import DataProcessingError
@@ -165,7 +165,7 @@ class HapiMirrorMetadataRefresher:
         """
         dataset_ids = [candidate.dataset_id for candidate in batch]
         stored_records = self.metadata_repository.get_many(dataset_ids)
-        stored_raw_records = self.metadata_repository.get_raw_many(dataset_ids, "hapi")
+        stored_raw_records = self.metadata_repository.get_raw_many(dataset_ids, MetadataSourceKind.HAPI)
 
         mirror_url = mirror_file_url(self.mirror_base_url, MIRROR_INFOS_PATH)
         new_records: list[DatasetMetadata] = []
@@ -192,7 +192,9 @@ class HapiMirrorMetadataRefresher:
                 continue
             new_records.append(record)
             new_raw_records.append(
-                RawMetadataRecord(dataset_id=candidate.dataset_id, kind="hapi", payload=payload, url=mirror_url, retrieved_at=retrieved_at)
+                RawMetadataRecord(
+                    dataset_id=candidate.dataset_id, kind=MetadataSourceKind.HAPI, payload=payload, url=mirror_url, retrieved_at=retrieved_at
+                )
             )
 
         # Records first: if the raw write fails, the next refresh still sees the change and rebuilds the record

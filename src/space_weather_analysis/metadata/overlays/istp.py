@@ -3,7 +3,7 @@ from typing import Any
 
 import numpy as np
 
-from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSource, VariableMetadata
+from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSource, MetadataSourceKind, VariableMetadata
 from space_weather_analysis.metadata.normalize import normalize_units, optional_text
 
 # The ISTP Metadata Guidelines (International Solar-Terrestrial Physics, https://istp-metadata.readthedocs.io/)
@@ -41,7 +41,7 @@ def apply_istp_overlay(record: DatasetMetadata, master: dict[str, Any], retrieve
         if rules_of_use:
             record.citation.rules_of_use = rules_of_use
 
-    record.replace_provenance(MetadataSource(kind="istp", url=url, retrieved_at=retrieved_at))
+    record.replace_provenance(MetadataSource(kind=MetadataSourceKind.ISTP, url=url, retrieved_at=retrieved_at))
 
 
 def _apply_variable_attributes(variable: VariableMetadata, master_variable: dict[str, Any], master_variables: dict[str, Any]) -> None:
@@ -68,7 +68,7 @@ def _apply_variable_attributes(variable: VariableMetadata, master_variable: dict
     for field_name, value in field_values.items():
         if value is not None:
             setattr(variable, field_name, value)
-            variable.field_sources[field_name] = "istp"
+            variable.field_sources[field_name] = MetadataSourceKind.ISTP
 
 
 def _element_label(master_variable: dict[str, Any], element_index: int | None, master_variables: dict[str, Any]) -> str | None:

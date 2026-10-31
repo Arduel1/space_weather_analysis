@@ -15,7 +15,7 @@ class CdawebDiscoverer(AbstractDiscoverer):
     The metadata of CDAWeb datasets comes from the CDAS dataset list, the master files and SPASE, so discovery yields none.
     """
 
-    source_type = SourceType.FIDO_CDAWEB
+    source_type = SourceType.CDAWEB
 
     def __init__(self, client: CdawebClient | None = None) -> None:
         """Initializes the discoverer.

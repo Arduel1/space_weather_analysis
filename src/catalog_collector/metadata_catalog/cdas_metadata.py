@@ -6,7 +6,7 @@ from itertools import batched
 
 from catalog_collector.cdaweb.datasets import CDAS_DATASETS_URL, CdasDataset, cdaweb_dataset_ids_by_cdas_id
 from space_weather_analysis.catalog.repository import CatalogRepository
-from space_weather_analysis.metadata.models import RawMetadataRecord
+from space_weather_analysis.metadata.models import MetadataSourceKind, RawMetadataRecord
 from space_weather_analysis.metadata.overlays.layering import resave_cdaweb_records
 from space_weather_analysis.metadata.repository import MetadataRepository, sanitize_for_bson
 
@@ -103,7 +103,7 @@ class CdasMetadataRefresher:
             retrieved_at: When the dataset list was read.
             summary: The summary to count the outcomes in, changed in place.
         """
-        stored_raw_records = self.metadata_repository.get_raw_many(batch, "cdas")
+        stored_raw_records = self.metadata_repository.get_raw_many(batch, MetadataSourceKind.CDAS)
         new_raw_records: list[RawMetadataRecord] = []
         changed_dataset_ids: list[str] = []
         for cdas_id in batch:
@@ -112,7 +112,9 @@ class CdasMetadataRefresher:
             if stored_raw_record is not None and stored_raw_record.payload == payload:
                 summary.unchanged += 1
                 continue
-            new_raw_records.append(RawMetadataRecord(dataset_id=cdas_id, kind="cdas", payload=payload, url=self.url, retrieved_at=retrieved_at))
+            new_raw_records.append(
+                RawMetadataRecord(dataset_id=cdas_id, kind=MetadataSourceKind.CDAS, payload=payload, url=self.url, retrieved_at=retrieved_at)
+            )
             changed_dataset_ids.extend(datasets[cdas_id])
 
         # The raw entries come first, as the overlay of the saved records reads them

@@ -9,7 +9,7 @@ from pymongo.database import Database
 
 from pipeline_service.pipelines.cdaweb import CdawebPipeline
 from pipeline_service.pipelines.report import IngestionReport
-from space_weather_analysis.metadata.models import DatasetMetadata
+from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSourceKind
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
 
 StoredData = Callable[[str, datetime], dict[str, Any]]
@@ -17,7 +17,7 @@ StoredTimestampsAndMetadata = Callable[[str], list[tuple[datetime, dict[str, Any
 
 DATASET_ID = "SYNTH_MAG_H0"
 GROUP = "SYNTH"
-SOURCE_METADATA = {"source": f"FIDO_CDAWEB/{GROUP}"}
+SOURCE_METADATA = {"source": f"CDAWEB/{GROUP}"}
 
 DAY_ONE = datetime(2024, 1, 1, tzinfo=UTC)
 DAY_TWO = DAY_ONE + timedelta(days=1)
@@ -154,7 +154,7 @@ def one_day_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
 def _ingest(db: Database, cdas: FakeCdasWs, start: datetime = DAY_ONE, end: datetime = DAY_TWO) -> IngestionReport:
     """Registers the dataset in the catalog, unless already there, and runs the CDAWeb pipeline against the fake CDAS."""
     if db["master_catalog"].count_documents({"dataset_id": DATASET_ID}) == 0:
-        source = {"type": "FIDO_CDAWEB", "source_id": GROUP, "time_range": {"start_time": "2024-01-01T00:00:00Z", "end_time": "2024-01-31T00:00:00Z"}}
+        source = {"type": "CDAWEB", "source_id": GROUP, "time_range": {"start_time": "2024-01-01T00:00:00Z", "end_time": "2024-01-31T00:00:00Z"}}
         db["master_catalog"].insert_one({"dataset_id": DATASET_ID, "sources": [source]})
     return CdawebPipeline(db, cdas=cdas).run([DATASET_ID], start, end)
 
@@ -273,7 +273,7 @@ def test_cdaweb_metadata_variables_match_stored_fields(db: Database, stored_data
     assert components == [("B", 0, 0), ("B", 1, 1), ("B", 2, 2)]
     # VALIDMIN of B holds one value per component, so no single valid range applies
     assert variables["B_1"].valid_min is None
-    raw = MongoMetadataRepository(db).get_raw(DATASET_ID, "file")
+    raw = MongoMetadataRepository(db).get_raw(DATASET_ID, MetadataSourceKind.FILE)
     assert raw is not None
     assert raw.payload["B"]["VALIDMIN"] == B_VALID_MIN
 
@@ -291,7 +291,7 @@ def test_cdaweb_stored_master_file_selects_the_requested_variables(db: Database)
             "epoch": _master_variable("support_data"),
         },
     }
-    MongoMetadataRepository(db).save_raw(DATASET_ID, "istp", master, "https://cdaweb.example.org/master.json", DAY_ONE)
+    MongoMetadataRepository(db).save_raw(DATASET_ID, MetadataSourceKind.ISTP, master, "https://cdaweb.example.org/master.json", DAY_ONE)
     cdas = FakeCdasWs()
 
     _ingest(db, cdas)

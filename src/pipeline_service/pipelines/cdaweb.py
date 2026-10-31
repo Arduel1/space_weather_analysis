@@ -30,6 +30,7 @@ from space_weather_analysis.metadata.models import (
     DatasetMetadata,
     DataType,
     MetadataSource,
+    MetadataSourceKind,
     SkippedParameter,
     SourceInfo,
     TimeInfo,
@@ -95,13 +96,13 @@ class CdawebPipeline(MongoLoader, BasePipeline):
             The report with the number of tried chunks and the chunks that failed.
 
         Raises:
-            ValueError: If start or end time is missing, no dataset is given or a dataset has no FIDO_CDAWEB source in the master catalog.
+            ValueError: If start or end time is missing, no dataset is given or a dataset has no CDAWEB source in the master catalog.
         """
         if not start_time or not end_time:
             raise ValueError("The CDAWeb pipeline needs a start and an end time.")
         if not datasets:
             raise ValueError("The CDAWeb pipeline needs at least one dataset.")
-        group_names = {dataset_id: self._find_fido_group(dataset_id) for dataset_id in datasets}
+        group_names = {dataset_id: self._find_cdaweb_group(dataset_id) for dataset_id in datasets}
         self._variable_plans = self._plan_variables(datasets)
 
         time_chunks = generate_time_chunks(ensure_aware(start_time), ensure_aware(end_time), self.CHUNK_DURATION)
@@ -146,8 +147,8 @@ class CdawebPipeline(MongoLoader, BasePipeline):
 
         return report
 
-    def _find_fido_group(self, dataset_id: str) -> str:
-        """Reads the observatory group of the first FIDO_CDAWEB source of a dataset from the master catalog.
+    def _find_cdaweb_group(self, dataset_id: str) -> str:
+        """Reads the observatory group of the first CDAWEB source of a dataset from the master catalog.
 
         Args:
             dataset_id: The dataset ID.
@@ -156,13 +157,13 @@ class CdawebPipeline(MongoLoader, BasePipeline):
             The group name, the source_id of the source.
 
         Raises:
-            ValueError: If the master catalog lists no FIDO_CDAWEB source with a group for the dataset.
+            ValueError: If the master catalog lists no CDAWEB source with a group for the dataset.
         """
-        for source in self.catalog_repository.get_sources(dataset_id, SourceType.FIDO_CDAWEB):
+        for source in self.catalog_repository.get_sources(dataset_id, SourceType.CDAWEB):
             group_name = source.get("source_id")
             if group_name:
                 return group_name
-        raise ValueError(f"The master catalog lists no {SourceType.FIDO_CDAWEB} source for dataset '{dataset_id}'.")
+        raise ValueError(f"The master catalog lists no {SourceType.CDAWEB} source for dataset '{dataset_id}'.")
 
     def _plan_variables(self, datasets: Sequence[str]) -> dict[str, VariablePlan]:
         """Selects the variables to request for each dataset from its stored CDAWeb master file.
@@ -174,7 +175,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
             The plan of each dataset with a stored master file; datasets without one request the variables CDAS lists.
         """
         cdas_ids = sorted({cdas_dataset_id(dataset_id) for dataset_id in datasets})
-        raw_masters = self.metadata_repository.get_raw_many(cdas_ids, "istp")
+        raw_masters = self.metadata_repository.get_raw_many(cdas_ids, MetadataSourceKind.ISTP)
         plans: dict[str, VariablePlan] = {}
         for dataset_id in datasets:
             raw_master = raw_masters.get(cdas_dataset_id(dataset_id))
@@ -220,7 +221,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         plan = self._variable_plans.get(dataset_id)
         not_stored = _unique_by_name([*(plan.not_stored if plan else ()), *dataset_frame.not_stored])
         cleaned_frame, _ = clean_cdf_columns(dataset_frame.frame, dataset_frame.attributes)
-        documents = dataframe_to_documents(cleaned_frame, f"{SourceType.FIDO_CDAWEB}/{group_name}")
+        documents = dataframe_to_documents(cleaned_frame, f"{SourceType.CDAWEB}/{group_name}")
         if documents:
             self._load_data(sanitize_collection_name(dataset_id), documents)
         stored_column_types = {str(column_name): column_data_type(cleaned_frame[column_name]) for column_name in cleaned_frame.columns}
@@ -250,15 +251,15 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         record = DatasetMetadata(
             dataset_id=dataset_id,
             collection=sanitize_collection_name(dataset_id),
-            source=SourceInfo(type=SourceType.FIDO_CDAWEB),
+            source=SourceInfo(type=SourceType.CDAWEB),
             time=TimeInfo(timestamp_location=self.ISTP_TIMESTAMP_LOCATIONS.get(location, "other")),
             variables=self._istp_variables(file_metadata, stored_column_types),
             not_stored=not_stored,
-            provenance=[MetadataSource(kind="file", retrieved_at=retrieved_at)],
+            provenance=[MetadataSource(kind=MetadataSourceKind.FILE, retrieved_at=retrieved_at)],
             updated_at=retrieved_at,
         )
         try:
-            self.metadata_repository.save_raw(dataset_id, "file", file_metadata, None, retrieved_at)
+            self.metadata_repository.save_raw(dataset_id, MetadataSourceKind.FILE, file_metadata, None, retrieved_at)
             save_with_overlays(self.metadata_repository, [record])
         except METADATA_SAVE_ERRORS:
             logger.exception("Failed to save metadata of %s", dataset_id)
@@ -283,7 +284,7 @@ class CdawebPipeline(MongoLoader, BasePipeline):
                 attributes = {}
             variables.append(
                 VariableMetadata.from_single_source(
-                    "file",
+                    MetadataSourceKind.FILE,
                     name=column_name,
                     source_name=variable_name,
                     component=component_index,

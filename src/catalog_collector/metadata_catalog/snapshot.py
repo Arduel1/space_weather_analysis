@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from catalog_collector.hapi_mirror.servers import describes_hapi_source, first_hapi_servers, normalize_server_url
 from space_weather_analysis.catalog.repository import CatalogRepository
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
-from space_weather_analysis.metadata.models import DatasetMetadata, RawMetadataRecord
+from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSourceKind, RawMetadataRecord
 from space_weather_analysis.metadata.overlays.layering import save_with_overlays
 from space_weather_analysis.metadata.repository import MetadataRepository
 from space_weather_analysis.util.error_handling import CatalogError
@@ -70,7 +70,7 @@ class MetadataSnapshotLoader:
         retrieved_at = datetime.fromtimestamp(self.file_path.stat().st_mtime, tz=UTC)
         snapshot_url = self.file_path.resolve().as_uri()
         record_servers = first_hapi_servers(self.catalog_repository)
-        stored_dataset_ids = self.metadata_repository.get_raw_dataset_ids("hapi")
+        stored_dataset_ids = self.metadata_repository.get_raw_dataset_ids(MetadataSourceKind.HAPI)
 
         new_entries = [(dataset_id, info) for dataset_id, info in _snapshot_entries(data) if dataset_id not in stored_dataset_ids]
         stored_records = self.metadata_repository.get_many([dataset_id for dataset_id, _ in new_entries])
@@ -80,7 +80,9 @@ class MetadataSnapshotLoader:
             if not isinstance(info, dict):
                 logger.warning("Metadata of '%s' is not a mapping; skipped.", dataset_id)
                 continue
-            raw_records.append(RawMetadataRecord(dataset_id=dataset_id, kind="hapi", payload=info, url=snapshot_url, retrieved_at=retrieved_at))
+            raw_records.append(
+                RawMetadataRecord(dataset_id=dataset_id, kind=MetadataSourceKind.HAPI, payload=info, url=snapshot_url, retrieved_at=retrieved_at)
+            )
             record = self._record(dataset_id, info, record_servers.get(dataset_id), stored_records.get(dataset_id), retrieved_at)
             if record is not None:
                 records.append(record)
@@ -115,7 +117,7 @@ class MetadataSnapshotLoader:
             return
         retrieved_at = self.clock()
         self.metadata_repository.save_raw_many(
-            [RawMetadataRecord(dataset_id=dataset_id, kind="hapi", payload=info, url=server_url, retrieved_at=retrieved_at)]
+            [RawMetadataRecord(dataset_id=dataset_id, kind=MetadataSourceKind.HAPI, payload=info, url=server_url, retrieved_at=retrieved_at)]
         )
         record = self._record(dataset_id, info, record_server, self.metadata_repository.get(dataset_id), retrieved_at)
         if record is not None:

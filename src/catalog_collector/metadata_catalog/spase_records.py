@@ -6,6 +6,7 @@ import requests
 
 from catalog_collector.metadata_catalog.raw_updates import store_changed_raw_and_overlay
 from catalog_collector.spase.records import fetch_spase_record
+from space_weather_analysis.metadata.models import MetadataSourceKind
 from space_weather_analysis.metadata.repository import MetadataRepository
 
 logger = logging.getLogger(__name__)
@@ -53,4 +54,4 @@ class SpaseRecordRefresher:
         if record is None:
             logger.info("No SPASE record of %s at %s.", cdas_id, url)
             return False
-        return store_changed_raw_and_overlay(self.metadata_repository, "spase", cdas_id, record, url, self.clock(), dataset_ids)
+        return store_changed_raw_and_overlay(self.metadata_repository, MetadataSourceKind.SPASE, cdas_id, record, url, self.clock(), dataset_ids)

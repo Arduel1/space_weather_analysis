@@ -5,6 +5,7 @@ import requests
 
 from catalog_collector.cdaweb.masters import fetch_master
 from catalog_collector.metadata_catalog.raw_updates import store_changed_raw_and_overlay
+from space_weather_analysis.metadata.models import MetadataSourceKind
 from space_weather_analysis.metadata.repository import MetadataRepository
 
 
@@ -47,4 +48,4 @@ class CdawebMasterRefresher:
             DataRetrievalError, DataProcessingError: If the master file cannot be read; the stored metadata is then left unchanged.
         """
         master = fetch_master(self.session, url)
-        return store_changed_raw_and_overlay(self.metadata_repository, "istp", cdas_id, master, url, self.clock(), dataset_ids)
+        return store_changed_raw_and_overlay(self.metadata_repository, MetadataSourceKind.ISTP, cdas_id, master, url, self.clock(), dataset_ids)

@@ -35,7 +35,7 @@ class CdawebClient(DataClient[xr.Dataset]):
     serves the data of a dataset subset by variables and time range; cdasws is its official Python client.
     """
 
-    source_type = SourceType.FIDO_CDAWEB
+    source_type = SourceType.CDAWEB
 
     def __init__(self, cdas: CdasWs | None = None, variables_for: Callable[[str], Sequence[str] | None] | None = None) -> None:
         """Initializes the client.
@@ -108,7 +108,7 @@ class CdawebClient(DataClient[xr.Dataset]):
             return None
 
         return {
-            "type": SourceType.FIDO_CDAWEB,
+            "type": SourceType.CDAWEB,
             "dataset_id": dataset_id,
             "source_id": group_name,
             "time_range": {"start_time": str(start_date), "end_time": str(stop_date)},

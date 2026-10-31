@@ -13,7 +13,7 @@ from catalog_collector.worker_tasks.metadata_catalog import CdawebDatasetPlan, s
 from space_weather_analysis.catalog.models import MasterCatalogItem, TimeRangeDict
 from space_weather_analysis.catalog.repository import MongoCatalogRepository
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
-from space_weather_analysis.metadata.models import DatasetMetadata
+from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSourceKind
 from space_weather_analysis.metadata.overlays.layering import save_with_overlays
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
 
@@ -122,12 +122,12 @@ def _store(db: Database) -> None:
     items: list[MasterCatalogItem] = [
         {"dataset_id": f"{SPLIT_DATASET}@0", "sources": [{"type": "HAPI", "source_id": CDAWEB_HAPI_URL, "time_range": TIME_RANGE}]},
         {"dataset_id": f"{SPLIT_DATASET}@1", "sources": [{"type": "HAPI", "source_id": CDAWEB_HAPI_URL, "time_range": TIME_RANGE}]},
-        {"dataset_id": NO_SPASE_DATASET, "sources": [{"type": "FIDO_CDAWEB", "source_id": "SYNTH", "time_range": TIME_RANGE}]},
+        {"dataset_id": NO_SPASE_DATASET, "sources": [{"type": "CDAWEB", "source_id": "SYNTH", "time_range": TIME_RANGE}]},
     ]
     MongoCatalogRepository(db).save_many(items)
     repository = MongoMetadataRepository(db)
-    repository.save_raw(SPLIT_DATASET, "cdas", {"Id": SPLIT_DATASET, "SpaseResourceId": SPASE_ID}, CDAS_URL, STORED_AT)
-    repository.save_raw(NO_SPASE_DATASET, "cdas", {"Id": NO_SPASE_DATASET}, CDAS_URL, STORED_AT)
+    repository.save_raw(SPLIT_DATASET, MetadataSourceKind.CDAS, {"Id": SPLIT_DATASET, "SpaseResourceId": SPASE_ID}, CDAS_URL, STORED_AT)
+    repository.save_raw(NO_SPASE_DATASET, MetadataSourceKind.CDAS, {"Id": NO_SPASE_DATASET}, CDAS_URL, STORED_AT)
     save_with_overlays(repository, [build_hapi_metadata(f"{SPLIT_DATASET}@0", SPLIT_DATASET, HAPI_INFO, CDAWEB_HAPI_URL, STORED_AT)])
 
 
@@ -201,7 +201,9 @@ def test_spase_record_sets_coordinate_system_vector_components_and_cadence(
 def test_master_file_fields_rank_above_the_spase_record(db: Database, httpserver: HTTPServer, http_session: requests.Session) -> None:
     """With a stored master file, labels and valid ranges stay the ISTP ones, while SPASE adds the coordinate system."""
     _store(db)
-    MongoMetadataRepository(db).save_raw(SPLIT_DATASET, "istp", parse_master(MASTER), "https://cdaweb.example.org/master.json", STORED_AT)
+    MongoMetadataRepository(db).save_raw(
+        SPLIT_DATASET, MetadataSourceKind.ISTP, parse_master(MASTER), "https://cdaweb.example.org/master.json", STORED_AT
+    )
     httpserver.expect_request(SPASE_PATH).respond_with_json(SPASE_RECORD)
 
     _refresher(db, http_session).refresh(SPLIT_DATASET, httpserver.url_for(SPASE_PATH), SPLIT_DATASET_IDS)
@@ -222,7 +224,7 @@ def test_missing_spase_record_stores_nothing(db: Database, httpserver: HTTPServe
 
     changed = _refresher(db, http_session).refresh(SPLIT_DATASET, httpserver.url_for(SPASE_PATH), SPLIT_DATASET_IDS)
 
-    assert (changed, MongoMetadataRepository(db).get_raw(SPLIT_DATASET, "spase"), _record(db)) == (False, None, stored)
+    assert (changed, MongoMetadataRepository(db).get_raw(SPLIT_DATASET, MetadataSourceKind.SPASE), _record(db)) == (False, None, stored)
 
 
 @pytest.mark.integration
@@ -235,7 +237,7 @@ def test_unchanged_spase_record_is_not_written_again(db: Database, httpserver: H
 
     changed = _refresher(db, http_session, datetime(2026, 10, 8, tzinfo=UTC)).refresh(SPLIT_DATASET, url, SPLIT_DATASET_IDS)
 
-    raw_record = MongoMetadataRepository(db).get_raw(SPLIT_DATASET, "spase")
+    raw_record = MongoMetadataRepository(db).get_raw(SPLIT_DATASET, MetadataSourceKind.SPASE)
     assert (changed, raw_record is not None and raw_record.retrieved_at) == (False, STORED_AT)
 
 

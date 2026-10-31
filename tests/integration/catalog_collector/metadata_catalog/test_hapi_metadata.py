@@ -13,7 +13,7 @@ from catalog_collector.metadata_catalog.snapshot import MetadataSnapshotLoader
 from space_weather_analysis.catalog.models import CatalogEntryDict
 from space_weather_analysis.catalog.repository import MongoCatalogRepository
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
-from space_weather_analysis.metadata.models import DatasetMetadata, RawMetadataRecord, SourceInfo
+from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSourceKind, RawMetadataRecord, SourceInfo
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
 from space_weather_analysis.util.error_handling import DataRetrievalError
 
@@ -66,14 +66,14 @@ def _store(db: Database, record: DatasetMetadata | None = None) -> None:
     """Saves the catalog with one HAPI source, the raw info as the HAPI client recorded it, and its record or the given one."""
     MongoCatalogRepository(db).save({"dataset_id": DATASET_ID, "sources": [CATALOG_SOURCE]})
     repository = MongoMetadataRepository(db)
-    repository.save_raw(DATASET_ID, "hapi", {**STORED_INFO, "x_server_url": SERVER_URL}, SERVER_URL, STORED_AT)
+    repository.save_raw(DATASET_ID, MetadataSourceKind.HAPI, {**STORED_INFO, "x_server_url": SERVER_URL}, SERVER_URL, STORED_AT)
     repository.save(record or build_hapi_metadata(DATASET_ID, DATASET_ID, STORED_INFO, SERVER_URL, STORED_AT))
 
 
 def _stored_metadata(db: Database) -> tuple[DatasetMetadata | None, RawMetadataRecord | None]:
     """Reads the record and the raw HAPI metadata of the dataset."""
     repository = MongoMetadataRepository(db)
-    return repository.get(DATASET_ID), repository.get_raw(DATASET_ID, "hapi")
+    return repository.get(DATASET_ID), repository.get_raw(DATASET_ID, MetadataSourceKind.HAPI)
 
 
 def _refresh(db: Database, session: requests.Session, mirror_base_url: str, clock: Callable[[], datetime]) -> HapiMirrorMetadataSummary:
@@ -153,7 +153,7 @@ def test_record_of_another_source_kind_is_not_replaced(
     db: Database, httpserver: HTTPServer, http_session: requests.Session, clock: Callable[[], datetime]
 ) -> None:
     """A record built from another source kind ranks above HAPI metadata and stays in place."""
-    _store(db, record=DatasetMetadata(dataset_id=DATASET_ID, collection=DATASET_ID, source=SourceInfo(type="FIDO_CDAWEB")))
+    _store(db, record=DatasetMetadata(dataset_id=DATASET_ID, collection=DATASET_ID, source=SourceInfo(type="CDAWEB")))
     stored = _stored_metadata(db)
 
     summary = _refresh(db, http_session, _serve_mirror(httpserver, {DATASET_ID: CHANGED_INFO}), clock)
@@ -191,17 +191,17 @@ def test_coverage_follows_the_refreshed_time_range_of_the_record_server(db: Data
         "availability_checked_at": now,
     }
     MongoCatalogRepository(db).save_many(
-        [{"dataset_id": DATASET_ID, "sources": [refreshed_source]}, {"dataset_id": "synthetic_fido", "sources": [{**refreshed_source}]}]
+        [{"dataset_id": DATASET_ID, "sources": [refreshed_source]}, {"dataset_id": "synthetic_cdaweb", "sources": [{**refreshed_source}]}]
     )
     repository = MongoMetadataRepository(db)
     repository.save(build_hapi_metadata(DATASET_ID, DATASET_ID, STORED_INFO, SERVER_URL, STORED_AT))
-    repository.save(DatasetMetadata(dataset_id="synthetic_fido", collection="synthetic_fido", source=SourceInfo(type="FIDO_CDAWEB")))
-    other_record = repository.get("synthetic_fido")
+    repository.save(DatasetMetadata(dataset_id="synthetic_cdaweb", collection="synthetic_cdaweb", source=SourceInfo(type="CDAWEB")))
+    other_record = repository.get("synthetic_cdaweb")
 
     changed = sync_hapi_coverage(MongoCatalogRepository(db), repository)
 
     record = repository.get(DATASET_ID)
-    assert (changed, record is not None and record.time.coverage_stop, repository.get("synthetic_fido")) == (
+    assert (changed, record is not None and record.time.coverage_stop, repository.get("synthetic_cdaweb")) == (
         1,
         datetime(2026, 10, 28, tzinfo=UTC),
         other_record,

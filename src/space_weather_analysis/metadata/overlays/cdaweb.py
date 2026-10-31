@@ -32,9 +32,9 @@ def is_cdaweb_source(source_type: str | None, server_url: str | None) -> bool:
         server_url: The server base URL of a HAPI source; ignored for other source types.
 
     Returns:
-        True for sources ingested through SunPy Fido from CDAWeb or from the CDAWeb HAPI server.
+        True for sources ingested from CDAWeb through CDAS or from the CDAWeb HAPI server.
     """
-    if source_type == SourceType.FIDO_CDAWEB:
+    if source_type == SourceType.CDAWEB:
         return True
     server_host = urlsplit(server_url or "").hostname or ""
     return source_type == SourceType.HAPI and server_host.lower() == CDAWEB_HOST
@@ -47,6 +47,6 @@ def describes_cdaweb_dataset(record: DatasetMetadata) -> bool:
         record: The metadata record.
 
     Returns:
-        True for records ingested through SunPy Fido from CDAWeb or from the CDAWeb HAPI server.
+        True for records ingested from CDAWeb through CDAS or from the CDAWeb HAPI server.
     """
     return is_cdaweb_source(record.source.type, record.source.server_url)

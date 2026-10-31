@@ -1,36 +1,26 @@
 import logging
 import sys
 
+# Libraries whose informational output is reduced to warnings; SunPy downloads through parfive.
+QUIET_LIBRARY_LOGGERS = ("urllib3", "pymongo", "hapiclient", "sunpy", "parfive")
+
 
 def setup_logging(service_name: str, level: int = logging.INFO) -> None:
-    """Configures the root logger with a standardized format for all services.
-
-    This setup ensures that logs from different microservices (Catalog, Pipeline,
-    Frontend) share a consistent structure, making debugging and log aggregation
-    easier. It directs all logs to the standard output (stdout).
+    """Configures the root logger with one format for all services, writing to standard output.
 
     Args:
-        service_name (str): The name of the service. This name will appear in every
-                            log message to identify the source.
-        level (int): The logging threshold level as a numeric level of the `logging` module.
-                     Defaults to logging.INFO.
+        service_name: The name of the service, shown in every log line.
+        level: The logging threshold as a numeric level of the `logging` module.
     """
-    # Define the format string to include time, level, service name, and message.
-    log_format = f"%(asctime)s [%(levelname)s] [{service_name}] [%(name)s] %(message)s"
-
-    # Configure the root logger.
     logging.basicConfig(
         level=level,
-        format=log_format,
+        format=f"%(asctime)s [%(levelname)s] [{service_name}] [%(name)s] %(message)s",
         handlers=[logging.StreamHandler(sys.stdout)],
-        force=True,  # Ensures that any existing configuration is overwritten.
+        # A previous configuration, such as one made by an imported library, is replaced
+        force=True,
     )
 
-    # Set the log level for external libraries to WARNING to reduce noise.
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
-    logging.getLogger("pymongo").setLevel(logging.WARNING)
-    logging.getLogger("fido").setLevel(logging.WARNING)
-    logging.getLogger("hapiclient").setLevel(logging.WARNING)
+    for logger_name in QUIET_LIBRARY_LOGGERS:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
 
-    root_logger = logging.getLogger()
-    root_logger.info(f"Logging initialized for service: {service_name}")
+    logging.getLogger().info("Logging initialized for service: %s", service_name)

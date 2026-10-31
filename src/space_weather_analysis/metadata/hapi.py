@@ -12,6 +12,7 @@ from space_weather_analysis.metadata.models import (
     DataType,
     LinkInfo,
     MetadataSource,
+    MetadataSourceKind,
     SkippedParameter,
     SourceInfo,
     TimeInfo,
@@ -104,7 +105,9 @@ def build_hapi_metadata(dataset_id: str, collection: str, info: dict[str, Any], 
         variables=variables,
         not_stored=not_stored,
         provenance=[
-            MetadataSource(kind="hapi", url=server_url, retrieved_at=retrieved_at, last_modified=optional_text(info.get("modificationDate")))
+            MetadataSource(
+                kind=MetadataSourceKind.HAPI, url=server_url, retrieved_at=retrieved_at, last_modified=optional_text(info.get("modificationDate"))
+            )
         ],
         updated_at=retrieved_at,
     )
@@ -140,7 +143,7 @@ def _column_variable(parameter: dict[str, Any], column: ParameterColumn, element
         The variable, with every set field attributed to the source kind "hapi".
     """
     return VariableMetadata.from_single_source(
-        "hapi",
+        MetadataSourceKind.HAPI,
         name=column.name,
         source_name=str(parameter["name"]),
         component=_component(column, element_shape),

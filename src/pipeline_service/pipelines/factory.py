@@ -35,7 +35,7 @@ class PipelineFactory:
         match source_type:
             case SourceType.HAPI:
                 return HapiPipeline(self.db)
-            case SourceType.FIDO_CDAWEB:
+            case SourceType.CDAWEB:
                 return CdawebPipeline(self.db)
             case SourceType.GFZ_POTSDAM:
                 return GfzPipeline(self.db)

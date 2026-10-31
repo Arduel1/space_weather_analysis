@@ -13,14 +13,14 @@ from catalog_collector.worker_tasks.metadata_catalog import CdawebDatasetPlan
 from space_weather_analysis.catalog.models import MasterCatalogItem, TimeRangeDict
 from space_weather_analysis.catalog.repository import MongoCatalogRepository
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
-from space_weather_analysis.metadata.models import DatasetMetadata, SourceInfo, VariableMetadata
+from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSourceKind, SourceInfo, VariableMetadata
 from space_weather_analysis.metadata.overlays.layering import save_with_overlays
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
 from space_weather_analysis.util.error_handling import DataRetrievalError
 
 CDAWEB_HAPI_URL = "https://cdaweb.gsfc.nasa.gov/hapi"
 CDAS_URL = "https://cdaweb.gsfc.nasa.gov/WS/cdasr/1/dataviews/sp_phys/datasets"
-FIDO_DATASET = "SYNTH_K0_FIDO"
+CDAWEB_DATASET = "SYNTH_K0_CDAWEB"
 SPLIT_DATASET = "SYNTH_H0_MAG"
 UNLINKED_DATASET = "SYNTH_K1_NOLINK"
 TIME_RANGE: TimeRangeDict = {"start_time": "2020-01-01T00:00:00Z", "end_time": "2020-02-01T00:00:00Z"}
@@ -71,8 +71,8 @@ SPLIT_MASTER: dict[str, Any] = {
         ],
     }
 }
-FIDO_MASTER: dict[str, Any] = {
-    "synth_k0_fido_00000000_v01.cdf": {
+CDAWEB_MASTER_FILE: dict[str, Any] = {
+    "synth_k0_cdaweb_00000000_v01.cdf": {
         "CDFglobalAttributes": [],
         "CDFVariables": [
             {
@@ -98,24 +98,26 @@ def _cdas_entry(dataset_id: str, master_url: str | None) -> dict[str, Any]:
 
 
 def _store(db: Database, httpserver: HTTPServer) -> None:
-    """Saves the catalog, the CDAS entries and the records of the FIDO dataset and the first HAPI split."""
+    """Saves the catalog, the CDAS entries and the records of the CDAWeb dataset and the first HAPI split."""
     items: list[MasterCatalogItem] = [
-        {"dataset_id": FIDO_DATASET, "sources": [{"type": "FIDO_CDAWEB", "source_id": "SYNTH", "time_range": TIME_RANGE}]},
+        {"dataset_id": CDAWEB_DATASET, "sources": [{"type": "CDAWEB", "source_id": "SYNTH", "time_range": TIME_RANGE}]},
         {"dataset_id": f"{SPLIT_DATASET}@0", "sources": [{"type": "HAPI", "source_id": CDAWEB_HAPI_URL, "time_range": TIME_RANGE}]},
         {"dataset_id": f"{SPLIT_DATASET}@1", "sources": [{"type": "HAPI", "source_id": CDAWEB_HAPI_URL, "time_range": TIME_RANGE}]},
-        {"dataset_id": UNLINKED_DATASET, "sources": [{"type": "FIDO_CDAWEB", "source_id": "SYNTH", "time_range": TIME_RANGE}]},
+        {"dataset_id": UNLINKED_DATASET, "sources": [{"type": "CDAWEB", "source_id": "SYNTH", "time_range": TIME_RANGE}]},
     ]
     MongoCatalogRepository(db).save_many(items)
 
     repository = MongoMetadataRepository(db)
-    for dataset_id in (FIDO_DATASET, SPLIT_DATASET):
-        repository.save_raw(dataset_id, "cdas", _cdas_entry(dataset_id, httpserver.url_for(_master_path(dataset_id))), CDAS_URL, STORED_AT)
-    repository.save_raw(UNLINKED_DATASET, "cdas", _cdas_entry(UNLINKED_DATASET, None), CDAS_URL, STORED_AT)
+    for dataset_id in (CDAWEB_DATASET, SPLIT_DATASET):
+        repository.save_raw(
+            dataset_id, MetadataSourceKind.CDAS, _cdas_entry(dataset_id, httpserver.url_for(_master_path(dataset_id))), CDAS_URL, STORED_AT
+        )
+    repository.save_raw(UNLINKED_DATASET, MetadataSourceKind.CDAS, _cdas_entry(UNLINKED_DATASET, None), CDAS_URL, STORED_AT)
 
-    flux = VariableMetadata.from_single_source("file", name="flux", source_name="flux", description="File flux", units="cm^-3")
-    fido_record = DatasetMetadata(dataset_id=FIDO_DATASET, collection=FIDO_DATASET, source=SourceInfo(type="FIDO_CDAWEB"), variables=[flux])
+    flux = VariableMetadata.from_single_source(MetadataSourceKind.FILE, name="flux", source_name="flux", description="File flux", units="cm^-3")
+    cdaweb_record = DatasetMetadata(dataset_id=CDAWEB_DATASET, collection=CDAWEB_DATASET, source=SourceInfo(type="CDAWEB"), variables=[flux])
     split_record = build_hapi_metadata(f"{SPLIT_DATASET}@0", SPLIT_DATASET, HAPI_INFO, CDAWEB_HAPI_URL, STORED_AT)
-    save_with_overlays(repository, [fido_record, split_record])
+    save_with_overlays(repository, [cdaweb_record, split_record])
 
 
 SPLIT_DATASET_IDS = [f"{SPLIT_DATASET}@0", f"{SPLIT_DATASET}@1"]
@@ -159,7 +161,7 @@ def test_plan_lists_one_master_file_per_cdas_dataset_with_a_link(db: Database, h
 
     assert planned_requests == [
         PlannedRequest(SPLIT_DATASET, httpserver.url_for(_master_path(SPLIT_DATASET))),
-        PlannedRequest(FIDO_DATASET, httpserver.url_for(_master_path(FIDO_DATASET))),
+        PlannedRequest(CDAWEB_DATASET, httpserver.url_for(_master_path(CDAWEB_DATASET))),
     ]
     assert plan.dataset_ids(SPLIT_DATASET) == SPLIT_DATASET_IDS
 
@@ -186,16 +188,16 @@ def test_master_file_sets_istp_fields_per_vector_element_while_cdas_keeps_its_fi
 
 
 @pytest.mark.integration
-def test_fido_record_takes_master_attributes_only_where_the_master_sets_them(
+def test_cdaweb_record_takes_master_attributes_only_where_the_master_sets_them(
     db: Database, httpserver: HTTPServer, http_session: requests.Session
 ) -> None:
     """A blank master unit keeps the unit of the data file, while description and valid range come from the master file."""
     _store(db, httpserver)
-    httpserver.expect_request(_master_path(FIDO_DATASET)).respond_with_json(FIDO_MASTER)
+    httpserver.expect_request(_master_path(CDAWEB_DATASET)).respond_with_json(CDAWEB_MASTER_FILE)
 
-    _refresher(db, http_session).refresh(FIDO_DATASET, httpserver.url_for(_master_path(FIDO_DATASET)), [FIDO_DATASET])
+    _refresher(db, http_session).refresh(CDAWEB_DATASET, httpserver.url_for(_master_path(CDAWEB_DATASET)), [CDAWEB_DATASET])
 
-    flux = _record(db, FIDO_DATASET).variables[0]
+    flux = _record(db, CDAWEB_DATASET).variables[0]
     assert (flux.description, flux.units, flux.valid_min, flux.valid_max) == ("Master flux", "cm^-3", 0.0, 100.0)
     assert flux.field_sources == {
         "name": "file",
@@ -230,7 +232,7 @@ def test_unchanged_master_file_is_not_written_again(db: Database, httpserver: HT
 
     changed = _refresher(db, http_session, datetime(2026, 10, 8, tzinfo=UTC)).refresh(SPLIT_DATASET, url, SPLIT_DATASET_IDS)
 
-    raw_master = MongoMetadataRepository(db).get_raw(SPLIT_DATASET, "istp")
+    raw_master = MongoMetadataRepository(db).get_raw(SPLIT_DATASET, MetadataSourceKind.ISTP)
     assert (changed, raw_master is not None and raw_master.retrieved_at) == (False, STORED_AT)
 
 
@@ -246,5 +248,5 @@ def test_overloaded_master_server_leaves_metadata_unchanged_and_names_its_wait(
     with pytest.raises(DataRetrievalError) as raised:
         _refresher(db, http_session).refresh(SPLIT_DATASET, httpserver.url_for(_master_path(SPLIT_DATASET)), SPLIT_DATASET_IDS)
 
-    assert (raised.value.retry_after_seconds, MongoMetadataRepository(db).get_raw(SPLIT_DATASET, "istp")) == (60.0, None)
+    assert (raised.value.retry_after_seconds, MongoMetadataRepository(db).get_raw(SPLIT_DATASET, MetadataSourceKind.ISTP)) == (60.0, None)
     assert _record(db, f"{SPLIT_DATASET}@0") == stored

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 import pytest
@@ -8,6 +8,7 @@ from space_weather_analysis.metadata.models import (
     CitationInfo,
     DatasetMetadata,
     MetadataSource,
+    MetadataSourceKind,
     RawMetadataRecord,
     SkippedParameter,
     SourceInfo,
@@ -16,7 +17,7 @@ from space_weather_analysis.metadata.models import (
 )
 from space_weather_analysis.metadata.repository import MongoMetadataRepository, sanitize_for_bson
 
-RETRIEVED_AT = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
+RETRIEVED_AT = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
 
 def _record(dataset_id: str, collection: str) -> DatasetMetadata:
@@ -26,14 +27,18 @@ def _record(dataset_id: str, collection: str) -> DatasetMetadata:
         collection=collection,
         source=SourceInfo(type="HAPI", server_url="https://hapi.example.org/hapi"),
         description="Synthetic dataset",
-        time=TimeInfo(coverage_start=datetime(2024, 1, 1, tzinfo=timezone.utc), cadence="PT1M", timestamp_location="begin"),
+        time=TimeInfo(coverage_start=datetime(2024, 1, 1, tzinfo=UTC), cadence="PT1M", timestamp_location="begin"),
         citation=CitationInfo(doi="10.5880/Synthetic.1", license="CC BY 4.0"),
         variables=[
-            VariableMetadata.from_single_source("hapi", name="B_x", source_name="B", component="x", units="nT", fill="-1e31", vector_component="x"),
-            VariableMetadata.from_single_source("curated", name="status", source_name="status", dtype="string", flag_meanings={"def": "definitive"}),
+            VariableMetadata.from_single_source(
+                MetadataSourceKind.HAPI, name="B_x", source_name="B", component="x", units="nT", fill="-1e31", vector_component="x"
+            ),
+            VariableMetadata.from_single_source(
+                MetadataSourceKind.CURATED, name="status", source_name="status", dtype="string", flag_meanings={"def": "definitive"}
+            ),
         ],
         not_stored=[SkippedParameter(name="spectrum", reason="array with more than 10 elements")],
-        provenance=[MetadataSource(kind="hapi", url="https://hapi.example.org/hapi", retrieved_at=RETRIEVED_AT)],
+        provenance=[MetadataSource(kind=MetadataSourceKind.HAPI, url="https://hapi.example.org/hapi", retrieved_at=RETRIEVED_AT)],
         updated_at=RETRIEVED_AT,
     )
 
@@ -80,16 +85,20 @@ def test_saving_a_record_again_replaces_it(db: Database) -> None:
 def test_raw_metadata_round_trip_and_overwrite_per_dataset_and_kind(db: Database) -> None:
     """Raw metadata is stored once per dataset and kind, a second save replaces it, and other kinds stay separate."""
     repository = MongoMetadataRepository(db)
-    repository.save_raw("synthetic/one", "hapi", {"version": 1}, "https://hapi.example.org/hapi", RETRIEVED_AT)
-    repository.save_raw("synthetic/one", "istp", {"FILLVAL": -1}, None, RETRIEVED_AT)
+    repository.save_raw("synthetic/one", MetadataSourceKind.HAPI, {"version": 1}, "https://hapi.example.org/hapi", RETRIEVED_AT)
+    repository.save_raw("synthetic/one", MetadataSourceKind.ISTP, {"FILLVAL": -1}, None, RETRIEVED_AT)
 
-    repository.save_raw("synthetic/one", "hapi", {"version": 2}, "https://hapi.example.org/hapi", RETRIEVED_AT)
+    repository.save_raw("synthetic/one", MetadataSourceKind.HAPI, {"version": 2}, "https://hapi.example.org/hapi", RETRIEVED_AT)
 
     assert db["dataset_metadata_raw"].count_documents({}) == 2
-    assert repository.get_raw("synthetic/one", "hapi") == RawMetadataRecord(
-        dataset_id="synthetic/one", kind="hapi", payload={"version": 2}, url="https://hapi.example.org/hapi", retrieved_at=RETRIEVED_AT
+    assert repository.get_raw("synthetic/one", MetadataSourceKind.HAPI) == RawMetadataRecord(
+        dataset_id="synthetic/one",
+        kind=MetadataSourceKind.HAPI,
+        payload={"version": 2},
+        url="https://hapi.example.org/hapi",
+        retrieved_at=RETRIEVED_AT,
     )
-    assert repository.get_raw("synthetic/one", "spase") is None
+    assert repository.get_raw("synthetic/one", MetadataSourceKind.SPASE) is None
 
 
 @pytest.mark.integration
@@ -100,12 +109,12 @@ def test_raw_metadata_too_large_for_one_document_is_skipped_and_the_batch_saved(
 
     repository.save_raw_many(
         [
-            RawMetadataRecord(dataset_id="synthetic/huge", kind="hapi", payload=oversized_payload, retrieved_at=RETRIEVED_AT),
-            RawMetadataRecord(dataset_id="synthetic/one", kind="hapi", payload={"version": 1}, retrieved_at=RETRIEVED_AT),
+            RawMetadataRecord(dataset_id="synthetic/huge", kind=MetadataSourceKind.HAPI, payload=oversized_payload, retrieved_at=RETRIEVED_AT),
+            RawMetadataRecord(dataset_id="synthetic/one", kind=MetadataSourceKind.HAPI, payload={"version": 1}, retrieved_at=RETRIEVED_AT),
         ]
     )
 
-    assert (repository.get_raw("synthetic/huge", "hapi"), db["dataset_metadata_raw"].count_documents({})) == (None, 1)
+    assert (repository.get_raw("synthetic/huge", MetadataSourceKind.HAPI), db["dataset_metadata_raw"].count_documents({})) == (None, 1)
 
 
 @pytest.mark.integration
@@ -113,12 +122,12 @@ def test_delete_removes_record_and_raw_metadata(db: Database) -> None:
     """Deleting a dataset removes the record and every raw entry of the dataset, and leaves other datasets untouched."""
     repository = MongoMetadataRepository(db)
     repository.save_many([_record("synthetic/one", "synthetic_one"), _record("synthetic/two", "synthetic_two")])
-    repository.save_raw("synthetic/one", "hapi", {}, None, RETRIEVED_AT)
+    repository.save_raw("synthetic/one", MetadataSourceKind.HAPI, {}, None, RETRIEVED_AT)
 
     repository.delete("synthetic/one")
 
     assert repository.get("synthetic/one") is None
-    assert repository.get_raw("synthetic/one", "hapi") is None
+    assert repository.get_raw("synthetic/one", MetadataSourceKind.HAPI) is None
     assert repository.get("synthetic/two") is not None
 
 

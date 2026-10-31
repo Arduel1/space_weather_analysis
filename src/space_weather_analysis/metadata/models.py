@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -6,16 +7,26 @@ from pydantic import BaseModel, Field
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.util.time_utils import UtcDatetime
 
-# Where a metadata value comes from:
-# hapi: the /info response of a HAPI server (Heliophysics Application Programmer's Interface, https://hapi-server.org/).
-# istp: the CDAWeb master file of a dataset, its authoritative attributes following the ISTP Metadata Guidelines
-#   (International Solar-Terrestrial Physics, https://istp-metadata.readthedocs.io/).
-# spase: a SPASE record (Space Physics Archive Search and Extract, https://spase-group.org/).
-# curated: a value written in the code of this project.
-# file: the attributes of a downloaded data file, which a master file of the dataset overrides.
-# api: the response of a provider API other than HAPI.
-# cdas: the dataset list of CDAS, the CDAWeb Coordinated Data Analysis System web services (https://cdaweb.gsfc.nasa.gov/WebServices/REST/).
-MetadataSourceKind = Literal["hapi", "istp", "spase", "curated", "file", "api", "cdas"]
+
+class MetadataSourceKind(StrEnum):
+    """Where a metadata value comes from; the members are stored as their lower-case values."""
+
+    # The /info response of a HAPI server (Heliophysics Application Programmer's Interface, https://hapi-server.org/).
+    HAPI = "hapi"
+    # The CDAWeb master file of a dataset, its authoritative attributes following the ISTP Metadata Guidelines
+    # (International Solar-Terrestrial Physics, https://istp-metadata.readthedocs.io/).
+    ISTP = "istp"
+    # A SPASE record (Space Physics Archive Search and Extract, https://spase-group.org/).
+    SPASE = "spase"
+    # A value written in the code of this project.
+    CURATED = "curated"
+    # The attributes delivered with the data, which the master file of the dataset overrides.
+    FILE = "file"
+    # The response of a provider API other than HAPI.
+    API = "api"
+    # The dataset list of CDAS, the CDAWeb Coordinated Data Analysis System web services (https://cdaweb.gsfc.nasa.gov/WebServices/REST/).
+    CDAS = "cdas"
+
 
 # Value types of the stored fields, named like the HAPI parameter types.
 DataType = Literal["double", "integer", "string", "isotime", "boolean"]

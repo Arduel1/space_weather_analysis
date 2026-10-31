@@ -3,7 +3,7 @@ from typing import Any, NamedTuple
 
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.metadata.hapi import doi_from_text, parse_hapi_time
-from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSource
+from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSource, MetadataSourceKind
 from space_weather_analysis.metadata.normalize import optional_text
 
 
@@ -48,7 +48,7 @@ def apply_cdas_overlay(record: DatasetMetadata, payload: dict[str, Any], retriev
     """Sets the dataset fields for which CDAS is the authoritative source.
 
     DOI, SPASE resource ID and the CDAWeb notes page replace the values of other sources when CDAS
-    gives them. The coverage is set only for records ingested through SunPy Fido, as HAPI records
+    gives them. The coverage is set only for records ingested through CDAS, as HAPI records
     take it from the HAPI server.
 
     Args:
@@ -68,7 +68,7 @@ def apply_cdas_overlay(record: DatasetMetadata, payload: dict[str, Any], retriev
         record.links.resource_url = notes_url
 
     time_interval = cdas_time_interval(payload)
-    if record.source.type == SourceType.FIDO_CDAWEB and time_interval is not None:
+    if record.source.type == SourceType.CDAWEB and time_interval is not None:
         record.time.coverage_start, record.time.coverage_stop = time_interval.start_time, time_interval.stop_time
 
-    record.replace_provenance(MetadataSource(kind="cdas", url=url, retrieved_at=retrieved_at))
+    record.replace_provenance(MetadataSource(kind=MetadataSourceKind.CDAS, url=url, retrieved_at=retrieved_at))

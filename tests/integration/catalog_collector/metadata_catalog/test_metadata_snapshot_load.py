@@ -10,7 +10,7 @@ from pymongo.database import Database
 from catalog_collector.data_catalog.snapshot import CatalogSnapshotLoader
 from catalog_collector.metadata_catalog.snapshot import MetadataSnapshotLoader
 from space_weather_analysis.catalog.repository import MongoCatalogRepository
-from space_weather_analysis.metadata.models import DatasetMetadata, SourceInfo
+from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSourceKind, SourceInfo
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
 from space_weather_analysis.util.error_handling import CatalogError
 
@@ -22,7 +22,7 @@ TIME_RANGE = {"start_time": "2024-01-01T00:00Z", "end_time": "2024-02-01T00:00Z"
 
 CATALOG: dict[str, list[dict[str, Any]]] = {
     HAPI_DATASET: [{"type": "HAPI", "source_id": HAPI_SERVER, "time_range": TIME_RANGE}],
-    CDAWEB_DATASET: [{"type": "FIDO_CDAWEB", "source_id": "SYNTH", "time_range": TIME_RANGE}],
+    CDAWEB_DATASET: [{"type": "CDAWEB", "source_id": "SYNTH", "time_range": TIME_RANGE}],
 }
 
 type SnapshotFiles = Callable[[dict[str, Any], Any], tuple[pathlib.Path, pathlib.Path]]
@@ -63,7 +63,7 @@ def test_record_describes_the_first_catalog_server_and_raw_info_keeps_the_respon
     _load(db, snapshot_files, [{"dataset_id": HAPI_DATASET, "metadata": info}], clock)
     repository = MongoMetadataRepository(db)
 
-    record, raw = repository.get(HAPI_DATASET), repository.get_raw(HAPI_DATASET, "hapi")
+    record, raw = repository.get(HAPI_DATASET), repository.get_raw(HAPI_DATASET, MetadataSourceKind.HAPI)
     assert record is not None and raw is not None
     assert (record.collection, record.source.server_url, [variable.name for variable in record.variables]) == (
         "synthetic_mag_1",
@@ -79,7 +79,7 @@ def test_dataset_without_hapi_source_gets_only_raw_info(db: Database, snapshot_f
     _load(db, snapshot_files, {CDAWEB_DATASET: _hapi_info()}, clock)
     repository = MongoMetadataRepository(db)
 
-    assert (repository.get(CDAWEB_DATASET), repository.get_raw(CDAWEB_DATASET, "hapi") is not None) == (None, True)
+    assert (repository.get(CDAWEB_DATASET), repository.get_raw(CDAWEB_DATASET, MetadataSourceKind.HAPI) is not None) == (None, True)
 
 
 @pytest.mark.integration
@@ -93,7 +93,11 @@ def test_malformed_entries_are_skipped_and_the_rest_loads(db: Database, snapshot
     _load(db, snapshot_files, snapshot, clock)
     repository = MongoMetadataRepository(db)
 
-    assert (repository.get(HAPI_DATASET), repository.get_raw(HAPI_DATASET, "hapi") is not None, db["dataset_metadata_raw"].count_documents({})) == (
+    assert (
+        repository.get(HAPI_DATASET),
+        repository.get_raw(HAPI_DATASET, MetadataSourceKind.HAPI) is not None,
+        db["dataset_metadata_raw"].count_documents({}),
+    ) == (
         None,
         True,
         1,
@@ -105,13 +109,13 @@ def test_snapshot_never_replaces_a_record_of_a_higher_ranked_source(
     db: Database, snapshot_files: SnapshotFiles, clock: Callable[[], datetime]
 ) -> None:
     """A stored record of another source kind stays in place, while the snapshot still adds the raw info."""
-    MongoMetadataRepository(db).save(DatasetMetadata(dataset_id=HAPI_DATASET, collection="synthetic_mag_1", source=SourceInfo(type="FIDO_CDAWEB")))
-    fido_record = MongoMetadataRepository(db).get(HAPI_DATASET)
+    MongoMetadataRepository(db).save(DatasetMetadata(dataset_id=HAPI_DATASET, collection="synthetic_mag_1", source=SourceInfo(type="CDAWEB")))
+    cdaweb_record = MongoMetadataRepository(db).get(HAPI_DATASET)
 
     _load(db, snapshot_files, [{"dataset_id": HAPI_DATASET, "metadata": _hapi_info()}], clock)
 
     repository = MongoMetadataRepository(db)
-    assert (repository.get(HAPI_DATASET), repository.get_raw(HAPI_DATASET, "hapi") is not None) == (fido_record, True)
+    assert (repository.get(HAPI_DATASET), repository.get_raw(HAPI_DATASET, MetadataSourceKind.HAPI) is not None) == (cdaweb_record, True)
 
 
 @pytest.mark.integration
@@ -122,14 +126,14 @@ def test_snapshot_with_a_newer_file_time_keeps_stored_hapi_metadata(
     catalog_file, metadata_file = snapshot_files(CATALOG, [{"dataset_id": HAPI_DATASET, "metadata": _hapi_info(description="first")}])
     CatalogSnapshotLoader(MongoCatalogRepository(db), catalog_file).load_to_db()
     _loader(db, metadata_file, clock).load_metadata_to_db()
-    stored = MongoMetadataRepository(db).get_raw(HAPI_DATASET, "hapi")
+    stored = MongoMetadataRepository(db).get_raw(HAPI_DATASET, MetadataSourceKind.HAPI)
     _, newer_file = snapshot_files(CATALOG, [{"dataset_id": HAPI_DATASET, "metadata": _hapi_info(description="stale")}])
     later = newer_file.stat().st_mtime + 86400
     os.utime(newer_file, (later, later))
 
     _loader(db, newer_file, clock).load_metadata_to_db()
 
-    assert MongoMetadataRepository(db).get_raw(HAPI_DATASET, "hapi") == stored
+    assert MongoMetadataRepository(db).get_raw(HAPI_DATASET, MetadataSourceKind.HAPI) == stored
 
 
 @pytest.mark.integration

@@ -13,19 +13,19 @@ from catalog_collector.metadata_catalog.cdas_metadata import CdasMetadataRefresh
 from catalog_collector.metadata_catalog.snapshot import MetadataSnapshotLoader
 from space_weather_analysis.catalog.repository import MongoCatalogRepository
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
-from space_weather_analysis.metadata.models import DatasetMetadata, SourceInfo
+from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSourceKind, SourceInfo
 from space_weather_analysis.metadata.overlays.layering import save_with_overlays
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
 
 CDAWEB_HAPI_URL = "https://cdaweb.gsfc.nasa.gov/hapi"
 OTHER_HAPI_URL = "https://hapi.example.org/hapi"
-FIDO_DATASET = "SYNTH_K0_FIDO"
+CDAWEB_DATASET = "SYNTH_K0_CDAWEB"
 SPLIT_DATASET = "SYNTH_H0_MAG"
 OTHER_DATASET = "synthetic_other_P1M"
 TIME_RANGE = {"start_time": "2020-01-01T00:00:00Z", "end_time": "2020-02-01T00:00:00Z"}
 
 CATALOG: dict[str, list[dict[str, Any]]] = {
-    FIDO_DATASET: [{"type": "FIDO_CDAWEB", "source_id": "SYNTH", "time_range": TIME_RANGE}],
+    CDAWEB_DATASET: [{"type": "CDAWEB", "source_id": "SYNTH", "time_range": TIME_RANGE}],
     f"{SPLIT_DATASET}@0": [{"type": "HAPI", "source_id": CDAWEB_HAPI_URL, "time_range": TIME_RANGE}],
     OTHER_DATASET: [{"type": "HAPI", "source_id": OTHER_HAPI_URL, "time_range": TIME_RANGE}],
 }
@@ -58,7 +58,7 @@ def _cdas_entry(dataset_id: str) -> dict[str, Any]:
 
 
 def _load_snapshots(db: Database, snapshot_files: SnapshotFiles, clock: Callable[[], datetime]) -> None:
-    """Loads the catalog and the HAPI snapshot of both HAPI datasets and saves the record of the FIDO dataset."""
+    """Loads the catalog and the HAPI snapshot of both HAPI datasets and saves the record of the CDAWeb dataset."""
     snapshot = [
         {"dataset_id": f"{SPLIT_DATASET}@0", "metadata": {**HAPI_INFO, "x_server_url": CDAWEB_HAPI_URL}},
         {"dataset_id": OTHER_DATASET, "metadata": {**HAPI_INFO, "x_server_url": OTHER_HAPI_URL}},
@@ -66,7 +66,7 @@ def _load_snapshots(db: Database, snapshot_files: SnapshotFiles, clock: Callable
     catalog_file, metadata_file = snapshot_files(CATALOG, snapshot)
     CatalogSnapshotLoader(MongoCatalogRepository(db), catalog_file).load_to_db()
     MetadataSnapshotLoader(MongoCatalogRepository(db), MongoMetadataRepository(db), metadata_file, clock).load_metadata_to_db()
-    MongoMetadataRepository(db).save(DatasetMetadata(dataset_id=FIDO_DATASET, collection=FIDO_DATASET, source=SourceInfo(type="FIDO_CDAWEB")))
+    MongoMetadataRepository(db).save(DatasetMetadata(dataset_id=CDAWEB_DATASET, collection=CDAWEB_DATASET, source=SourceInfo(type="CDAWEB")))
 
 
 def _refresh(db: Database, session: requests.Session, cdas_url: str, clock: Callable[[], datetime]) -> CdasMetadataSummary:
@@ -92,17 +92,19 @@ def _cdas_fields(db: Database, dataset_id: str) -> dict[str, Any]:
 def test_overlay_lands_on_cdaweb_records_only(
     db: Database, http_session: requests.Session, serve_cdas: ServeCdas, snapshot_files: SnapshotFiles, clock: Callable[[], datetime]
 ) -> None:
-    """The CDAS fields reach the FIDO record with its coverage and the HAPI split record by its base ID, but no record of another server."""
+    """The CDAS fields reach the CDAWeb record with its coverage and the HAPI split record by its base ID, but no record of another server."""
     _load_snapshots(db, snapshot_files, clock)
 
-    summary = _refresh(db, http_session, serve_cdas([_cdas_entry(dataset_id) for dataset_id in (FIDO_DATASET, SPLIT_DATASET, OTHER_DATASET)]), clock)
+    summary = _refresh(
+        db, http_session, serve_cdas([_cdas_entry(dataset_id) for dataset_id in (CDAWEB_DATASET, SPLIT_DATASET, OTHER_DATASET)]), clock
+    )
 
     hapi_coverage = (datetime(2020, 1, 1, tzinfo=UTC), datetime(2020, 2, 1, tzinfo=UTC))
     assert (summary.saved, summary.records_overlaid, summary.missing) == (2, 2, 0)
-    assert _cdas_fields(db, FIDO_DATASET) == {
-        "doi": "10.48322/synth_k0_fido",
-        "spase_resource_id": f"spase://NASA/NumericalData/Synthetic/{FIDO_DATASET}",
-        "resource_url": f"https://cdaweb.gsfc.nasa.gov/misc/NotesS.html#{FIDO_DATASET}",
+    assert _cdas_fields(db, CDAWEB_DATASET) == {
+        "doi": "10.48322/synth_k0_cdaweb",
+        "spase_resource_id": f"spase://NASA/NumericalData/Synthetic/{CDAWEB_DATASET}",
+        "resource_url": f"https://cdaweb.gsfc.nasa.gov/misc/NotesS.html#{CDAWEB_DATASET}",
         "coverage": (datetime(2019, 12, 31, tzinfo=UTC), datetime(2026, 10, 1, tzinfo=UTC)),
         "provenance": ["cdas"],
     }
@@ -128,7 +130,7 @@ def test_record_rebuilt_from_its_own_source_keeps_the_cdas_fields(
 ) -> None:
     """A split record rebuilt from its /info response and saved by any writer gets the stored CDAS entry laid over it again."""
     _load_snapshots(db, snapshot_files, clock)
-    _refresh(db, http_session, serve_cdas([_cdas_entry(FIDO_DATASET), _cdas_entry(SPLIT_DATASET)]), clock)
+    _refresh(db, http_session, serve_cdas([_cdas_entry(CDAWEB_DATASET), _cdas_entry(SPLIT_DATASET)]), clock)
     overlaid = _cdas_fields(db, f"{SPLIT_DATASET}@0")
 
     rebuilt = build_hapi_metadata(f"{SPLIT_DATASET}@0", f"{SPLIT_DATASET}_0", HAPI_INFO, CDAWEB_HAPI_URL, now)
@@ -143,12 +145,12 @@ def test_unchanged_entries_are_not_rewritten_and_unlisted_ones_kept(
 ) -> None:
     """A second refresh with the same list stores nothing, and a dataset CDAS stops listing keeps its stored entry."""
     _load_snapshots(db, snapshot_files, clock)
-    cdas_url = serve_cdas([_cdas_entry(FIDO_DATASET), _cdas_entry(SPLIT_DATASET)])
+    cdas_url = serve_cdas([_cdas_entry(CDAWEB_DATASET), _cdas_entry(SPLIT_DATASET)])
     _refresh(db, http_session, cdas_url, clock)
-    stored_raw = MongoMetadataRepository(db).get_raw_many([FIDO_DATASET, SPLIT_DATASET], "cdas")
+    stored_raw = MongoMetadataRepository(db).get_raw_many([CDAWEB_DATASET, SPLIT_DATASET], MetadataSourceKind.CDAS)
 
     unchanged = _refresh(db, http_session, cdas_url, clock)
-    without_fido = _refresh(db, http_session, serve_cdas([_cdas_entry(SPLIT_DATASET)]), clock)
+    without_cdaweb = _refresh(db, http_session, serve_cdas([_cdas_entry(SPLIT_DATASET)]), clock)
 
-    assert (unchanged.saved, unchanged.unchanged, without_fido.missing) == (0, 2, 1)
-    assert MongoMetadataRepository(db).get_raw_many([FIDO_DATASET, SPLIT_DATASET], "cdas") == stored_raw
+    assert (unchanged.saved, unchanged.unchanged, without_cdaweb.missing) == (0, 2, 1)
+    assert MongoMetadataRepository(db).get_raw_many([CDAWEB_DATASET, SPLIT_DATASET], MetadataSourceKind.CDAS) == stored_raw

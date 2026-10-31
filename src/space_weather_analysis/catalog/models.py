@@ -25,7 +25,7 @@ class SourceType(StrEnum):
     """
 
     HAPI = "HAPI"
-    FIDO_CDAWEB = "FIDO_CDAWEB"
+    CDAWEB = "CDAWEB"
     GFZ_POTSDAM = "GFZ_POTSDAM"
     LOCAL = "LOCAL"
 
@@ -39,7 +39,7 @@ class CatalogEntryDict(TypedDict):
     Attributes:
         type: The source type, the value of a SourceType member; stored documents hold it as plain text.
         source_id: The identifier of the source within its type: the server URL for HAPI,
-            the group name for FIDO_CDAWEB and 'GFZ' for GFZ_POTSDAM.
+            the group name for CDAWEB and 'GFZ' for GFZ_POTSDAM.
         time_range: The temporal coverage of this dataset at this source.
         dataset_id: Optional dataset identifier, added by some discoverers.
         description: Optional human-readable description of the dataset.

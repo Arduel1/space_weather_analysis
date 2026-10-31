@@ -40,8 +40,8 @@ def main() -> None:
         ],
     }
 
-    # Configuration for FIDO/CDAWeb Data Ingestion
-    fido_manual_config: dict[str, Any] = {
+    # Configuration for CDAWeb data ingestion
+    cdaweb_manual_config: dict[str, Any] = {
         "start_time": datetime(2025, 10, 1, 0, 0, 0, tzinfo=UTC),
         "end_time": datetime(2025, 11, 26, 0, 0, 0, tzinfo=UTC),
         "datasets": [],  # Add dataset IDs here to enable the CDAWeb download
@@ -59,7 +59,7 @@ def main() -> None:
     # Aggregate configurations mapped to their source IDs
     manual_jobs: dict[SourceType, dict[str, Any]] = {
         SourceType.HAPI: hapi_manual_config,
-        SourceType.FIDO_CDAWEB: fido_manual_config,
+        SourceType.CDAWEB: cdaweb_manual_config,
         SourceType.GFZ_POTSDAM: gfz_manual_config,
         SourceType.LOCAL: local_manual_config,
     }

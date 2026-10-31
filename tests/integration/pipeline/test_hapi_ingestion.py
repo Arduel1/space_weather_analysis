@@ -14,7 +14,7 @@ from werkzeug import Request, Response
 
 from pipeline_service.pipelines.hapi import HapiPipeline
 from pipeline_service.pipelines.report import IngestionReport
-from space_weather_analysis.metadata.models import DatasetMetadata
+from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSourceKind
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
 
 StoredData = Callable[[str, datetime], dict[str, Any]]
@@ -359,7 +359,7 @@ def test_hapi_metadata_variables_match_stored_fields(db: Database, serve_dataset
         DATASET_ID,
         "begin",
     )
-    raw = MongoMetadataRepository(db).get_raw(DATASET_ID, "hapi")
+    raw = MongoMetadataRepository(db).get_raw(DATASET_ID, MetadataSourceKind.HAPI)
     assert raw is not None
     assert raw.payload["parameters"] == XRAY_PARAMETERS
     assert (raw.url, "x_server_url" in raw.payload, "x_dataFile" in raw.payload) == (server_url, False, False)

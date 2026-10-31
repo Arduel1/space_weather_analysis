@@ -17,7 +17,15 @@ from pipeline_service.util.time import generate_time_chunks
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.clients.gfz import GfzClient
 from space_weather_analysis.coverage.repository import CoverageRepository, MongoCoverageRepository
-from space_weather_analysis.metadata.models import CitationInfo, DatasetMetadata, MetadataSource, SourceInfo, TimeInfo, VariableMetadata
+from space_weather_analysis.metadata.models import (
+    CitationInfo,
+    DatasetMetadata,
+    MetadataSource,
+    MetadataSourceKind,
+    SourceInfo,
+    TimeInfo,
+    VariableMetadata,
+)
 from space_weather_analysis.metadata.overlays.layering import save_with_overlays
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
 from space_weather_analysis.util.naming import sanitize_collection_name
@@ -195,11 +203,15 @@ class GfzPipeline(MongoLoader, BasePipeline):
         description = self.INDEX_DESCRIPTIONS.get(dataset_id, f"GFZ geomagnetic index {dataset_id}")
         cadence = self.INDEX_CADENCES.get(dataset_id)
 
-        variables = [VariableMetadata.from_single_source("curated", name=dataset_id, source_name=dataset_id, description=description, dtype="double")]
+        variables = [
+            VariableMetadata.from_single_source(
+                MetadataSourceKind.CURATED, name=dataset_id, source_name=dataset_id, description=description, dtype="double"
+            )
+        ]
         if "status" in response.columns:
             variables.append(
                 VariableMetadata.from_single_source(
-                    "curated",
+                    MetadataSourceKind.CURATED,
                     name="status",
                     source_name="status",
                     description="Status of the index value",
@@ -217,8 +229,8 @@ class GfzPipeline(MongoLoader, BasePipeline):
             citation=CitationInfo(license=meta.get("license")),
             variables=variables,
             provenance=[
-                MetadataSource(kind="api", url=self.client.BASE_URL, retrieved_at=retrieved_at),
-                MetadataSource(kind="curated", retrieved_at=retrieved_at),
+                MetadataSource(kind=MetadataSourceKind.API, url=self.client.BASE_URL, retrieved_at=retrieved_at),
+                MetadataSource(kind=MetadataSourceKind.CURATED, retrieved_at=retrieved_at),
             ],
             updated_at=retrieved_at,
         )
