@@ -1,4 +1,6 @@
+from collections.abc import Mapping
 from datetime import datetime
+from types import MappingProxyType
 from typing import Any
 
 from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSource, MetadataSourceKind, VariableMetadata, VectorComponent
@@ -12,7 +14,9 @@ REPLACEABLE_SOURCES: frozenset[MetadataSourceKind | None] = frozenset(
 
 # SPASE names the elements of a Cartesian vector by their axis; HAPI names them x, y and z.
 CARTESIAN_REPRESENTATION = "Cartesian"
-CARTESIAN_COMPONENTS: dict[str, VectorComponent] = {"Component.I": "x", "Component.J": "y", "Component.K": "z"}
+CARTESIAN_COMPONENTS: Mapping[str, VectorComponent] = MappingProxyType(
+    {"Component.I": VectorComponent.X, "Component.J": VectorComponent.Y, "Component.K": VectorComponent.Z}
+)
 
 
 def apply_spase_overlay(record: DatasetMetadata, payload: dict[str, Any], retrieved_at: datetime, url: str | None) -> None:

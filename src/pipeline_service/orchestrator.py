@@ -1,12 +1,14 @@
 import logging
 import pathlib
 import time
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
 from pymongo.database import Database
 from pymongo.errors import PyMongoError
 
+from pipeline_service.pipelines.base import BasePipeline
 from pipeline_service.pipelines.factory import PipelineFactory
 from pipeline_service.pipelines.report import IngestionReport
 from space_weather_analysis.catalog.models import SourceType
@@ -32,17 +34,20 @@ class PipelineOrchestrator:
     # The data directory of the project, holding the local dataset files
     DATA_BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent / "data"
 
-    def __init__(self, db: Database, data_dir: pathlib.Path = DATA_BASE_DIR) -> None:
+    def __init__(
+        self, db: Database, data_dir: pathlib.Path = DATA_BASE_DIR, pipeline_for: Callable[[SourceType], BasePipeline] | None = None
+    ) -> None:
         """Initializes the orchestrator.
 
         Args:
             db: The MongoDB database instance holding jobs, catalog and data.
             data_dir: The directory holding the local dataset files.
+            pipeline_for: Builds the pipeline of a source type; the PipelineFactory with its defaults if None.
         """
         self.db = db
         self.job_repository: JobRepository = MongoJobRepository(db)
         self.catalog_repository: CatalogRepository = MongoCatalogRepository(db)
-        self.pipeline_factory = PipelineFactory(self.db, data_dir)
+        self.pipeline_for = pipeline_for if pipeline_for is not None else PipelineFactory(self.db, data_dir).get_pipeline
 
     def run_manual_jobs(self, manual_jobs: dict[SourceType, dict[str, Any]]) -> None:
         """Runs the pipelines of a manual configuration one after the other; a failing one does not stop the others.
@@ -94,24 +99,27 @@ class PipelineOrchestrator:
         self._process_job(job)
         return True
 
-    def _resolve_source_type(self, datasets: list[str]) -> SourceType:
-        """Reads the source type of the first dataset from the master catalog.
+    def _group_by_source_type(self, datasets: list[str]) -> dict[SourceType, list[str]]:
+        """Groups the datasets of a job by the source type of their first source in the master catalog.
 
         Args:
             datasets: The dataset IDs of the job.
 
         Returns:
-            The source type of the first source of the first dataset.
+            The dataset IDs per source type, in the order of the job.
 
         Raises:
-            ValueError: If the job has no dataset, the dataset has no source or its source type is unknown.
+            ValueError: If the job has no dataset, a dataset has no source or its source type is unknown.
         """
         if not datasets:
             raise ValueError("The job names no dataset.")
-        sources = self.catalog_repository.get_sources(datasets[0])
-        if not sources:
-            raise ValueError(f"Dataset {datasets[0]} has no source in the master catalog.")
-        return SourceType(sources[0]["type"])
+        groups: dict[SourceType, list[str]] = {}
+        for dataset_id in datasets:
+            sources = self.catalog_repository.get_sources(dataset_id)
+            if not sources:
+                raise ValueError(f"Dataset {dataset_id} has no source in the master catalog.")
+            groups.setdefault(SourceType(sources[0]["type"]), []).append(dataset_id)
+        return groups
 
     def _process_job(self, job: Job) -> None:
         """Runs one claimed job and stores how it ended.
@@ -120,9 +128,14 @@ class PipelineOrchestrator:
             job: The claimed job.
         """
         try:
-            source_type = job.source_type or self._resolve_source_type(job.parameters.datasets)
-            logger.info("Processing job %s for source type %s", job.id, source_type)
-            report = self._execute_pipeline(source_type, job.parameters.datasets, job.parameters.start_time, job.parameters.end_time, job_id=job.id)
+            if job.source_type is not None:
+                groups = {job.source_type: job.parameters.datasets}
+            else:
+                groups = self._group_by_source_type(job.parameters.datasets)
+            report = IngestionReport()
+            for source_type, datasets in groups.items():
+                logger.info("Processing job %s for source type %s: %s", job.id, source_type, datasets)
+                report.merge(self._execute_pipeline(source_type, datasets, job.parameters.start_time, job.parameters.end_time, job_id=job.id))
         except INVALID_REQUEST_ERRORS as error:
             logger.warning("Job %s rejected: %s", job.id, error)
             self.job_repository.finish(job.id, JobStatus.FAILED, str(error))
@@ -155,7 +168,7 @@ class PipelineOrchestrator:
         Returns:
             The report of the pipeline run.
         """
-        pipeline = self.pipeline_factory.get_pipeline(source_type)
+        pipeline = self.pipeline_for(source_type)
 
         def progress_callback(progress: float, message: str) -> None:
             """Stores the progress of a job or logs that of a manual run."""

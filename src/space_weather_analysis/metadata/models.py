@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -28,14 +28,53 @@ class MetadataSourceKind(StrEnum):
     CDAS = "cdas"
 
 
-# Value types of the stored fields, named like the HAPI parameter types.
-DataType = Literal["double", "integer", "string", "isotime", "boolean"]
+class DataType(StrEnum):
+    """The value type of a stored field, named like the HAPI parameter types."""
 
-# Position of the time stamp in the measurement interval, the vocabulary of the HAPI 'timeStampLocation'.
-TimestampLocation = Literal["begin", "center", "end", "other"]
+    DOUBLE = "double"
+    INTEGER = "integer"
+    STRING = "string"
+    ISOTIME = "isotime"
+    BOOLEAN = "boolean"
 
-# Meaning of a vector component, the vocabulary of the HAPI 3.1 'vectorComponents'.
-VectorComponent = Literal["x", "y", "z", "r", "rho", "latitude", "colatitude", "longitude", "longitude0", "altitude", "other"]
+
+class TimestampLocation(StrEnum):
+    """The position of a time stamp in its measurement interval, the vocabulary of the HAPI 'timeStampLocation'."""
+
+    BEGIN = "begin"
+    CENTER = "center"
+    END = "end"
+    OTHER = "other"
+
+
+class VectorComponent(StrEnum):
+    """The meaning of one element of a vector, the vocabulary of the HAPI 3.1 'vectorComponents'."""
+
+    X = "x"
+    Y = "y"
+    Z = "z"
+    R = "r"
+    RHO = "rho"
+    LATITUDE = "latitude"
+    COLATITUDE = "colatitude"
+    LONGITUDE = "longitude"
+    LONGITUDE0 = "longitude0"
+    ALTITUDE = "altitude"
+    OTHER = "other"
+
+
+# Arrays with more elements are maps, images or spectra rather than single values over time, so they are not stored as columns.
+MAX_ARRAY_COLUMNS = 10
+
+
+class NotStoredReason(StrEnum):
+    """Why a provider parameter is left out of the data documents."""
+
+    TOO_MANY_ELEMENTS = f"array with more than {MAX_ARRAY_COLUMNS} elements"
+    # The first dimension of the variable is no time coordinate, so its values cannot be placed in time-stamped documents.
+    TIME_AXIS_NOT_RESOLVABLE = "time axis not resolvable"
+    # The variable has no value per record; it is a constant of the dataset, not a series over time.
+    NOT_TIME_VARYING = "not time-varying"
 
 
 class SourceInfo(BaseModel):
@@ -109,7 +148,7 @@ class SkippedParameter(BaseModel):
     """
 
     name: str
-    reason: str
+    reason: NotStoredReason
 
 
 class MetadataSource(BaseModel):

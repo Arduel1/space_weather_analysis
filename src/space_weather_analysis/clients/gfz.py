@@ -1,5 +1,9 @@
 import logging
-from datetime import UTC, datetime
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from enum import StrEnum
+from types import MappingProxyType
 from typing import Any
 
 import pandas as pd
@@ -16,31 +20,66 @@ from space_weather_analysis.util.time_utils import ensure_aware
 logger = logging.getLogger(__name__)
 
 
+class GfzStatus(StrEnum):
+    """The status GFZ sends with the value of an index."""
+
+    DEFINITIVE = "def"
+    # A nowcast value, which GFZ later replaces by the definitive one
+    PRELIMINARY = "pre"
+
+
+# The meaning of each status, as stored in the dataset metadata.
+STATUS_MEANINGS: Mapping[GfzStatus, str] = MappingProxyType({GfzStatus.DEFINITIVE: "definitive", GfzStatus.PRELIMINARY: "preliminary"})
+
+
+@dataclass(frozen=True)
+class GfzIndex:
+    """One index of the GFZ web service.
+
+    Attributes:
+        description: What the index measures.
+        cadence: The time between two values, each time stamp marking the start of its interval.
+    """
+
+    description: str
+    cadence: timedelta
+
+
+# The indices this project fetches from GFZ. The web service offers more, but their licenses and value
+# formats are not verified for this project; the Kp index is published under CC BY 4.0.
+GFZ_INDICES: Mapping[str, GfzIndex] = MappingProxyType(
+    {
+        "Kp": GfzIndex("Planetary geomagnetic Kp index, 0 to 9 in steps of one third", timedelta(hours=3)),
+    }
+)
+
+
 class GfzClient(DataClient[pd.DataFrame]):
     """Fetches geomagnetic indices from the JSON web service of GFZ Potsdam (https://kp.gfz.de/)."""
 
     source_type = SourceType.GFZ_POTSDAM
 
-    BASE_URL = "https://kp.gfz.de/app/json/"
+    DEFAULT_BASE_URL = "https://kp.gfz.de/app/json/"
 
-    # Index names the GFZ web service accepts; any other name is answered with HTTP 500.
-    # Taken from getKpindex.py by I. Wehner, GFZ (CC BY 4.0): https://kp.gfz.de/app/webservice/python
-    ALLOWED_INDICES = frozenset({"Kp", "ap", "Ap", "Cp", "C9", "Hp30", "Hp60", "ap30", "ap60", "SN", "Fobs", "Fadj"})
+    ALLOWED_INDICES = frozenset(GFZ_INDICES)
 
     TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
     TIMEOUT_SECONDS = 10
-    RETRY_COUNT = 3
+    DEFAULT_RETRY_COUNT = 3
     # Statuses of an overloaded or failing server that a repeated request may not get
     RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 
-    def __init__(self, retry_backoff_factor: float = 1.0) -> None:
+    def __init__(self, base_url: str = DEFAULT_BASE_URL, retry_count: int = DEFAULT_RETRY_COUNT, retry_backoff_factor: float = 1.0) -> None:
         """Initializes the client with a session that repeats requests failing with a server error.
 
         Args:
+            base_url: The URL of the JSON web service.
+            retry_count: The number of repetitions of a request failing with a server error.
             retry_backoff_factor: The wait before the first repetition in seconds, doubled for every further one.
         """
+        self.base_url = base_url
         self.session = requests.Session()
-        retries = Retry(total=self.RETRY_COUNT, backoff_factor=retry_backoff_factor, status_forcelist=sorted(self.RETRY_STATUSES))
+        retries = Retry(total=retry_count, backoff_factor=retry_backoff_factor, status_forcelist=sorted(self.RETRY_STATUSES))
         adapter = HTTPAdapter(max_retries=retries)
         self.session.mount("https://", adapter)
         self.session.mount("http://", adapter)
@@ -108,7 +147,7 @@ class GfzClient(DataClient[pd.DataFrame]):
         logger.info("Fetching %s from GFZ: %s to %s", dataset_id, params["start"], params["end"])
 
         try:
-            response = self.session.get(self.BASE_URL, params=params, timeout=self.TIMEOUT_SECONDS)
+            response = self.session.get(self.base_url, params=params, timeout=self.TIMEOUT_SECONDS)
         except requests.RequestException as error:
             raise DataRetrievalError(f"GFZ request for {dataset_id} failed: {error}") from error
         if not response.ok:
@@ -125,9 +164,9 @@ class GfzClient(DataClient[pd.DataFrame]):
         frame = _index_frame(body, dataset_id)
         in_range = frame[(frame.index >= start) & (frame.index < stop)]
         if in_range.empty:
-            return FetchResult(None, self.BASE_URL)
+            return FetchResult(None, self.base_url)
         in_range.attrs["meta"] = body.get("meta", {})
-        return FetchResult(in_range, self.BASE_URL)
+        return FetchResult(in_range, self.base_url)
 
 
 def _index_frame(body: dict[str, Any], dataset_id: str) -> pd.DataFrame:

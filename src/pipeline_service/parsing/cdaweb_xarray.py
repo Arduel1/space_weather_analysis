@@ -8,15 +8,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from pipeline_service.parsing.cdf import MAX_ARRAY_COLUMNS
-from space_weather_analysis.metadata.hapi import NOT_STORED_REASON
-from space_weather_analysis.metadata.models import SkippedParameter
-
-# A variable whose first dimension is no time coordinate cannot be placed in time-stamped documents.
-TIME_AXIS_REASON = "time axis not resolvable"
-
-# A data variable without a value per record is a constant of the dataset, not a series over time.
-NOT_TIME_VARYING_REASON = "not time-varying"
+from space_weather_analysis.metadata.models import MAX_ARRAY_COLUMNS, NotStoredReason, SkippedParameter
 
 # ISTP marks the variables holding the measurements with VAR_TYPE "data"; support and metadata variables describe them.
 DATA_VARIABLE_TYPE = "data"
@@ -73,9 +65,9 @@ def plan_master_variables(master: Mapping[str, Any]) -> VariablePlan:
         dimension_sizes = description.get("DimSizes")
         element_count = math.prod(dimension_sizes) if isinstance(dimension_sizes, list) and dimension_sizes else 1
         if description.get("RecVariance") == "NOVARY":
-            not_stored.append(SkippedParameter(name=name, reason=NOT_TIME_VARYING_REASON))
+            not_stored.append(SkippedParameter(name=name, reason=NotStoredReason.NOT_TIME_VARYING))
         elif element_count > MAX_ARRAY_COLUMNS:
-            not_stored.append(SkippedParameter(name=name, reason=NOT_STORED_REASON))
+            not_stored.append(SkippedParameter(name=name, reason=NotStoredReason.TOO_MANY_ELEMENTS))
         else:
             requested.append(name)
     return VariablePlan(requested=tuple(requested), not_stored=tuple(not_stored))
@@ -106,14 +98,14 @@ def dataset_to_frame(dataset: xr.Dataset, variables: Sequence[str], start: datet
         variable = dataset[name]
         time_axis = str(variable.dims[0]) if variable.dims else None
         if time_axis is None or time_axis not in dataset.coords or not np.issubdtype(dataset[time_axis].dtype, np.datetime64):
-            result.not_stored.append(SkippedParameter(name=name, reason=TIME_AXIS_REASON))
+            result.not_stored.append(SkippedParameter(name=name, reason=NotStoredReason.TIME_AXIS_NOT_RESOLVABLE))
             continue
         if variable.ndim > 2 or (variable.ndim == 2 and variable.shape[1] > MAX_ARRAY_COLUMNS):
-            result.not_stored.append(SkippedParameter(name=name, reason=NOT_STORED_REASON))
+            result.not_stored.append(SkippedParameter(name=name, reason=NotStoredReason.TOO_MANY_ELEMENTS))
             continue
 
-        index = pd.DatetimeIndex(dataset[time_axis].values)
-        values = variable.values
+        index = pd.DatetimeIndex(dataset[time_axis].to_numpy())
+        values = variable.to_numpy()
         if variable.ndim == 1:
             frame = pd.DataFrame({name: values}, index=index)
         else:

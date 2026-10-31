@@ -3,17 +3,14 @@ import logging
 import pandas as pd
 
 from pipeline_service.pipelines.processors.base import BaseETLProcessor
-from pipeline_service.util.documents import TransformedDocuments, rows_to_documents
+from pipeline_service.util.documents import DocumentDict, frame_to_documents
 from space_weather_analysis.util.error_handling import DataProcessingError
 
 logger = logging.getLogger(__name__)
 
 
 class SilsoETL(BaseETLProcessor):
-    """ETL Processor for daily sunspot data (SILSO).
-
-    Parses a CSV-like file containing sunspot numbers and loads them into MongoDB.
-    """
+    """Loads the daily total sunspot numbers of SILSO (Sunspot Index and Long-term Solar Observations) from their CSV file."""
 
     COLLECTION_NAME = "silso_sunspot_daily"
     # Identifies the source and version of the data in the metadata field of every document.
@@ -58,7 +55,7 @@ class SilsoETL(BaseETLProcessor):
         logger.info("Extracted %d rows from %s.", len(raw_data), self.file_path)
         return raw_data
 
-    def _transform(self, raw_data: pd.DataFrame) -> TransformedDocuments:
+    def _transform(self, raw_data: pd.DataFrame) -> list[DocumentDict]:
         """Builds one document per row with a valid date, omitting the placeholders of days without a sunspot number.
 
         Args:
@@ -99,7 +96,7 @@ class SilsoETL(BaseETLProcessor):
             if count:
                 logger.warning("Omitted %d invalid values in field %s.", count, column)
 
-        return rows_to_documents(timestamps_all[has_valid_date].to_list(), data.to_dict("records"), self.SOURCE_IDENTIFIER)
+        return frame_to_documents(timestamps_all[has_valid_date].to_list(), data, self.SOURCE_IDENTIFIER)
 
     @staticmethod
     def _to_count(values: pd.Series) -> pd.Series:

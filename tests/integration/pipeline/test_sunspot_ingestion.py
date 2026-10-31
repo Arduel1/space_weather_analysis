@@ -1,15 +1,16 @@
 import pathlib
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any
 
 import pytest
 from pymongo.database import Database
 
 from pipeline_service.pipelines.local import LocalPipeline
 
-StoredData = Callable[[str, datetime], Dict[str, Any]]
+StoredData = Callable[[str, datetime], dict[str, Any]]
 DataDirWithExtraRow = Callable[[str, str], pathlib.Path]
-StoredTimestampsAndMetadata = Callable[[str], List[Tuple[datetime, Dict[str, Any]]]]
+StoredTimestampsAndMetadata = Callable[[str], list[tuple[datetime, dict[str, Any]]]]
 
 SUNSPOT_COLLECTION = "silso_sunspot_daily"
 SOURCE_METADATA = {"source": "SILSO_V2.0"}
@@ -92,8 +93,7 @@ def test_sunspot_non_numeric_value_affects_only_its_own_field(
 
     data = stored_data(SUNSPOT_COLLECTION, NON_NUMERIC_SUNSPOT_DAY)
     assert data == pytest.approx({"std_dev": 9.4, "num_observations": 22, "decimal_year": 2001.207, "is_provisional": True})
-    other_number = stored_data(SUNSPOT_COLLECTION, REGULAR_DAY)["sunspot_number"]
-    assert isinstance(other_number, (int, float)) and other_number == 123
+    assert stored_data(SUNSPOT_COLLECTION, REGULAR_DAY)["sunspot_number"] == 123
 
 
 @pytest.mark.integration

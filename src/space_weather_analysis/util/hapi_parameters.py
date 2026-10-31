@@ -1,10 +1,9 @@
 import math
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, NamedTuple
 
 import numpy as np
 
-# Arrays with more elements are maps, images or spectra rather than single values over time, so they are not stored as columns.
-MAX_ARRAY_COLUMNS = 10
+from space_weather_analysis.metadata.models import MAX_ARRAY_COLUMNS
 
 # Some HAPI servers write the string "null" where the specification expects a JSON null.
 HAPI_NULL_STRING = "null"
@@ -23,8 +22,8 @@ class ParameterColumn(NamedTuple):
     """
 
     name: str
-    element_index: Optional[Tuple[int, ...]]
-    label: Optional[str]
+    element_index: tuple[int, ...] | None
+    label: str | None
 
 
 def null_string_to_none(value: Any) -> Any:
@@ -41,7 +40,7 @@ def null_string_to_none(value: Any) -> Any:
     return value
 
 
-def is_too_large_for_columns(parameter: Dict[str, Any]) -> bool:
+def is_too_large_for_columns(parameter: dict[str, Any]) -> bool:
     """Tells whether an array parameter has more than MAX_ARRAY_COLUMNS elements.
 
     Args:
@@ -56,7 +55,7 @@ def is_too_large_for_columns(parameter: Dict[str, Any]) -> bool:
     return math.prod(size) > MAX_ARRAY_COLUMNS
 
 
-def parameters_too_large_for_columns(meta: Dict[str, Any]) -> List[str]:
+def parameters_too_large_for_columns(meta: dict[str, Any]) -> list[str]:
     """Returns the names of the array parameters with more than MAX_ARRAY_COLUMNS elements.
 
     Args:
@@ -65,14 +64,10 @@ def parameters_too_large_for_columns(meta: Dict[str, Any]) -> List[str]:
     Returns:
         The names of the parameters that are left out of the converted data.
     """
-    too_large_names = []
-    for param in meta.get("parameters", [])[1:]:
-        if is_too_large_for_columns(param):
-            too_large_names.append(param.get("name"))
-    return too_large_names
+    return [parameter.get("name") for parameter in meta.get("parameters", [])[1:] if is_too_large_for_columns(parameter)]
 
 
-def parameter_columns(parameter: Dict[str, Any]) -> List[ParameterColumn]:
+def parameter_columns(parameter: dict[str, Any]) -> list[ParameterColumn]:
     """Lists the columns a HAPI parameter is stored in.
 
     A scalar gets one column named after the parameter. A vector gets one column
@@ -102,7 +97,7 @@ def parameter_columns(parameter: Dict[str, Any]) -> List[ParameterColumn]:
     ]
 
 
-def vector_columns(parameter_name: str, labels: Any, vector_length: int) -> List[ParameterColumn]:
+def vector_columns(parameter_name: str, labels: Any, vector_length: int) -> list[ParameterColumn]:
     """Builds the columns of a vector parameter.
 
     Args:
@@ -118,7 +113,7 @@ def vector_columns(parameter_name: str, labels: Any, vector_length: int) -> List
     return [ParameterColumn(indexed_column_name(parameter_name, (index,)), (index,), None) for index in range(vector_length)]
 
 
-def indexed_column_name(parameter_name: str, element_index: Tuple[int, ...]) -> str:
+def indexed_column_name(parameter_name: str, element_index: tuple[int, ...]) -> str:
     """Builds the column name `{parameter_name}_{i}_{j}...` of one array element.
 
     Args:

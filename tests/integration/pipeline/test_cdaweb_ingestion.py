@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -9,6 +9,8 @@ from pymongo.database import Database
 
 from pipeline_service.pipelines.cdaweb import CdawebPipeline
 from pipeline_service.pipelines.report import IngestionReport
+from space_weather_analysis.catalog.models import CatalogEntryDict
+from space_weather_analysis.catalog.repository import MongoCatalogRepository
 from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSourceKind
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
 
@@ -124,10 +126,11 @@ def _synthetic_response(days: list[datetime], variables: list[str], bin_location
 class FakeCdasWs:
     """CDAS web service client answering with synthetic responses, recording its calls."""
 
-    def __init__(self, status_code: int = 200, bin_location: float | None = None) -> None:
-        """Starts without calls; every data request is answered with the given HTTP status."""
+    def __init__(self, status_code: int = 200, bin_location: float | None = None, slow_until: datetime | None = None) -> None:
+        """Starts without calls; every data request is answered with the given HTTP status, with the slow variable only before slow_until."""
         self.status_code = status_code
         self.bin_location = bin_location
+        self.slow_until = slow_until
         self.data_calls: list[tuple[str, list[str], datetime, datetime]] = []
         self.variable_name_calls = 0
 
@@ -142,21 +145,17 @@ class FakeCdasWs:
         status = {"http": {"status_code": self.status_code}, "cdas": {"status": [], "message": [], "warning": [], "error": []}}
         if self.status_code != 200:
             return status, None
+        if self.slow_until is not None and start >= self.slow_until:
+            variables = [name for name in variables if name != "slow"]
         return status, _synthetic_response(_days_touching(start, stop), variables, self.bin_location)
 
 
-@pytest.fixture(autouse=True)
-def one_day_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pipeline chunks of one day, so short runs cover several chunks."""
-    monkeypatch.setattr(CdawebPipeline, "CHUNK_DURATION", timedelta(days=1))
-
-
 def _ingest(db: Database, cdas: FakeCdasWs, start: datetime = DAY_ONE, end: datetime = DAY_TWO) -> IngestionReport:
-    """Registers the dataset in the catalog, unless already there, and runs the CDAWeb pipeline against the fake CDAS."""
-    if db["master_catalog"].count_documents({"dataset_id": DATASET_ID}) == 0:
-        source = {"type": "CDAWEB", "source_id": GROUP, "time_range": {"start_time": "2024-01-01T00:00:00Z", "end_time": "2024-01-31T00:00:00Z"}}
-        db["master_catalog"].insert_one({"dataset_id": DATASET_ID, "sources": [source]})
-    return CdawebPipeline(db, cdas=cdas).run([DATASET_ID], start, end)
+    """Registers the dataset in the catalog and runs the CDAWeb pipeline in one-day chunks against the fake CDAS."""
+    time_range = {"start_time": "2024-01-01T00:00:00Z", "end_time": "2024-01-31T00:00:00Z"}
+    source = cast(CatalogEntryDict, {"type": "CDAWEB", "source_id": GROUP, "time_range": time_range})
+    MongoCatalogRepository(db).save({"dataset_id": DATASET_ID, "sources": [source]})
+    return CdawebPipeline(db, cdas=cdas, chunk_duration=timedelta(days=1)).run([DATASET_ID], start, end)
 
 
 def _dataset_metadata(db: Database) -> DatasetMetadata:
@@ -276,6 +275,14 @@ def test_cdaweb_metadata_variables_match_stored_fields(db: Database, stored_data
     raw = MongoMetadataRepository(db).get_raw(DATASET_ID, MetadataSourceKind.FILE)
     assert raw is not None
     assert raw.payload["B"]["VALIDMIN"] == B_VALID_MIN
+
+
+@pytest.mark.integration
+def test_cdaweb_metadata_keeps_variables_delivered_only_by_earlier_chunks(db: Database) -> None:
+    """The record of a run over several chunks describes every variable a chunk delivered, not only those of the last chunk."""
+    _ingest(db, FakeCdasWs(slow_until=DAY_TWO), end=DAY_THREE)
+
+    assert "slow" in {variable.name for variable in _dataset_metadata(db).variables}
 
 
 @pytest.mark.integration

@@ -41,8 +41,9 @@ ServedValue = tuple[Any, str]
 class FakeGfzServer:
     """Fake GFZ JSON endpoint answering from values and failures that a test may change between runs."""
 
-    def __init__(self) -> None:
-        """Starts without values and without failing requests."""
+    def __init__(self, url: str) -> None:
+        """Starts without values and without failing requests, served at the given base URL."""
+        self.url = url
         self.values: dict[datetime, ServedValue] = {}
         self.failing_starts: set[datetime] = set()
 
@@ -74,23 +75,21 @@ def _parse_time(text: str) -> datetime:
 
 
 @pytest.fixture
-def gfz_server(httpserver: HTTPServer, monkeypatch: pytest.MonkeyPatch) -> FakeGfzServer:
-    """Fake GFZ server the client is pointed at, with one-day pipeline chunks."""
-    fake_server = FakeGfzServer()
+def gfz_server(httpserver: HTTPServer) -> FakeGfzServer:
+    """Fake GFZ server on the local test HTTP server."""
+    fake_server = FakeGfzServer(httpserver.url_for(SERVER_PATH))
     httpserver.expect_request(SERVER_PATH).respond_with_handler(fake_server.handle)
-    monkeypatch.setattr(GfzClient, "BASE_URL", httpserver.url_for(SERVER_PATH))
-    monkeypatch.setattr(GfzPipeline, "CHUNK_DURATION", timedelta(days=1))
     return fake_server
 
 
-def _pipeline(db: Database) -> GfzPipeline:
-    """Builds the GFZ pipeline with a client that repeats failing requests without waiting."""
-    return GfzPipeline(db, GfzClient(retry_backoff_factor=0))
+def _pipeline(db: Database, gfz_server: FakeGfzServer) -> GfzPipeline:
+    """Builds the GFZ pipeline with one-day chunks and a client of the fake server that repeats failing requests without waiting."""
+    return GfzPipeline(db, GfzClient(base_url=gfz_server.url, retry_backoff_factor=0), chunk_duration=timedelta(days=1))
 
 
-def _ingest(db: Database, start: datetime = DAY_ONE, end: datetime = DAY_TWO) -> IngestionReport:
+def _ingest(db: Database, gfz_server: FakeGfzServer, start: datetime = DAY_ONE, end: datetime = DAY_TWO) -> IngestionReport:
     """Runs the GFZ pipeline for the Kp index and returns its report."""
-    return _pipeline(db).run([INDEX], start, end)
+    return _pipeline(db, gfz_server).run([INDEX], start, end)
 
 
 def _requested_starts(httpserver: HTTPServer) -> list[str]:
@@ -119,7 +118,7 @@ def test_gfz_ingestion_stores_one_document_per_value_at_its_interval_start(
     """Each value yields one document at its interval start (naive UTC) with the Kp float, its status and GFZ as source."""
     gfz_server.set_day(DAY_ONE, KP_DAY_ONE, "def")
 
-    _ingest(db)
+    _ingest(db, gfz_server)
 
     expected_times = [_naive(DAY_ONE + interval_number * KP_INTERVAL) for interval_number in range(8)]
     assert stored_timestamps_and_metadata(INDEX) == [(time, SOURCE_METADATA) for time in expected_times]
@@ -135,7 +134,7 @@ def test_gfz_missing_kp_omits_field_and_keeps_record(db: Database, gfz_server: F
     gfz_server.values[DAY_ONE + KP_INTERVAL] = (-1, "pre")
     gfz_server.values[DAY_ONE + 2 * KP_INTERVAL] = (None, "def")
 
-    _ingest(db)
+    _ingest(db, gfz_server)
 
     assert stored_data(INDEX, _naive(DAY_ONE + KP_INTERVAL)) == {"status": "pre"}
     assert stored_data(INDEX, _naive(DAY_ONE + 2 * KP_INTERVAL)) == {"status": "def"}
@@ -147,7 +146,7 @@ def test_gfz_chunk_boundary_value_stored_once(db: Database, gfz_server: FakeGfzS
     gfz_server.set_day(DAY_ONE, KP_DAY_ONE, "def")
     gfz_server.set_day(DAY_TWO, KP_DAY_TWO, "def")
 
-    _ingest(db, end=DAY_THREE)
+    _ingest(db, gfz_server, end=DAY_THREE)
 
     assert len(httpserver.log) == 2
     assert db[INDEX].count_documents({}) == 16
@@ -161,10 +160,10 @@ def test_gfz_second_run_skips_complete_chunk_off_the_kp_grid(db: Database, gfz_s
     gfz_server.set_day(DAY_TWO, KP_DAY_TWO, "def")
     run_start = DAY_ONE + timedelta(hours=1)
     run_end = DAY_TWO + timedelta(hours=1)
-    _ingest(db, start=run_start, end=run_end)
+    _ingest(db, gfz_server, start=run_start, end=run_end)
     httpserver.clear_log()
 
-    _ingest(db, start=run_start, end=run_end)
+    _ingest(db, gfz_server, start=run_start, end=run_end)
 
     assert len(httpserver.log) == 0
     # Interval starts 03:00 to 21:00 of day one and 00:00 of day two.
@@ -176,11 +175,11 @@ def test_gfz_second_run_replaces_preliminary_values(db: Database, gfz_server: Fa
     """A second run skips the complete definitive chunk, refetches only the chunk with preliminary values and replaces them without duplicates."""
     gfz_server.set_day(DAY_ONE, KP_DAY_ONE, "def")
     gfz_server.set_day(DAY_TWO, KP_DAY_TWO, "pre")
-    _ingest(db, end=DAY_THREE)
+    _ingest(db, gfz_server, end=DAY_THREE)
     gfz_server.set_day(DAY_TWO, KP_DAY_TWO_REVISED, "def")
     httpserver.clear_log()
 
-    _ingest(db, end=DAY_THREE)
+    _ingest(db, gfz_server, end=DAY_THREE)
 
     assert _requested_starts(httpserver) == [DAY_TWO.strftime(TIME_FORMAT)]
     assert db[INDEX].count_documents({}) == 16
@@ -191,10 +190,10 @@ def test_gfz_second_run_replaces_preliminary_values(db: Database, gfz_server: Fa
 def test_gfz_second_run_completes_incomplete_chunk(db: Database, gfz_server: FakeGfzServer) -> None:
     """A chunk of which the first run received only part is completed by a second run, without duplicates."""
     gfz_server.set_day(DAY_ONE, KP_DAY_ONE[:4], "def")
-    _ingest(db)
+    _ingest(db, gfz_server)
     gfz_server.set_day(DAY_ONE, KP_DAY_ONE, "def")
 
-    _ingest(db)
+    _ingest(db, gfz_server)
 
     assert _stored_kp_and_status(db, DAY_ONE) == pytest.approx([(kp_value, "def") for kp_value in KP_DAY_ONE])
 
@@ -203,11 +202,11 @@ def test_gfz_second_run_completes_incomplete_chunk(db: Database, gfz_server: Fak
 def test_gfz_failed_chunk_keeps_stored_documents_and_next_chunk_runs(db: Database, gfz_server: FakeGfzServer) -> None:
     """A chunk whose request fails with HTTP 500 keeps its stored documents, is reported as gap and does not stop the next chunk."""
     gfz_server.set_day(DAY_ONE, KP_DAY_ONE, "pre")
-    _ingest(db)
+    _ingest(db, gfz_server)
     gfz_server.failing_starts.add(DAY_ONE)
     gfz_server.set_day(DAY_TWO, KP_DAY_TWO, "def")
 
-    report = _ingest(db, end=DAY_THREE)
+    report = _ingest(db, gfz_server, end=DAY_THREE)
 
     assert _stored_kp_and_status(db, DAY_ONE) == pytest.approx([(kp_value, "pre") for kp_value in KP_DAY_ONE])
     assert _stored_kp_and_status(db, DAY_TWO) == pytest.approx([(kp_value, "def") for kp_value in KP_DAY_TWO])
@@ -218,7 +217,7 @@ def test_gfz_failed_chunk_keeps_stored_documents_and_next_chunk_runs(db: Databas
 def test_gfz_unknown_index_sends_no_request(db: Database, gfz_server: FakeGfzServer, httpserver: HTTPServer) -> None:
     """An index name the GFZ service does not offer is rejected as invalid request without a request and stores nothing."""
     with pytest.raises(ValueError, match="Unknown GFZ indices"):
-        _pipeline(db).run(["kp"], DAY_ONE, DAY_TWO)
+        _pipeline(db, gfz_server).run(["kp"], DAY_ONE, DAY_TWO)
 
     assert httpserver.log == []
     assert db["kp"].count_documents({}) == 0
@@ -229,7 +228,7 @@ def test_gfz_metadata_records_time_stamp_location_and_license(db: Database, gfz_
     """The record holds 'begin' as time stamp location, the Kp cadence, provider and license of the response meta, and the Kp and status variables."""
     gfz_server.set_day(DAY_ONE, KP_DAY_ONE, "def")
 
-    _ingest(db)
+    _ingest(db, gfz_server)
 
     record = MongoMetadataRepository(db).get(INDEX)
     assert record is not None

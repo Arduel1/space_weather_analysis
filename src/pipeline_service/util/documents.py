@@ -1,134 +1,85 @@
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, Dict, Hashable, Iterable, List, Mapping, Optional, TypeAlias
+from typing import Any
 
 import pandas as pd
 
-DocumentDict: TypeAlias = Dict[str, Any]
-"""
-A dictionary representing a MongoDB document.
-Keys are strings (field names), values can be any BSON-compatible type.
-"""
+# The fields of a stored time series document: the time stamp, the identification of the source and the measured values.
+TIME_FIELD = "timestamp"
+META_FIELD = "metadata"
+DATA_FIELD = "data"
+# The key of the source identifier inside the metadata field.
+SOURCE_KEY = "source"
 
-TransformedDocuments: TypeAlias = List[DocumentDict]
-"""A list of formatted dictionaries ready for MongoDB insertion."""
+# One MongoDB document of a time series collection, built from field names to BSON-compatible values.
+type DocumentDict = dict[str, Any]
 
 
-def dataframe_to_documents(df: pd.DataFrame, source_identifier: str, timestamp_column: Optional[str] = None) -> TransformedDocuments:
-    """Converts a pandas DataFrame to a list of standardized MongoDB documents.
-
-    This function provides vectorized conversion of DataFrame rows into
-    the standard document structure, handling both indexed and column-based
-    timestamps efficiently.
+def dataframe_to_documents(frame: pd.DataFrame, source_identifier: str) -> list[DocumentDict]:
+    """Builds one time series document per row of a frame indexed by time.
 
     Args:
-        df: The DataFrame to convert. Must have a DatetimeIndex if
-            timestamp_column is None.
-        source_identifier: String identifying the data source.
-        timestamp_column: Optional name of column containing timestamps.
-            If None, uses the DataFrame index.
+        frame: The values, one column per stored field, with a DatetimeIndex.
+        source_identifier: The identification of the source, stored in the metadata field.
 
     Returns:
-        A list of formatted documents ready for MongoDB insertion.
+        One document per row; missing values are left out of its data field.
 
     Raises:
-        ValueError: If timestamp_column is None and index is not DatetimeIndex.
+        ValueError: If the index of the frame is no DatetimeIndex.
     """
-    if timestamp_column is not None:
-        if timestamp_column not in df.columns:
-            raise ValueError(f"Timestamp column '{timestamp_column}' not found in DataFrame")
-        timestamps = pd.to_datetime(df[timestamp_column]).to_pydatetime()  # type: ignore
-        data_columns = [col for col in df.columns if col != timestamp_column]
-        data_df = df[data_columns]
-    else:
-        if not isinstance(df.index, pd.DatetimeIndex):
-            raise ValueError("DataFrame index must be DatetimeIndex when timestamp_column is None")
-        timestamps = df.index.to_pydatetime()
-        data_df = df
-
-    data_payloads = data_df.to_dict("records")
-
-    return rows_to_documents(timestamps, data_payloads, source_identifier)
+    if not isinstance(frame.index, pd.DatetimeIndex):
+        raise ValueError("The frame needs a DatetimeIndex to build time series documents.")
+    return frame_to_documents(list(frame.index.to_pydatetime()), frame, source_identifier)
 
 
-def rows_to_documents(timestamps: Iterable[datetime], rows: Iterable[Mapping[Hashable, Any]], source_identifier: str) -> TransformedDocuments:
-    """Combines timestamps and data rows into time series documents.
+def frame_to_documents(timestamps: Sequence[datetime], frame: pd.DataFrame, source_identifier: str) -> list[DocumentDict]:
+    """Builds one time series document per row of a frame, at the time stamp of the same position.
 
-    Each document is built by build_timeseries_document.
+    The missing values of the whole frame are found in one vectorized step; pandas converts the
+    kept values to Python types, which BSON can store.
 
     Args:
-        timestamps: Time of each row.
-        rows: Field values of each row, in the same order as timestamps.
-        source_identifier: String identifying the data source.
+        timestamps: The time of each row.
+        frame: The values, one column per stored field.
+        source_identifier: The identification of the source, stored in the metadata field.
 
     Returns:
-        One document per row with the fields timestamp, metadata and data.
+        One document per row; missing values (NaN, NA, None) are left out of its data field.
 
     Raises:
-        ValueError: If timestamps and rows differ in length.
+        ValueError: If timestamps and rows differ in number.
     """
+    field_names = [str(column) for column in frame.columns]
+    present_values = frame.notna().to_numpy()
+    rows = frame.to_dict("records")
     documents = []
-    for timestamp, row in zip(timestamps, rows, strict=True):
-        documents.append(build_timeseries_document(timestamp, row, source_identifier))
+    for timestamp, row, row_present in zip(timestamps, rows, present_values, strict=True):
+        data = {field_name: value for field_name, value, present in zip(field_names, row.values(), row_present, strict=True) if present}
+        documents.append({TIME_FIELD: timestamp, META_FIELD: {SOURCE_KEY: source_identifier}, DATA_FIELD: data})
     return documents
-
-
-def build_timeseries_document(
-    timestamp: datetime,
-    data_dict: Mapping[Hashable, Any],
-    source_identifier: str,
-    additional_metadata: Optional[Dict[str, Any]] = None,
-) -> DocumentDict:
-    """Builds a standardized time-series document for MongoDB insertion.
-
-    The standard structure places timestamp and metadata at the root level,
-    with actual measurements nested under a 'data' field.
-
-    Args:
-        timestamp: The timestamp of this data point.
-        data_dict: Measurement values; missing values (NaN, NA, None) are left out of the document.
-        source_identifier: String identifying the data source.
-        additional_metadata: Optional additional metadata fields.
-
-    Returns:
-        A formatted document ready for MongoDB insertion.
-    """
-    metadata = {"source": source_identifier}
-    if additional_metadata:
-        metadata.update(additional_metadata)
-
-    # Filter out NaN values and ensure keys are strings for MongoDB compatibility
-    clean_data = {str(key): value for key, value in data_dict.items() if not pd.isna(value)}
-
-    return {"timestamp": timestamp, "metadata": metadata, "data": clean_data}
 
 
 def build_gridfs_reference_document(
     timestamp: datetime,
     gridfs_id: Any,
     source_identifier: str,
-    additional_metadata: Optional[Dict[str, Any]] = None,
+    additional_metadata: dict[str, Any] | None = None,
 ) -> DocumentDict:
     """Builds a document that references data stored in GridFS.
 
-    For multi-dimensional data too large to store directly in documents,
-    this function creates a reference document that maintains the same
-    structure as regular time-series documents but points to GridFS storage.
+    The document has the structure of a time series document, with a reference to the GridFS file in place of the data field.
 
     Args:
-        timestamp: The timestamp for this data point.
-        gridfs_id: The GridFS ObjectId referencing the stored data payload.
-        source_identifier: String identifying the data source.
-        additional_metadata: Optional additional metadata fields.
+        timestamp: The time stamp of the data.
+        gridfs_id: The GridFS ObjectId of the stored data payload.
+        source_identifier: The identification of the source, stored in the metadata field.
+        additional_metadata: Further metadata fields.
 
     Returns:
-        A formatted reference document for MongoDB insertion.
+        The reference document.
     """
-    metadata = {"source": source_identifier}
+    metadata = {SOURCE_KEY: source_identifier}
     if additional_metadata:
         metadata.update(additional_metadata)
-
-    return {
-        "timestamp": timestamp,
-        "metadata": metadata,
-        "data_gridfs_id": gridfs_id,
-    }
+    return {TIME_FIELD: timestamp, META_FIELD: metadata, "data_gridfs_id": gridfs_id}

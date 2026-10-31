@@ -1,7 +1,8 @@
 import pathlib
 import shutil
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable, Dict, List, NamedTuple, Tuple
+from typing import Any, NamedTuple
 
 import pytest
 from pymongo.database import Database
@@ -17,7 +18,7 @@ class _InputFile(NamedTuple):
     target_name: str
 
 
-_INPUT_FILES: Dict[str, _InputFile] = {
+_INPUT_FILES: dict[str, _InputFile] = {
     "silso_sunspot_daily": _InputFile("synthetic_sunspots.csv", "SN_d_tot_V2.0.csv"),
     "cme_catalog": _InputFile("synthetic_cme_catalog.txt", "cme_catalog.txt"),
 }
@@ -77,23 +78,23 @@ def full_data_dir(tmp_path: pathlib.Path) -> pathlib.Path:
 
 
 @pytest.fixture
-def stored_timestamps_and_metadata(db: Database) -> Callable[[str], List[Tuple[datetime, Dict[str, Any]]]]:
+def stored_timestamps_and_metadata(db: Database) -> Callable[[str], list[tuple[datetime, dict[str, Any]]]]:
     """Function reading timestamp and metadata of every document of a collection, sorted by timestamp."""
 
-    def read(collection_name: str) -> List[Tuple[datetime, Dict[str, Any]]]:
+    def read(collection_name: str) -> list[tuple[datetime, dict[str, Any]]]:
         return [(doc["timestamp"], doc["metadata"]) for doc in db[collection_name].find().sort("timestamp", 1)]
 
     return read
 
 
 @pytest.fixture
-def stored_data(db: Database) -> Callable[[str, datetime], Dict[str, Any]]:
+def stored_data(db: Database) -> Callable[[str, datetime], dict[str, Any]]:
     """Function reading the 'data' field of the single document with a given timestamp."""
 
-    def read(collection_name: str, timestamp: datetime) -> Dict[str, Any]:
+    def read(collection_name: str, timestamp: datetime) -> dict[str, Any]:
         documents = list(db[collection_name].find({"timestamp": timestamp}))
         assert len(documents) == 1
-        data: Dict[str, Any] = documents[0]["data"]
+        data: dict[str, Any] = documents[0]["data"]
         return data
 
     return read

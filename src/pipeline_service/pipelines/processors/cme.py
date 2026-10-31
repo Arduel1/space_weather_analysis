@@ -6,14 +6,14 @@ from typing import ClassVar
 import pandas as pd
 
 from pipeline_service.pipelines.processors.base import BaseETLProcessor
-from pipeline_service.util.documents import TransformedDocuments, rows_to_documents
+from pipeline_service.util.documents import DocumentDict, frame_to_documents
 from space_weather_analysis.util.error_handling import DataProcessingError
 
 logger = logging.getLogger(__name__)
 
 
 class CmeETL(BaseETLProcessor):
-    """ETL Processor for Coronal Mass Ejection (CME) catalog data."""
+    """Loads the SOHO/LASCO catalog of coronal mass ejections (CME) from its text file."""
 
     COLLECTION_NAME = "cme_catalog"
     # Identifies the source and version of the catalog in the metadata field of every document.
@@ -74,15 +74,16 @@ class CmeETL(BaseETLProcessor):
         logger.info("Extracted %d rows from %s.", len(parsed_rows), self.file_path)
         return pd.DataFrame(parsed_rows, columns=list(self._COLUMN_NAMES))
 
-    def _transform(self, raw_data: pd.DataFrame) -> TransformedDocuments:
+    def _transform(self, raw_data: pd.DataFrame) -> list[DocumentDict]:
         """Builds one document per event with a valid time, with numbers, halo flag and uncertainty flags.
 
         Args:
-            raw_data: The raw rows of the file.
+            raw_data: The raw rows of the file, left unchanged.
 
         Returns:
             The time series documents.
         """
+        raw_data = raw_data.copy()
         for column, flag in self._MARKER_FLAGS.items():
             is_marked = raw_data[column].str.endswith("*", na=False)
             # The flag is stored as true for marked values only; unmarked events get no flag field.
@@ -97,21 +98,20 @@ class CmeETL(BaseETLProcessor):
         has_valid_timestamp = raw_data["timestamp"].notna()
         if not has_valid_timestamp.all():
             logger.warning("Skipped %d rows without a valid timestamp.", (~has_valid_timestamp).sum())
-        raw_data.dropna(subset=["timestamp"], inplace=True)
+        raw_data = raw_data[has_valid_timestamp].copy()
 
-        # Feature engineering
         raw_data["is_halo"] = raw_data["central_pa"].str.contains("Halo", na=False)
         # A halo CME has no central position angle; is_halo carries that information.
         raw_data["central_pa"] = raw_data["central_pa"].mask(raw_data["is_halo"])
 
-        for col in self._NUMERIC_COLUMNS:
-            is_placeholder = raw_data[col].isin(self._PLACEHOLDERS)
-            numeric = pd.to_numeric(raw_data[col].mask(is_placeholder), errors="coerce")
+        for column in self._NUMERIC_COLUMNS:
+            is_placeholder = raw_data[column].isin(self._PLACEHOLDERS)
+            numeric = pd.to_numeric(raw_data[column].mask(is_placeholder), errors="coerce")
             # Values that are neither numbers nor placeholders are invalid and omitted like missing ones.
-            invalid_count = (numeric.isna() & raw_data[col].notna() & ~is_placeholder).sum()
+            invalid_count = (numeric.isna() & raw_data[column].notna() & ~is_placeholder).sum()
             if invalid_count:
-                logger.warning("Omitted %d invalid values in field %s.", invalid_count, col)
-            raw_data[col] = numeric
+                logger.warning("Omitted %d invalid values in field %s.", invalid_count, column)
+            raw_data[column] = numeric
 
         data_columns = [
             *self._NUMERIC_COLUMNS,
@@ -120,4 +120,4 @@ class CmeETL(BaseETLProcessor):
             "remarks",
         ]
 
-        return rows_to_documents(raw_data["timestamp"].to_list(), raw_data[data_columns].to_dict("records"), self.SOURCE_IDENTIFIER)
+        return frame_to_documents(raw_data["timestamp"].to_list(), raw_data[data_columns], self.SOURCE_IDENTIFIER)

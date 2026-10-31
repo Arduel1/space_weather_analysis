@@ -8,6 +8,8 @@ from pytest_httpserver import HTTPServer
 from werkzeug import Request, Response
 
 from pipeline_service.orchestrator import PipelineOrchestrator
+from pipeline_service.pipelines.base import BasePipeline
+from pipeline_service.pipelines.factory import PipelineFactory
 from pipeline_service.pipelines.gfz import GfzPipeline
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.clients.gfz import GfzClient
@@ -26,8 +28,9 @@ KP_INTERVAL = timedelta(hours=3)
 class FakeGfzServer:
     """Fake GFZ JSON endpoint serving a constant Kp of 2.0 for every interval, with HTTP 500 for the failing request starts."""
 
-    def __init__(self) -> None:
-        """Starts without failing requests."""
+    def __init__(self, url: str) -> None:
+        """Starts without failing requests, served at the given base URL."""
+        self.url = url
         self.failing_starts: set[datetime] = set()
 
     def handle(self, request: Request) -> Response:
@@ -42,24 +45,39 @@ class FakeGfzServer:
 
 
 @pytest.fixture
-def gfz_server(httpserver: HTTPServer, monkeypatch: pytest.MonkeyPatch) -> FakeGfzServer:
-    """Fake GFZ server the client is pointed at, without request repetitions and with one-day pipeline chunks."""
-    fake_server = FakeGfzServer()
+def gfz_server(httpserver: HTTPServer) -> FakeGfzServer:
+    """Fake GFZ server on the local test HTTP server."""
+    fake_server = FakeGfzServer(httpserver.url_for(SERVER_PATH))
     httpserver.expect_request(SERVER_PATH).respond_with_handler(fake_server.handle)
-    monkeypatch.setattr(GfzClient, "BASE_URL", httpserver.url_for(SERVER_PATH))
-    monkeypatch.setattr(GfzClient, "RETRY_COUNT", 0)
-    monkeypatch.setattr(GfzPipeline, "CHUNK_DURATION", timedelta(days=1))
     return fake_server
 
 
+def _gfz_pipeline(db: Database, gfz_url: str) -> GfzPipeline:
+    """Builds the GFZ pipeline with one-day chunks and a client of the fake server without request repetitions."""
+    return GfzPipeline(db, GfzClient(base_url=gfz_url, retry_count=0), chunk_duration=timedelta(days=1))
+
+
 def _run_job(
-    db: Database, data_dir: pathlib.Path, source_type: SourceType, datasets: list[str], start: datetime = DAY_ONE, end: datetime = DAY_THREE
+    db: Database,
+    data_dir: pathlib.Path,
+    source_type: SourceType,
+    datasets: list[str],
+    gfz_url: str | None = None,
+    start: datetime = DAY_ONE,
+    end: datetime = DAY_THREE,
 ) -> Job:
-    """Creates a job, lets the orchestrator process it and returns the stored job."""
+    """Creates a job, lets the orchestrator process it and returns the stored job; with a GFZ URL the GFZ pipeline uses that server."""
     repository = MongoJobRepository(db)
     job_id = repository.create(datasets, start, end, source_type=source_type)
+    factory = PipelineFactory(db, data_dir)
 
-    assert PipelineOrchestrator(db, data_dir).process_next_job()
+    def pipeline_for(requested_type: SourceType) -> BasePipeline:
+        """Builds the GFZ pipeline of the given server and every other pipeline through the factory."""
+        if requested_type == SourceType.GFZ_POTSDAM and gfz_url is not None:
+            return _gfz_pipeline(db, gfz_url)
+        return factory.get_pipeline(requested_type)
+
+    assert PipelineOrchestrator(db, data_dir, pipeline_for=pipeline_for).process_next_job()
 
     job = repository.get(job_id)
     assert job is not None
@@ -80,7 +98,7 @@ def test_failed_chunks_are_stored_as_missing_and_fail_the_job_only_when_all_fail
     """A job keeps its failed chunks as missing chunks; it completes when another chunk was ingested and fails when every chunk failed."""
     gfz_server.failing_starts = failing_starts
 
-    job = _run_job(db, tmp_path, SourceType.GFZ_POTSDAM, [INDEX])
+    job = _run_job(db, tmp_path, SourceType.GFZ_POTSDAM, [INDEX], gfz_url=gfz_server.url)
 
     assert (job.status, sorted((gap.start, gap.stop) for gap in job.missing_chunks)) == (
         expected_status,
@@ -109,7 +127,7 @@ def test_rejected_write_is_reported_as_gap(db: Database, tmp_path: pathlib.Path,
     # A collection whose validator rejects every document makes each insert fail
     db.create_collection(INDEX, validator={"$jsonSchema": {"required": ["field_no_document_has"]}})
 
-    report = GfzPipeline(db, GfzClient(retry_backoff_factor=0)).run([INDEX], DAY_ONE, DAY_TWO)
+    report = _gfz_pipeline(db, gfz_server.url).run([INDEX], DAY_ONE, DAY_TWO)
 
     assert [(gap.start, gap.reason.split(":")[0]) for gap in report.gaps] == [(DAY_ONE, "BulkWriteError")]
     assert db[INDEX].count_documents({}) == 0

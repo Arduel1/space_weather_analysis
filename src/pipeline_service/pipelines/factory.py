@@ -1,4 +1,5 @@
 import pathlib
+from typing import assert_never
 
 from pymongo.database import Database
 
@@ -41,3 +42,5 @@ class PipelineFactory:
                 return GfzPipeline(self.db)
             case SourceType.LOCAL:
                 return LocalPipeline(self.db, self.data_dir)
+            case _:
+                assert_never(source_type)

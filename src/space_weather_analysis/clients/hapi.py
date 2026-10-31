@@ -42,14 +42,16 @@ class HapiClient(DataClient[HapiData]):
     # An empty parameter list makes the server deliver every parameter of the dataset.
     ALL_PARAMETERS = ""
 
-    def __init__(self, catalog_map: CatalogMap | None = None) -> None:
+    def __init__(self, catalog_map: CatalogMap | None = None, retry_backoff_factor: float = 1.0) -> None:
         """Initializes the client with the HAPI sources it may request data from.
 
         Args:
             catalog_map: The HAPI sources of each dataset, keyed by dataset ID; None for a client
                 that only uses the methods taking a server URL.
+            retry_backoff_factor: The wait in seconds before asking a transiently failing source again, doubled for every further try.
         """
         self.catalog_map: CatalogMap = catalog_map if catalog_map is not None else {}
+        self.retry_backoff_factor = retry_backoff_factor
 
     @retry_interaction(exceptions=(HAPIError,))
     def fetch_server_catalog(self, server_url: str) -> list[dict[str, Any]]:
@@ -129,9 +131,26 @@ class HapiClient(DataClient[HapiData]):
         logger.info("No source has data for %s between %s and %s.", dataset_id, start, stop)
         return FetchResult(None)
 
-    @retry_interaction(exceptions=(DataRetrievalError,))
     def _fetch_from_source(self, dataset_id: str, entry: CatalogEntryDict, start: datetime, stop: datetime) -> FetchResult[HapiData]:
-        """Fetches a time range from one catalog source, clipped to the time range the catalog gives for it.
+        """Fetches a time range from one catalog source, asking it again after a transient failure.
+
+        Args:
+            dataset_id: The dataset ID.
+            entry: The catalog source with server URL and time range.
+            start: The start of the requested range (inclusive), timezone-aware.
+            stop: The end of the requested range (exclusive), timezone-aware.
+
+        Returns:
+            The data and /info response, or a result without data if the source has none for the range.
+
+        Raises:
+            DataRetrievalError: If the request failed transiently in every try.
+        """
+        retried_request = retry_interaction(exceptions=(DataRetrievalError,), backoff_factor=self.retry_backoff_factor)(self._request_source)
+        return retried_request(dataset_id, entry, start, stop)
+
+    def _request_source(self, dataset_id: str, entry: CatalogEntryDict, start: datetime, stop: datetime) -> FetchResult[HapiData]:
+        """Fetches a time range from one catalog source once, clipped to the time range the catalog gives for it.
 
         The stop of an ongoing source is not clipped, as its server already holds data beyond the catalog stop.
 

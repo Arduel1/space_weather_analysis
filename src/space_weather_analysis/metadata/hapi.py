@@ -1,7 +1,9 @@
 import logging
 import re
+from collections.abc import Mapping
 from datetime import datetime
-from typing import Any, cast, get_args
+from types import MappingProxyType
+from typing import Any
 
 import numpy as np
 
@@ -13,6 +15,7 @@ from space_weather_analysis.metadata.models import (
     LinkInfo,
     MetadataSource,
     MetadataSourceKind,
+    NotStoredReason,
     SkippedParameter,
     SourceInfo,
     TimeInfo,
@@ -21,25 +24,23 @@ from space_weather_analysis.metadata.models import (
     VectorComponent,
 )
 from space_weather_analysis.metadata.normalize import normalize_units, optional_text
-from space_weather_analysis.util.hapi_parameters import MAX_ARRAY_COLUMNS, ParameterColumn, is_too_large_for_columns, parameter_columns
+from space_weather_analysis.util.hapi_parameters import ParameterColumn, is_too_large_for_columns, parameter_columns
 from space_weather_analysis.util.time_utils import parse_iso_time
 
 logger = logging.getLogger(__name__)
 
 # HAPI parameter types and the value type of the stored field; "float" is a type some servers write in place of "double".
-HAPI_DATA_TYPES: dict[str, DataType] = {"double": "double", "float": "double", "integer": "integer", "string": "string", "isotime": "isotime"}
+HAPI_DATA_TYPES: Mapping[str, DataType] = MappingProxyType(
+    {"double": DataType.DOUBLE, "float": DataType.DOUBLE, "integer": DataType.INTEGER, "string": DataType.STRING, "isotime": DataType.ISOTIME}
+)
 
 # The HAPI specification defines 'center' as time stamp location if a server gives none.
-DEFAULT_TIMESTAMP_LOCATION: TimestampLocation = "center"
-TIMESTAMP_LOCATIONS: tuple[str, ...] = get_args(TimestampLocation)
-VECTOR_COMPONENTS: tuple[str, ...] = get_args(VectorComponent)
+DEFAULT_TIMESTAMP_LOCATION = TimestampLocation.CENTER
 
 SPASE_ID_PREFIX = "spase://"
 # A DOI (Digital Object Identifier, https://www.doi.org/) is "10.", a registrant code, "/" and a suffix,
 # optionally written as resolver URL or with the "doi:" prefix.
 DOI_PATTERN = re.compile(r"^(?:https?://(?:dx\.)?doi\.org/|doi:)?(10\.\d{4,9}/\S+)$", re.IGNORECASE)
-
-NOT_STORED_REASON = f"array with more than {MAX_ARRAY_COLUMNS} elements"
 
 
 def build_hapi_metadata(dataset_id: str, collection: str, info: dict[str, Any], server_url: str | None, retrieved_at: datetime) -> DatasetMetadata:
@@ -75,7 +76,7 @@ def build_hapi_metadata(dataset_id: str, collection: str, info: dict[str, Any], 
             logger.warning("HAPI info of '%s': parameter without name ignored: %s", dataset_id, parameter)
             continue
         if is_too_large_for_columns(parameter):
-            not_stored.append(SkippedParameter(name=str(parameter["name"]), reason=NOT_STORED_REASON))
+            not_stored.append(SkippedParameter(name=str(parameter["name"]), reason=NotStoredReason.TOO_MANY_ELEMENTS))
             continue
         variables.extend(hapi_parameter_variables(parameter))
 
@@ -218,9 +219,9 @@ def hapi_timestamp_location(value: Any) -> TimestampLocation:
     if text is None:
         return DEFAULT_TIMESTAMP_LOCATION
     location = text.strip().lower()
-    if location in TIMESTAMP_LOCATIONS:
-        return cast(TimestampLocation, location)
-    return "other"
+    if location in TimestampLocation:
+        return TimestampLocation(location)
+    return TimestampLocation.OTHER
 
 
 def doi_from_text(text: str | None) -> str | None:
@@ -312,6 +313,6 @@ def _vector_component(value: Any) -> VectorComponent | None:
         The component, or None if it is missing or outside the vocabulary.
     """
     text = optional_text(value)
-    if text is None or text.strip() not in VECTOR_COMPONENTS:
+    if text is None or text.strip() not in VectorComponent:
         return None
-    return cast(VectorComponent, text.strip())
+    return VectorComponent(text.strip())

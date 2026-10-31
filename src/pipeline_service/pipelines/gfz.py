@@ -1,10 +1,8 @@
 import logging
 import math
-from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from functools import partial
-from types import MappingProxyType
-from typing import Any, ClassVar
+from typing import Any
 
 import pandas as pd
 from pymongo.database import Database
@@ -12,18 +10,20 @@ from pymongo.database import Database
 from pipeline_service.database.mongo_loader import MongoLoader
 from pipeline_service.pipelines.base import METADATA_SAVE_ERRORS, BasePipeline, ProgressCallback
 from pipeline_service.pipelines.report import IngestionReport
-from pipeline_service.util.documents import dataframe_to_documents
+from pipeline_service.util.documents import DATA_FIELD, TIME_FIELD, dataframe_to_documents
 from pipeline_service.util.time import generate_time_chunks
 from space_weather_analysis.catalog.models import SourceType
-from space_weather_analysis.clients.gfz import GfzClient
+from space_weather_analysis.clients.gfz import GFZ_INDICES, STATUS_MEANINGS, GfzClient, GfzStatus
 from space_weather_analysis.coverage.repository import CoverageRepository, MongoCoverageRepository
 from space_weather_analysis.metadata.models import (
     CitationInfo,
     DatasetMetadata,
+    DataType,
     MetadataSource,
     MetadataSourceKind,
     SourceInfo,
     TimeInfo,
+    TimestampLocation,
     VariableMetadata,
 )
 from space_weather_analysis.metadata.overlays.layering import save_with_overlays
@@ -33,39 +33,27 @@ from space_weather_analysis.util.time_utils import ensure_aware, format_iso_dura
 
 logger = logging.getLogger(__name__)
 
+# Time range covered by one API request.
+DEFAULT_CHUNK_DURATION = timedelta(days=30)
+
 
 class GfzPipeline(MongoLoader, BasePipeline):
-    """Pipeline implementation for GFZ Potsdam data ingestion.
+    """Ingests the geomagnetic indices of GFZ Potsdam chunk by chunk into MongoDB time series collections.
 
-    This pipeline handles the downloading of geomagnetic indices from GFZ
-    and stores them in MongoDB. Each chunk is fetched again until it holds
-    a value for every interval and none of them is preliminary.
+    A chunk is fetched again until it holds a value for every interval of the index and none of them is preliminary.
     """
 
-    # Time range covered by one API request
-    CHUNK_DURATION = timedelta(days=30)
-
-    # Interval length per index, used to tell whether a stored chunk is complete
-    INDEX_CADENCES: ClassVar[Mapping[str, timedelta]] = MappingProxyType({"Kp": timedelta(hours=3)})
-
-    INDEX_DESCRIPTIONS: ClassVar[Mapping[str, str]] = MappingProxyType({"Kp": "Planetary geomagnetic Kp index, 0 to 9 in steps of one third"})
-
-    PRELIMINARY_STATUS = "pre"
-
-    # Values of the 'status' field and their meaning
-    STATUS_MEANINGS: ClassVar[Mapping[str, str]] = MappingProxyType({"def": "definitive", PRELIMINARY_STATUS: "preliminary"})
-
-    TIME_FIELD = "timestamp"
-
-    def __init__(self, db: Database, client: GfzClient | None = None) -> None:
+    def __init__(self, db: Database, client: GfzClient | None = None, chunk_duration: timedelta = DEFAULT_CHUNK_DURATION) -> None:
         """Initializes the GFZ pipeline.
 
         Args:
             db: The MongoDB database instance.
             client: The client fetching the index values; a new GfzClient if None.
+            chunk_duration: The time range covered by one request.
         """
         super().__init__(db)
         self.client = client if client is not None else GfzClient()
+        self.chunk_duration = chunk_duration
         self.metadata_repository: MetadataRepository = MongoMetadataRepository(db)
         self.coverage_repository: CoverageRepository = MongoCoverageRepository(db)
 
@@ -76,7 +64,7 @@ class GfzPipeline(MongoLoader, BasePipeline):
         end_time: datetime | None,
         progress_callback: ProgressCallback | None = None,
     ) -> IngestionReport:
-        """Ingests each index in chunks of CHUNK_DURATION.
+        """Ingests each index in chunks of the chunk duration.
 
         Args:
             datasets: The GFZ index names.
@@ -103,20 +91,15 @@ class GfzPipeline(MongoLoader, BasePipeline):
         report = IngestionReport()
 
         for dataset_index, dataset_id in enumerate(datasets):
-            time_chunks = generate_time_chunks(start_time, end_time, self.CHUNK_DURATION)
+            time_chunks = generate_time_chunks(start_time, end_time, self.chunk_duration)
             collection_name = sanitize_collection_name(dataset_id)
-            self._ensure_timeseries_collection(collection_name, time_field=self.TIME_FIELD, meta_field="metadata")
+            self._ensure_timeseries_collection(collection_name)
 
             # Response of the last chunk with data, the source of the dataset metadata
             latest_response: pd.DataFrame | None = None
             for chunk_index, (chunk_start, chunk_stop) in enumerate(time_chunks):
                 self._report_chunk_progress(
-                    progress_callback,
-                    dataset_index,
-                    len(datasets),
-                    chunk_index,
-                    len(time_chunks),
-                    f"Dataset {dataset_id}: Processing chunk {chunk_index + 1}/{len(time_chunks)}",
+                    progress_callback, dataset_id, dataset_position=(dataset_index, len(datasets)), chunk_position=(chunk_index, len(time_chunks))
                 )
                 if self._is_chunk_complete_and_final(dataset_id, collection_name, chunk_start, chunk_stop):
                     logger.info("Skipping chunk %s to %s of %s: stored values are complete and definitive.", chunk_start, chunk_stop, dataset_id)
@@ -157,7 +140,7 @@ class GfzPipeline(MongoLoader, BasePipeline):
             return None
 
         documents = dataframe_to_documents(result.data, f"{SourceType.GFZ_POTSDAM}/{dataset_id}")
-        self._replace_time_range(collection_name, self.TIME_FIELD, chunk_start, chunk_stop, documents)
+        self._replace_time_range(collection_name, chunk_start, chunk_stop, documents)
         return result.data
 
     def _is_chunk_complete_and_final(self, dataset_id: str, collection_name: str, chunk_start: datetime, chunk_stop: datetime) -> bool:
@@ -170,28 +153,24 @@ class GfzPipeline(MongoLoader, BasePipeline):
             chunk_stop: End of the chunk (exclusive).
 
         Returns:
-            True if the chunk needs no request; always False for an index without a known cadence.
+            True if the chunk needs no request.
         """
-        cadence = self.INDEX_CADENCES.get(dataset_id)
-        if cadence is None:
-            return False
-
-        chunk_filter: dict[str, Any] = {self.TIME_FIELD: {"$gte": chunk_start, "$lt": chunk_stop}}
+        chunk_filter: dict[str, Any] = {TIME_FIELD: {"$gte": chunk_start, "$lt": chunk_stop}}
         collection = self.db[collection_name]
 
         stored_count = collection.count_documents(chunk_filter)
-        if stored_count != count_grid_times(chunk_start, chunk_stop, cadence):
+        if stored_count != count_grid_times(chunk_start, chunk_stop, GFZ_INDICES[dataset_id].cadence):
             return False
 
-        preliminary_count = collection.count_documents({**chunk_filter, "data.status": self.PRELIMINARY_STATUS})
+        preliminary_count = collection.count_documents({**chunk_filter, f"{DATA_FIELD}.status": GfzStatus.PRELIMINARY})
         return preliminary_count == 0
 
     def _save_metadata(self, dataset_id: str, collection_name: str, response: pd.DataFrame) -> None:
         """Saves the metadata record of an index, with license and provider from the response meta.
 
-        Variable descriptions, status meanings, cadence and time stamp location are values of this
-        class; license and provider come from the meta object GFZ sends with every response.
-        A failing save is logged, as the stored data documents stay valid without metadata.
+        Description, cadence and status meanings come from the index table of the GFZ client; license and
+        provider come from the meta object GFZ sends with every response. A failing build or save is
+        logged, as the stored data documents stay valid without metadata.
 
         Args:
             dataset_id: The GFZ index name.
@@ -200,41 +179,38 @@ class GfzPipeline(MongoLoader, BasePipeline):
         """
         meta: dict[str, Any] = response.attrs.get("meta", {})
         retrieved_at = datetime.now(UTC)
-        description = self.INDEX_DESCRIPTIONS.get(dataset_id, f"GFZ geomagnetic index {dataset_id}")
-        cadence = self.INDEX_CADENCES.get(dataset_id)
-
-        variables = [
-            VariableMetadata.from_single_source(
-                MetadataSourceKind.CURATED, name=dataset_id, source_name=dataset_id, description=description, dtype="double"
-            )
-        ]
-        if "status" in response.columns:
-            variables.append(
-                VariableMetadata.from_single_source(
-                    MetadataSourceKind.CURATED,
-                    name="status",
-                    source_name="status",
-                    description="Status of the index value",
-                    dtype="string",
-                    flag_meanings=dict(self.STATUS_MEANINGS),
-                )
-            )
-
-        record = DatasetMetadata(
-            dataset_id=dataset_id,
-            collection=collection_name,
-            source=SourceInfo(type=SourceType.GFZ_POTSDAM, provider=meta.get("source"), server_url=self.client.BASE_URL),
-            # GFZ timestamps mark the start of each interval
-            time=TimeInfo(cadence=format_iso_duration(cadence) if cadence else None, timestamp_location="begin"),
-            citation=CitationInfo(license=meta.get("license")),
-            variables=variables,
-            provenance=[
-                MetadataSource(kind=MetadataSourceKind.API, url=self.client.BASE_URL, retrieved_at=retrieved_at),
-                MetadataSource(kind=MetadataSourceKind.CURATED, retrieved_at=retrieved_at),
-            ],
-            updated_at=retrieved_at,
-        )
+        index = GFZ_INDICES[dataset_id]
         try:
+            variables = [
+                VariableMetadata.from_single_source(
+                    MetadataSourceKind.CURATED, name=dataset_id, source_name=dataset_id, description=index.description, dtype=DataType.DOUBLE
+                )
+            ]
+            if "status" in response.columns:
+                variables.append(
+                    VariableMetadata.from_single_source(
+                        MetadataSourceKind.CURATED,
+                        name="status",
+                        source_name="status",
+                        description="Status of the index value",
+                        dtype=DataType.STRING,
+                        flag_meanings={str(status): meaning for status, meaning in STATUS_MEANINGS.items()},
+                    )
+                )
+            record = DatasetMetadata(
+                dataset_id=dataset_id,
+                collection=collection_name,
+                source=SourceInfo(type=SourceType.GFZ_POTSDAM, provider=meta.get("source"), server_url=self.client.base_url),
+                # GFZ time stamps mark the start of each interval
+                time=TimeInfo(cadence=format_iso_duration(index.cadence), timestamp_location=TimestampLocation.BEGIN),
+                citation=CitationInfo(license=meta.get("license")),
+                variables=variables,
+                provenance=[
+                    MetadataSource(kind=MetadataSourceKind.API, url=self.client.base_url, retrieved_at=retrieved_at),
+                    MetadataSource(kind=MetadataSourceKind.CURATED, retrieved_at=retrieved_at),
+                ],
+                updated_at=retrieved_at,
+            )
             save_with_overlays(self.metadata_repository, [record])
         except METADATA_SAVE_ERRORS:
             logger.exception("Failed to save metadata of %s", dataset_id)

@@ -1,11 +1,11 @@
 import json
 import os
 import pathlib
-import socket
 import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from functools import partial
+from typing import Any, cast
 
 import pytest
 from pymongo.database import Database
@@ -14,6 +14,9 @@ from werkzeug import Request, Response
 
 from pipeline_service.pipelines.hapi import HapiPipeline
 from pipeline_service.pipelines.report import IngestionReport
+from space_weather_analysis.catalog.models import CatalogEntryDict
+from space_weather_analysis.catalog.repository import MongoCatalogRepository
+from space_weather_analysis.clients.hapi import HapiClient
 from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSourceKind
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
 
@@ -90,12 +93,6 @@ LARGE_ARRAY_CSV = "".join(f"2024-03-01T0{hour}:00:00Z,1.5e-07," + ",".join(["1"]
 NO_DATA_RESPONSE = {"HAPI": "2.0", "status": {"code": 1406, "message": "No data available for the specified ID and time range"}, "data": []}
 
 
-@pytest.fixture(autouse=True)
-def no_retry_delay(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Retries of the HAPI client without waiting time."""
-    monkeypatch.setattr("space_weather_analysis.util.resilience.sleep", lambda seconds: None)
-
-
 @pytest.fixture
 def serve_dataset(httpserver: HTTPServer) -> ServeDataset:
     """Function letting the local fake HAPI server serve a dataset under a path and returning the server URL."""
@@ -114,24 +111,29 @@ def serve_dataset(httpserver: HTTPServer) -> ServeDataset:
 
 
 def _add_catalog_entry(db: Database, server_urls: list[str], extra_fields: dict[str, Any] | None = None) -> None:
-    """Inserts the master catalog document listing the given HAPI servers, each with the extra fields, as sources of the dataset."""
+    """Saves the master catalog item listing the given HAPI servers, each with the extra fields, as sources of the dataset."""
     sources = []
     for server_url in server_urls:
         time_range = {"start_time": CATALOG_START, "end_time": CATALOG_END}
-        sources.append({"type": "HAPI", "source_id": server_url, "time_range": time_range, **(extra_fields or {})})
-    db["master_catalog"].insert_one({"dataset_id": DATASET_ID, "sources": sources})
+        sources.append(cast(CatalogEntryDict, {"type": "HAPI", "source_id": server_url, "time_range": time_range, **(extra_fields or {})}))
+    MongoCatalogRepository(db).save({"dataset_id": DATASET_ID, "sources": sources})
+
+
+def _pipeline(db: Database, chunk_duration: timedelta = timedelta(days=7)) -> HapiPipeline:
+    """Builds the HAPI pipeline with a client that asks a failing source again without waiting."""
+    return HapiPipeline(db, chunk_duration=chunk_duration, client_factory=partial(HapiClient, retry_backoff_factor=0))
 
 
 def _ingest(
     db: Database,
     server_urls: list[str],
-    start: datetime = RUN_START,
-    end: datetime = RUN_END,
+    start: datetime | None = RUN_START,
+    end: datetime | None = RUN_END,
     extra_fields: dict[str, Any] | None = None,
 ) -> IngestionReport:
     """Registers the servers with the extra source fields in the catalog, runs the HAPI pipeline for the dataset and returns its report."""
     _add_catalog_entry(db, server_urls, extra_fields)
-    return HapiPipeline(db).run([DATASET_ID], start, end)
+    return _pipeline(db).run([DATASET_ID], start, end)
 
 
 def _requested_paths(httpserver: HTTPServer) -> list[str]:
@@ -228,17 +230,14 @@ def test_hapi_time_parameter_with_other_name_is_ingested(db: Database, serve_dat
 
 
 @pytest.mark.integration
-def test_hapi_arrays_above_column_limit_are_not_stored(
-    db: Database, httpserver: HTTPServer, stored_data: StoredData, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_hapi_arrays_above_column_limit_are_not_stored(db: Database, httpserver: HTTPServer, stored_data: StoredData) -> None:
     """Arrays with more than 10 elements are left out of the documents of every chunk and listed in the metadata."""
     httpserver.expect_request(f"{SERVER_PATH}/info", query_string={"id": DATASET_ID}).respond_with_json(LARGE_ARRAY_INFO)
     httpserver.expect_request(f"{SERVER_PATH}/data").respond_with_handler(_large_array_rows_in_requested_range)
 
-    # Two chunks with one row each.
-    monkeypatch.setattr(HapiPipeline, "CHUNK_DURATION", timedelta(hours=3))
     _add_catalog_entry(db, [httpserver.url_for(SERVER_PATH)])
-    HapiPipeline(db).run([DATASET_ID], RUN_START, RUN_END)
+    # Two chunks with one row each.
+    _pipeline(db, chunk_duration=timedelta(hours=3)).run([DATASET_ID], RUN_START, RUN_END)
 
     assert db[DATASET_ID].count_documents({}) == 2
     assert stored_data(DATASET_ID, REGULAR_TIME + timedelta(hours=4)) == pytest.approx({"Short_Wave": 1.5e-07})
@@ -280,24 +279,15 @@ def test_hapi_falls_back_to_next_source_when_first_fails(
     assert stored_timestamps_and_metadata(DATASET_ID) == [(time, {"source": mirror_url}) for time in ROW_TIMES]
 
 
-def _closed_port_url() -> str:
-    """Returns a local HAPI server URL on a port nobody listens on."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
-    return f"http://127.0.0.1:{port}{SERVER_PATH}"
-
-
 @pytest.mark.integration
-def test_hapi_unreachable_source_is_retried_and_leaves_a_gap(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A source refusing the connection is asked again before its chunk is reported as gap without stored documents."""
-    retry_waits: list[float] = []
-    monkeypatch.setattr("space_weather_analysis.util.resilience.sleep", retry_waits.append)
+def test_hapi_failing_source_is_asked_again_and_leaves_a_gap(db: Database, serve_dataset: ServeDataset, httpserver: HTTPServer) -> None:
+    """A source failing with HTTP 500 is asked three times before its chunk is reported as gap without stored documents."""
+    failing_url = serve_dataset(data=Response("Internal Server Error", status=500))
 
-    report = _ingest(db, [_closed_port_url()])
+    report = _ingest(db, [failing_url])
 
     assert [(gap.dataset_id, gap.start, gap.stop) for gap in report.gaps] == [(DATASET_ID, RUN_START, RUN_END)]
-    assert (report.chunks_total, len(retry_waits), db[DATASET_ID].count_documents({})) == (1, 2, 0)
+    assert (report.chunks_total, _requested_paths(httpserver).count(f"{SERVER_PATH}/data"), db[DATASET_ID].count_documents({})) == (1, 3, 0)
 
 
 @pytest.mark.integration
@@ -324,6 +314,28 @@ def test_hapi_request_clipped_to_catalog_time_range(
 
     data_requests = [request for request, _ in httpserver.log if request.path == f"{SERVER_PATH}/data"]
     assert [(request.args["time.min"], request.args["time.max"]) for request in data_requests] == [(CATALOG_START, expected_stop)]
+
+
+@pytest.mark.integration
+def test_hapi_request_with_unknown_dataset_is_rejected_before_any_request(db: Database, serve_dataset: ServeDataset, httpserver: HTTPServer) -> None:
+    """A run naming a dataset without HAPI source in the catalog is rejected before the first request, so the known dataset stays unfetched too."""
+    _add_catalog_entry(db, [serve_dataset()])
+
+    with pytest.raises(ValueError, match="no HAPI source"):
+        _pipeline(db).run([DATASET_ID, "synthetic_unknown"], RUN_START, RUN_END)
+
+    assert (httpserver.log, db[DATASET_ID].count_documents({})) == ([], 0)
+
+
+@pytest.mark.integration
+def test_hapi_requested_start_kept_when_end_comes_from_catalog(db: Database, serve_dataset: ServeDataset, httpserver: HTTPServer) -> None:
+    """A run with a requested start and no end requests from that start to the catalog stop."""
+    requested_start = RUN_START + timedelta(hours=1)
+
+    _ingest(db, [serve_dataset()], start=requested_start, end=None)
+
+    data_requests = [request for request, _ in httpserver.log if request.path == f"{SERVER_PATH}/data"]
+    assert [(request.args["time.min"], request.args["time.max"]) for request in data_requests] == [("2024-03-01T01:00:00Z", CATALOG_END)]
 
 
 @pytest.mark.integration
@@ -371,6 +383,6 @@ def test_repeated_hapi_ingestion_does_not_duplicate_documents(db: Database, serv
     server_url = serve_dataset()
     _ingest(db, [server_url])
 
-    HapiPipeline(db).run([DATASET_ID], RUN_START, RUN_END)
+    _pipeline(db).run([DATASET_ID], RUN_START, RUN_END)
 
     assert db[DATASET_ID].count_documents({}) == len(ROW_TIMES)

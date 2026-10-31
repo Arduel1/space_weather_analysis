@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from pymongo.errors import PyMongoError
 
 from pipeline_service.pipelines.report import IngestionReport
+from pipeline_service.util.documents import TIME_FIELD
 from space_weather_analysis.coverage.repository import CoverageRepository
 from space_weather_analysis.jobs.models import ChunkGap
 from space_weather_analysis.util.error_handling import DataProcessingError, DataRetrievalError
@@ -76,11 +77,10 @@ class BasePipeline(ABC):
     @staticmethod
     def _report_chunk_progress(
         progress_callback: ProgressCallback | None,
-        dataset_index: int,
-        dataset_count: int,
-        chunk_index: int,
-        chunk_count: int,
-        message: str,
+        dataset_id: str,
+        *,
+        dataset_position: tuple[int, int],
+        chunk_position: tuple[int, int],
     ) -> None:
         """Reports the progress at the start of a chunk, if a callback is given.
 
@@ -88,17 +88,16 @@ class BasePipeline(ABC):
 
         Args:
             progress_callback: The function receiving the progress, or None to report nothing.
-            dataset_index: The zero-based index of the current dataset.
-            dataset_count: The number of datasets in the run.
-            chunk_index: The zero-based index of the current chunk within the dataset.
-            chunk_count: The number of chunks of the dataset.
-            message: The status message passed along with the progress.
+            dataset_id: The ID of the current dataset, named in the status message.
+            dataset_position: The zero-based index of the current dataset and the number of datasets in the run.
+            chunk_position: The zero-based index of the current chunk and the number of chunks of the dataset.
         """
         if progress_callback is None:
             return
-        dataset_base_progress = dataset_index / dataset_count
-        chunk_progress = chunk_index / chunk_count
-        progress_callback(dataset_base_progress + (chunk_progress / dataset_count), message)
+        dataset_index, dataset_count = dataset_position
+        chunk_index, chunk_count = chunk_position
+        progress = (dataset_index + chunk_index / chunk_count) / dataset_count
+        progress_callback(progress, f"Dataset {dataset_id}: chunk {chunk_index + 1}/{chunk_count}")
 
     @staticmethod
     def _refresh_coverage(coverage_repository: CoverageRepository, dataset_id: str, collection_name: str) -> None:
@@ -112,7 +111,7 @@ class BasePipeline(ABC):
             collection_name: The collection holding the data documents of the dataset.
         """
         try:
-            coverage = coverage_repository.refresh(dataset_id, collection_name)
+            coverage = coverage_repository.refresh(dataset_id, collection_name, time_field=TIME_FIELD)
         except PyMongoError:
             logger.exception("Failed to refresh the coverage of %s", dataset_id)
             return
