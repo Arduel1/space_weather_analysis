@@ -230,6 +230,7 @@ Tools started outside Docker, such as the notebooks, can load the variables from
 ├── notebooks/                  # Jupyter notebooks for exploratory analysis
 ├── src/
 │   ├── space_weather_analysis/ # Shared core library (clients, config, DB, logging, utils)
+│   │   └── timeseries/         # Time series documents and their storage in MongoDB time series collections
 │   ├── catalog_collector/      # Collector (main.py) and metadata worker (metadata_worker.py)
 │   │   ├── data_catalog/       # Master catalog: snapshot load, availability, dataset discovery
 │   │   ├── metadata_catalog/   # Dataset metadata: snapshot load, HAPI, CDAS, master file and SPASE metadata refresh
@@ -238,7 +239,9 @@ Tools started outside Docker, such as the notebooks, can load the variables from
 │   │   ├── hapi_mirror/        # HAPI metadata mirror files and the server lookup shared by its refreshes
 │   │   ├── scheduling/         # Task queue and worker for recurring metadata requests
 │   │   └── worker_tasks/       # Task kinds the metadata worker runs, with their intervals
-│   ├── pipeline_service/       # ETL: fetch, parse, normalize, store
+│   ├── pipeline_service/       # Ingestion service (main.py) and job orchestrator (orchestrator.py)
+│   │   ├── pipelines/          # One pipeline per source type, the shared chunk loop and the pipeline factory
+│   │   └── parsing/            # Conversion of delivered data and local files into frames
 │   └── streamlit_app/          # Streamlit dashboard and plots
 └── tests/                      # Unit tests (tests/unit) and integration tests (tests/integration)
 ```

@@ -11,7 +11,9 @@ from werkzeug import Request, Response
 from pipeline_service.pipelines.gfz import GfzPipeline
 from pipeline_service.pipelines.report import IngestionReport
 from space_weather_analysis.clients.gfz import GfzClient
+from space_weather_analysis.coverage.repository import MongoCoverageRepository
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
+from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository
 
 StoredData = Callable[[str, datetime], dict[str, Any]]
 StoredTimestampsAndMetadata = Callable[[str], list[tuple[datetime, dict[str, Any]]]]
@@ -84,7 +86,13 @@ def gfz_server(httpserver: HTTPServer) -> FakeGfzServer:
 
 def _pipeline(db: Database, gfz_server: FakeGfzServer) -> GfzPipeline:
     """Builds the GFZ pipeline with one-day chunks and a client of the fake server that repeats failing requests without waiting."""
-    return GfzPipeline(db, GfzClient(base_url=gfz_server.url, retry_backoff_factor=0), chunk_duration=timedelta(days=1))
+    return GfzPipeline(
+        timeseries=MongoTimeSeriesRepository(db),
+        metadata_repository=MongoMetadataRepository(db),
+        coverage_repository=MongoCoverageRepository(db),
+        client=GfzClient(base_url=gfz_server.url, retry_backoff_factor=0),
+        chunk_duration=timedelta(days=1),
+    )
 
 
 def _ingest(db: Database, gfz_server: FakeGfzServer, start: datetime = DAY_ONE, end: datetime = DAY_TWO) -> IngestionReport:
@@ -95,11 +103,6 @@ def _ingest(db: Database, gfz_server: FakeGfzServer, start: datetime = DAY_ONE, 
 def _requested_starts(httpserver: HTTPServer) -> list[str]:
     """Returns the start parameter of every request the fake server received, in order."""
     return [request.args["start"] for request, _ in httpserver.log]
-
-
-def _naive(time: datetime) -> datetime:
-    """Returns an aware UTC datetime as the naive UTC datetime pymongo reads back."""
-    return time.replace(tzinfo=None)
 
 
 def _stored_kp_and_status(db: Database, day: datetime) -> list[tuple[float | None, str | None]]:
@@ -115,14 +118,14 @@ def test_gfz_ingestion_stores_one_document_per_value_at_its_interval_start(
     stored_timestamps_and_metadata: StoredTimestampsAndMetadata,
     stored_data: StoredData,
 ) -> None:
-    """Each value yields one document at its interval start (naive UTC) with the Kp float, its status and GFZ as source."""
+    """Each value yields one document at its interval start with the Kp float, its status and GFZ as source."""
     gfz_server.set_day(DAY_ONE, KP_DAY_ONE, "def")
 
     _ingest(db, gfz_server)
 
-    expected_times = [_naive(DAY_ONE + interval_number * KP_INTERVAL) for interval_number in range(8)]
+    expected_times = [DAY_ONE + interval_number * KP_INTERVAL for interval_number in range(8)]
     assert stored_timestamps_and_metadata(INDEX) == [(time, SOURCE_METADATA) for time in expected_times]
-    data = stored_data(INDEX, _naive(DAY_ONE + KP_INTERVAL))
+    data = stored_data(INDEX, DAY_ONE + KP_INTERVAL)
     assert data == pytest.approx({"Kp": 0.667, "status": "def"})
     assert isinstance(data["Kp"], float)
 
@@ -136,8 +139,8 @@ def test_gfz_missing_kp_omits_field_and_keeps_record(db: Database, gfz_server: F
 
     _ingest(db, gfz_server)
 
-    assert stored_data(INDEX, _naive(DAY_ONE + KP_INTERVAL)) == {"status": "pre"}
-    assert stored_data(INDEX, _naive(DAY_ONE + 2 * KP_INTERVAL)) == {"status": "def"}
+    assert stored_data(INDEX, DAY_ONE + KP_INTERVAL) == {"status": "pre"}
+    assert stored_data(INDEX, DAY_ONE + 2 * KP_INTERVAL) == {"status": "def"}
 
 
 @pytest.mark.integration
@@ -239,3 +242,14 @@ def test_gfz_metadata_records_time_stamp_location_and_license(db: Database, gfz_
     assert status.flag_meanings == {"def": "definitive", "pre": "preliminary"}
     assert set(status.field_sources.values()) == {"curated"}
     assert [source.kind for source in record.provenance] == ["api", "curated"]
+
+
+@pytest.mark.integration
+def test_gfz_collection_groups_documents_by_hours(db: Database, gfz_server: FakeGfzServer) -> None:
+    """The index is stored in a time series collection with the granularity hours, which fits the 3-hour Kp cadence."""
+    gfz_server.set_day(DAY_ONE, KP_DAY_ONE, "def")
+
+    _ingest(db, gfz_server)
+
+    collection_info = db.list_collections(filter={"name": INDEX}).next()
+    assert (collection_info["type"], collection_info["options"]["timeseries"]["granularity"]) == ("timeseries", "hours")

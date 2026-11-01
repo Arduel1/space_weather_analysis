@@ -1,6 +1,6 @@
 import logging
 import sys
-from typing import Optional, Tuple
+from datetime import UTC
 
 from pydantic import ValidationError
 from pymongo import MongoClient
@@ -29,26 +29,26 @@ class MongoConnection:
             settings (MongoSettings): The MongoDB settings to connect with.
         """
         self._settings = settings
-        self._client: Optional[MongoClient] = None
-        self._db: Optional[Database] = None
+        self._client: MongoClient | None = None
+        self._db: Database | None = None
 
-    def get_database(self) -> Optional[Database]:
+    def get_database(self) -> Database | None:
         """Retrieves the configured MongoDB database.
 
         On the first call, a client is created and the server is pinged to verify
         that it is reachable and the authentication succeeded. Later calls return
-        the cached database.
+        the cached database. The client reads stored times as timezone-aware UTC datetimes.
 
         Returns:
-            Optional[Database]: The MongoDB database named by the settings if the
+            Database | None: The MongoDB database named by the settings if the
             connection is successful, otherwise None.
         """
         if self._db is not None:
             return self._db
 
         try:
-            logger.info(f"Attempting to connect to MongoDB at {self._settings.host}:{self._settings.port}...")
-            self._client = MongoClient(self._settings.connection_uri(), serverSelectionTimeoutMS=5000)
+            logger.info("Attempting to connect to MongoDB at %s:%s...", self._settings.host, self._settings.port)
+            self._client = MongoClient(self._settings.connection_uri(), serverSelectionTimeoutMS=5000, tz_aware=True, tzinfo=UTC)
 
             # Verify that the server is actually reachable and authentication was successful.
             self._client.admin.command("ping")
@@ -58,11 +58,11 @@ class MongoConnection:
             return self._db
 
         except ConnectionFailure as e:
-            logger.critical(f"Could not connect to MongoDB: {e}", exc_info=True)
+            logger.critical("Could not connect to MongoDB: %s", e, exc_info=True)
             self.close()
             return None
         except Exception as e:
-            logger.critical(f"Unexpected error during database connection: {e}", exc_info=True)
+            logger.critical("Unexpected error during database connection: %s", e, exc_info=True)
             self.close()
             return None
 
@@ -81,7 +81,7 @@ class MongoConnection:
             self._db = None
 
 
-def connect_from_environment() -> Tuple[MongoConnection, Database]:
+def connect_from_environment() -> tuple[MongoConnection, Database]:
     """Opens the database connection of a service entry point from the MONGO_* environment variables.
 
     Meant for the start of a service process, which cannot work without its database.
@@ -95,7 +95,7 @@ def connect_from_environment() -> Tuple[MongoConnection, Database]:
     try:
         mongo_settings = MongoSettings()
     except ValidationError as e:
-        logger.critical(f"Invalid MongoDB settings, check the MONGO_* environment variables: {format_settings_error(e)}. Exiting.")
+        logger.critical("Invalid MongoDB settings, check the MONGO_* environment variables: %s. Exiting.", format_settings_error(e))
         sys.exit(1)
 
     connection = MongoConnection(mongo_settings)

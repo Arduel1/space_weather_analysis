@@ -7,6 +7,10 @@ from typing import Any, NamedTuple
 import pytest
 from pymongo.database import Database
 
+from pipeline_service.pipelines.local import LocalPipeline
+from space_weather_analysis.coverage.repository import MongoCoverageRepository
+from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository
+
 # The files in data/ hold invented values in the file layout of their data provider.
 DATA_DIR = pathlib.Path(__file__).parent / "data"
 
@@ -75,6 +79,16 @@ def full_data_dir(tmp_path: pathlib.Path) -> pathlib.Path:
     for dataset_id in _INPUT_FILES:
         _copy_input_file(tmp_path, dataset_id)
     return tmp_path
+
+
+@pytest.fixture
+def local_pipeline(db: Database) -> Callable[[pathlib.Path], LocalPipeline]:
+    """Function building the local pipeline of a data directory on the test database."""
+
+    def build(data_dir: pathlib.Path) -> LocalPipeline:
+        return LocalPipeline(timeseries=MongoTimeSeriesRepository(db), coverage_repository=MongoCoverageRepository(db), data_dir=data_dir)
+
+    return build
 
 
 @pytest.fixture

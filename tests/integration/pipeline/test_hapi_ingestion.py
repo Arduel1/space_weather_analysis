@@ -17,8 +17,10 @@ from pipeline_service.pipelines.report import IngestionReport
 from space_weather_analysis.catalog.models import CatalogEntryDict
 from space_weather_analysis.catalog.repository import MongoCatalogRepository
 from space_weather_analysis.clients.hapi import HapiClient
+from space_weather_analysis.coverage.repository import MongoCoverageRepository
 from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSourceKind
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
+from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository
 
 StoredData = Callable[[str, datetime], dict[str, Any]]
 StoredTimestampsAndMetadata = Callable[[str], list[tuple[datetime, dict[str, Any]]]]
@@ -26,6 +28,8 @@ ServeDataset = Callable[..., str]
 
 DATASET_ID = "synthetic_xray_flux_P1M"
 SERVER_PATH = "/hapi"
+# The host of the fake HAPI server, the provider ID in the source identifier of the documents.
+SERVER_HOST = "localhost"
 
 # Time range of the dataset in the master catalog; one pipeline chunk covers it.
 CATALOG_START = "2024-03-01T00:00:00Z"
@@ -62,8 +66,7 @@ XRAY_CSV = (
     "2024-03-01T00:01:00Z,0,2.6e-06,-1,-2147483648,1.6,-9999,3.6,NaN,21,31,11,12,21,22,0001-01-01T00:00:00Z,D,-1,F\n"
     "2024-03-01T00:02:00Z,1.7e-07,2.7e-06,GOES-18,0,1.7,-2.7,3.7,12,22,32,11,12,21,22,2024-03-01T00:02:30Z,G,H,I\n"
 )
-# pymongo reads stored times back as naive UTC.
-REGULAR_TIME = RUN_START.replace(tzinfo=None)
+REGULAR_TIME = RUN_START
 FILL_TIME = REGULAR_TIME + timedelta(minutes=1)
 ZERO_FLAG_TIME = REGULAR_TIME + timedelta(minutes=2)
 ROW_TIMES = [REGULAR_TIME, FILL_TIME, ZERO_FLAG_TIME]
@@ -121,7 +124,14 @@ def _add_catalog_entry(db: Database, server_urls: list[str], extra_fields: dict[
 
 def _pipeline(db: Database, chunk_duration: timedelta = timedelta(days=7)) -> HapiPipeline:
     """Builds the HAPI pipeline with a client that asks a failing source again without waiting."""
-    return HapiPipeline(db, chunk_duration=chunk_duration, client_factory=partial(HapiClient, retry_backoff_factor=0))
+    return HapiPipeline(
+        timeseries=MongoTimeSeriesRepository(db),
+        catalog_repository=MongoCatalogRepository(db),
+        metadata_repository=MongoMetadataRepository(db),
+        coverage_repository=MongoCoverageRepository(db),
+        client_factory=partial(HapiClient, retry_backoff_factor=0),
+        chunk_duration=chunk_duration,
+    )
 
 
 def _ingest(
@@ -154,13 +164,13 @@ def _files_below(directory: pathlib.Path) -> set[pathlib.Path]:
 def test_hapi_ingestion_stores_one_document_per_row_at_its_time(
     db: Database, serve_dataset: ServeDataset, stored_timestamps_and_metadata: StoredTimestampsAndMetadata
 ) -> None:
-    """Each data row yields one document at its time (naive UTC) with the serving server URL as source."""
+    """Each data row yields one document at its time with the server host as source and the serving server URL."""
     server_url = serve_dataset()
 
     _ingest(db, [server_url])
 
-    # pymongo returns stored datetimes as naive UTC, so the expected times carry no time zone.
-    assert stored_timestamps_and_metadata(DATASET_ID) == [(time, {"source": server_url}) for time in ROW_TIMES]
+    expected_metadata = {"source": f"HAPI/{SERVER_HOST}", "server": server_url}
+    assert stored_timestamps_and_metadata(DATASET_ID) == [(time, expected_metadata) for time in ROW_TIMES]
 
 
 @pytest.mark.integration
@@ -270,13 +280,14 @@ def test_hapi_no_data_response_stores_nothing(db: Database, serve_dataset: Serve
 def test_hapi_falls_back_to_next_source_when_first_fails(
     db: Database, serve_dataset: ServeDataset, stored_timestamps_and_metadata: StoredTimestampsAndMetadata
 ) -> None:
-    """If the first catalog source answers with HTTP 500, the documents come from the second source."""
+    """If the first catalog source answers with HTTP 500, the documents come from the second source and name its URL."""
     failing_url = serve_dataset(path="/primary/hapi", data=Response("Internal Server Error", status=500))
     mirror_url = serve_dataset(path="/mirror/hapi")
 
     _ingest(db, [failing_url, mirror_url])
 
-    assert stored_timestamps_and_metadata(DATASET_ID) == [(time, {"source": mirror_url}) for time in ROW_TIMES]
+    expected_metadata = {"source": f"HAPI/{SERVER_HOST}", "server": mirror_url}
+    assert stored_timestamps_and_metadata(DATASET_ID) == [(time, expected_metadata) for time in ROW_TIMES]
 
 
 @pytest.mark.integration

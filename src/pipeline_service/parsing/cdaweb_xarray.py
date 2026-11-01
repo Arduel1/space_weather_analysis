@@ -88,7 +88,7 @@ def dataset_to_frame(dataset: xr.Dataset, variables: Sequence[str], start: datet
         stop: The end of the range (exclusive), timezone-aware.
 
     Returns:
-        The columns in UTC without time zone, as MongoDB returns stored times, the attributes and the variables left out.
+        The columns indexed in UTC without time zone, as cdasws delivers the times, the attributes and the variables left out.
     """
     result = DatasetFrame(frame=pd.DataFrame())
     frames_by_axis: dict[str, list[pd.DataFrame]] = {}

@@ -1,4 +1,5 @@
-from typing import Generator
+from collections.abc import Generator
+from datetime import UTC
 
 import pytest
 from pymongo import MongoClient
@@ -45,8 +46,8 @@ def mongo_settings(mongo_container: MongoDbContainer) -> MongoSettings:
 
 @pytest.fixture(scope="session")
 def mongo_client(mongo_settings: MongoSettings) -> Generator[MongoClient, None, None]:
-    """Session-wide client for the container."""
-    client: MongoClient = MongoClient(mongo_settings.connection_uri(), serverSelectionTimeoutMS=2000)
+    """Session-wide client for the container; it reads stored times as timezone-aware UTC datetimes, as the services do."""
+    client: MongoClient = MongoClient(mongo_settings.connection_uri(), serverSelectionTimeoutMS=2000, tz_aware=True, tzinfo=UTC)
 
     try:
         client.admin.command("ping")

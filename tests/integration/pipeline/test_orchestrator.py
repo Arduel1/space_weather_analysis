@@ -8,13 +8,16 @@ from pytest_httpserver import HTTPServer
 from werkzeug import Request, Response
 
 from pipeline_service.orchestrator import PipelineOrchestrator
-from pipeline_service.pipelines.base import BasePipeline
+from pipeline_service.pipelines.base import Pipeline
 from pipeline_service.pipelines.factory import PipelineFactory
 from pipeline_service.pipelines.gfz import GfzPipeline
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.clients.gfz import GfzClient
+from space_weather_analysis.coverage.repository import MongoCoverageRepository
 from space_weather_analysis.jobs.models import Job, JobStatus
 from space_weather_analysis.jobs.repository import MongoJobRepository
+from space_weather_analysis.metadata.repository import MongoMetadataRepository
+from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository
 
 INDEX = "Kp"
 SERVER_PATH = "/app/json/"
@@ -54,7 +57,13 @@ def gfz_server(httpserver: HTTPServer) -> FakeGfzServer:
 
 def _gfz_pipeline(db: Database, gfz_url: str) -> GfzPipeline:
     """Builds the GFZ pipeline with one-day chunks and a client of the fake server without request repetitions."""
-    return GfzPipeline(db, GfzClient(base_url=gfz_url, retry_count=0), chunk_duration=timedelta(days=1))
+    return GfzPipeline(
+        timeseries=MongoTimeSeriesRepository(db),
+        metadata_repository=MongoMetadataRepository(db),
+        coverage_repository=MongoCoverageRepository(db),
+        client=GfzClient(base_url=gfz_url, retry_count=0),
+        chunk_duration=timedelta(days=1),
+    )
 
 
 def _run_job(
@@ -71,7 +80,7 @@ def _run_job(
     job_id = repository.create(datasets, start, end, source_type=source_type)
     factory = PipelineFactory(db, data_dir)
 
-    def pipeline_for(requested_type: SourceType) -> BasePipeline:
+    def pipeline_for(requested_type: SourceType) -> Pipeline:
         """Builds the GFZ pipeline of the given server and every other pipeline through the factory."""
         if requested_type == SourceType.GFZ_POTSDAM and gfz_url is not None:
             return _gfz_pipeline(db, gfz_url)

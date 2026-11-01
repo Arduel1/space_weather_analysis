@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from pipeline_service.util.time import generate_time_chunks
+from pipeline_service.pipelines.chunks import generate_time_chunks
 
 START = datetime(2023, 1, 1, tzinfo=UTC)
 WEEK = timedelta(days=7)

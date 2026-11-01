@@ -1,4 +1,5 @@
-from typing import Generator
+from collections.abc import Generator
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import SecretStr
@@ -58,3 +59,16 @@ class TestMongoConnection:
         db = connection.get_database()
         assert db is not None
         assert db.client.admin.command("ping")["ok"] == 1.0
+
+    def test_stored_times_read_back_as_aware_utc(self, connection: MongoConnection, db: Database) -> None:
+        """A stored time comes back through the connection as the same timezone-aware UTC datetime."""
+        stored_time = datetime(2024, 1, 1, 12, 30, tzinfo=UTC)
+        # The db fixture cleans the test database before and after the test
+        db["connection_times"].insert_one({"time": stored_time})
+        connection_db = connection.get_database()
+        assert connection_db is not None
+
+        read_back = connection_db["connection_times"].find_one({}, projection={"_id": 0})
+
+        assert read_back is not None
+        assert (read_back["time"], read_back["time"].tzinfo) == (stored_time, UTC)

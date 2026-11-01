@@ -1,45 +1,26 @@
 import logging
-from collections.abc import Sequence
-from dataclasses import dataclass, field
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
-from functools import partial
-from typing import Any
 
-import pandas as pd
 from cdasws import CdasWs
-from pymongo.database import Database
 
-from pipeline_service.database.mongo_loader import MongoLoader
 from pipeline_service.parsing.cdaweb_xarray import VariablePlan, dataset_to_frame, plan_master_variables
-from pipeline_service.parsing.istp import (
-    clean_istp_columns,
-    istp_scalar_attribute,
-    istp_text_attribute,
-    map_columns_to_istp_variables,
-    time_stamp_location,
-)
-from pipeline_service.pipelines.base import METADATA_SAVE_ERRORS, BasePipeline, ProgressCallback
+from pipeline_service.parsing.istp import clean_istp_columns
+from pipeline_service.pipelines.base import ProgressCallback
+from pipeline_service.pipelines.chunks import METADATA_SAVE_ERRORS, run_chunked
 from pipeline_service.pipelines.report import IngestionReport
-from pipeline_service.util.documents import TIME_FIELD, dataframe_to_documents
-from pipeline_service.util.time import generate_time_chunks
 from space_weather_analysis.catalog.models import SourceType
-from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
+from space_weather_analysis.catalog.repository import CatalogRepository
 from space_weather_analysis.clients.cdaweb import CdawebClient
-from space_weather_analysis.coverage.repository import CoverageRepository, MongoCoverageRepository
-from space_weather_analysis.metadata.models import (
-    DatasetMetadata,
-    DataType,
-    MetadataSource,
-    MetadataSourceKind,
-    SkippedParameter,
-    SourceInfo,
-    TimeInfo,
-    VariableMetadata,
-)
-from space_weather_analysis.metadata.normalize import normalize_units
+from space_weather_analysis.coverage.repository import CoverageRepository
+from space_weather_analysis.metadata.cdaweb_file import DeliveredMetadata, build_cdaweb_file_metadata, column_data_type
+from space_weather_analysis.metadata.models import MetadataSourceKind
 from space_weather_analysis.metadata.overlays.cdaweb import cdas_dataset_id
 from space_weather_analysis.metadata.overlays.layering import save_with_overlays
-from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
+from space_weather_analysis.metadata.repository import MetadataRepository
+from space_weather_analysis.timeseries.documents import frame_to_documents, source_identifier
+from space_weather_analysis.timeseries.models import Granularity
+from space_weather_analysis.timeseries.repository import TimeSeriesRepository
 from space_weather_analysis.util.naming import sanitize_collection_name
 from space_weather_analysis.util.time_utils import ensure_aware
 
@@ -49,22 +30,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_CHUNK_DURATION = timedelta(days=7)
 
 
-@dataclass
-class DeliveredMetadata:
-    """The metadata delivered with the chunks of one dataset in a run, collected for one record per dataset.
-
-    Attributes:
-        variable_attributes: The ISTP attributes of each delivered variable and time axis, keyed by name.
-        column_types: The value type of each stored column.
-        not_stored: The variables left out of the documents, keyed by name.
-    """
-
-    variable_attributes: dict[str, Any] = field(default_factory=dict)
-    column_types: dict[str, DataType | None] = field(default_factory=dict)
-    not_stored: dict[str, SkippedParameter] = field(default_factory=dict)
-
-
-class CdawebPipeline(MongoLoader, BasePipeline):
+class CdawebPipeline:
     """Ingests CDAWeb datasets chunk by chunk from the CDAS web services.
 
     CDAWeb data follow the ISTP Metadata Guidelines (International Solar-Terrestrial
@@ -73,19 +39,31 @@ class CdawebPipeline(MongoLoader, BasePipeline):
     and description (CATDESC). The pipeline uses them to clean the data and to describe it.
     """
 
-    def __init__(self, db: Database, cdas: CdasWs | None = None, chunk_duration: timedelta = DEFAULT_CHUNK_DURATION) -> None:
+    def __init__(
+        self,
+        *,
+        timeseries: TimeSeriesRepository,
+        catalog_repository: CatalogRepository,
+        metadata_repository: MetadataRepository,
+        coverage_repository: CoverageRepository,
+        cdas: CdasWs,
+        chunk_duration: timedelta = DEFAULT_CHUNK_DURATION,
+    ) -> None:
         """Initializes the pipeline.
 
         Args:
-            db: The MongoDB database instance.
-            cdas: The CDAS web service client the data are requested with; a new one if None.
+            timeseries: The repository storing the data documents.
+            catalog_repository: The repository of the master catalog, which names the observatory group of each dataset.
+            metadata_repository: The repository storing the metadata records and holding the stored master files.
+            coverage_repository: The repository storing which time ranges are stored.
+            cdas: The CDAS web service client the data are requested with.
             chunk_duration: The time span of one request.
         """
-        super().__init__(db)
+        self.timeseries = timeseries
+        self.catalog_repository = catalog_repository
+        self.metadata_repository = metadata_repository
+        self.coverage_repository = coverage_repository
         self.chunk_duration = chunk_duration
-        self.metadata_repository: MetadataRepository = MongoMetadataRepository(db)
-        self.catalog_repository: CatalogRepository = MongoCatalogRepository(db)
-        self.coverage_repository: CoverageRepository = MongoCoverageRepository(db)
         self._variable_plans: dict[str, VariablePlan] = {}
         self.client = CdawebClient(cdas=cdas, variables_for=self._requested_variables)
 
@@ -119,40 +97,15 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         group_names = {dataset_id: self._find_cdaweb_group(dataset_id) for dataset_id in datasets}
         self._variable_plans = self._plan_variables(datasets)
 
-        time_chunks = generate_time_chunks(ensure_aware(start_time), ensure_aware(end_time), self.chunk_duration)
-        report = IngestionReport()
-        for dataset_index, dataset_id in enumerate(datasets):
-            collection_name = sanitize_collection_name(dataset_id)
-            self._ensure_timeseries_collection(collection_name)
-            logger.info("Processing dataset %s (group %s) in %d chunks...", dataset_id, group_names[dataset_id], len(time_chunks))
-            delivered = DeliveredMetadata()
-            processed_any_chunk = False
-
-            for chunk_index, (chunk_start, chunk_stop) in enumerate(time_chunks):
-                self._report_chunk_progress(
-                    progress_callback, dataset_id, dataset_position=(dataset_index, len(datasets)), chunk_position=(chunk_index, len(time_chunks))
-                )
-                if self.db[collection_name].find_one({TIME_FIELD: {"$gte": chunk_start, "$lt": chunk_stop}}, {"_id": 1}):
-                    logger.info("Skipping chunk %s to %s of %s: documents already stored.", chunk_start, chunk_stop, dataset_id)
-                    continue
-
-                self._ingest_chunk(
-                    report,
-                    dataset_id,
-                    chunk_start,
-                    chunk_stop,
-                    partial(self._process_chunk, dataset_id, group_names[dataset_id], chunk_start, chunk_stop, delivered),
-                )
-                processed_any_chunk = True
-
-            if delivered.not_stored:
-                logger.warning("Dataset %s: variables not stored: %s", dataset_id, sorted(delivered.not_stored))
-            if delivered.variable_attributes:
-                self._save_pipeline_metadata(dataset_id, delivered)
-            if processed_any_chunk:
-                self._refresh_coverage(self.coverage_repository, dataset_id, collection_name)
-
-        return report
+        time_range = (ensure_aware(start_time), ensure_aware(end_time))
+        return run_chunked(
+            CdawebChunkSource(self.client, self.timeseries, self.metadata_repository, group_names, self._variable_plans),
+            dict.fromkeys(datasets, time_range),
+            chunk_duration=self.chunk_duration,
+            timeseries=self.timeseries,
+            coverage_repository=self.coverage_repository,
+            progress_callback=progress_callback,
+        )
 
     def _find_cdaweb_group(self, dataset_id: str) -> str:
         """Reads the observatory group of the first CDAWEB source of a dataset from the master catalog.
@@ -202,40 +155,100 @@ class CdawebPipeline(MongoLoader, BasePipeline):
         plan = self._variable_plans.get(dataset_id)
         return plan.requested if plan is not None else None
 
-    def _process_chunk(self, dataset_id: str, group_name: str, start_time: datetime, end_time: datetime, delivered: DeliveredMetadata) -> None:
+
+class CdawebChunkSource:
+    """The CDAWeb steps of a chunked run, collecting the metadata the chunks of each dataset delivered."""
+
+    # CDAWeb datasets have cadences from seconds to minutes
+    granularity = Granularity.SECONDS
+
+    def __init__(
+        self,
+        client: CdawebClient,
+        timeseries: TimeSeriesRepository,
+        metadata_repository: MetadataRepository,
+        group_names: Mapping[str, str],
+        variable_plans: Mapping[str, VariablePlan],
+    ) -> None:
+        """Initializes the source for one run.
+
+        Args:
+            client: The client requesting the data from CDAS.
+            timeseries: The repository storing the data documents.
+            metadata_repository: The repository storing the metadata records.
+            group_names: The observatory group of each dataset, part of the source identifier of its documents.
+            variable_plans: The variables planned from the stored master file of each dataset that has one.
+        """
+        self.client = client
+        self.timeseries = timeseries
+        self.metadata_repository = metadata_repository
+        self.group_names = group_names
+        self.variable_plans = variable_plans
+        self._delivered: dict[str, DeliveredMetadata] = {}
+
+    def collection_for(self, dataset_id: str) -> str:
+        """Names the collection of a dataset after its sanitized ID.
+
+        Args:
+            dataset_id: The dataset ID.
+
+        Returns:
+            The collection name.
+        """
+        return sanitize_collection_name(dataset_id)
+
+    def should_skip(self, dataset_id: str, collection: str, start: datetime, stop: datetime) -> bool:
+        """Skips a chunk that holds at least one stored document.
+
+        Args:
+            dataset_id: The dataset ID.
+            collection: The collection holding the data documents.
+            start: The start of the chunk (inclusive).
+            stop: The end of the chunk (exclusive).
+
+        Returns:
+            True if the chunk holds a stored document.
+        """
+        del dataset_id
+        return self.timeseries.has_documents(collection, start, stop)
+
+    def ingest_chunk(self, dataset_id: str, collection: str, start: datetime, stop: datetime) -> bool:
         """Requests, cleans and stores one chunk of a dataset and adds what it delivered to the metadata of the run.
 
         Args:
             dataset_id: The dataset ID.
-            group_name: The observatory group of the dataset, part of the source identifier of the documents.
-            start_time: The start of the chunk (inclusive).
-            end_time: The end of the chunk (exclusive).
-            delivered: The metadata delivered by the chunks of the run so far, changed in place.
+            collection: The collection holding the data documents.
+            start: The start of the chunk (inclusive).
+            stop: The end of the chunk (exclusive).
+
+        Returns:
+            True if CDAS delivered data for the chunk.
 
         Raises:
             DataRetrievalError: If the request failed.
             DataProcessingError: If CDAS delivered no readable data.
             pymongo.errors.PyMongoError: If the documents cannot be stored.
         """
-        result = self.client.fetch(dataset_id, start_time, end_time)
+        result = self.client.fetch(dataset_id, start, stop)
         if result.data is None:
-            logger.info("No data of %s for %s to %s.", dataset_id, start_time, end_time)
-            return
+            logger.info("No data of %s for %s to %s", dataset_id, start, stop)
+            return False
 
-        dataset_frame = dataset_to_frame(result.data, self.client.variables(dataset_id), start_time, end_time)
+        dataset_frame = dataset_to_frame(result.data, self.client.variables(dataset_id), start, stop)
         cleaned_frame = clean_istp_columns(dataset_frame.frame, dataset_frame.attributes)
-        documents = dataframe_to_documents(cleaned_frame, f"{SourceType.CDAWEB}/{group_name}")
-        if documents:
-            self._load_data(sanitize_collection_name(dataset_id), documents)
+        source = source_identifier(SourceType.CDAWEB, self.group_names[dataset_id])
+        self.timeseries.insert(collection, frame_to_documents(cleaned_frame, source))
 
-        plan = self._variable_plans.get(dataset_id)
+        delivered = self._delivered.setdefault(dataset_id, DeliveredMetadata())
+        plan = self.variable_plans.get(dataset_id)
         for skipped in [*(plan.not_stored if plan else ()), *dataset_frame.not_stored]:
             delivered.not_stored.setdefault(skipped.name, skipped)
         delivered.variable_attributes.update(dataset_frame.attributes)
         for column_name in cleaned_frame.columns:
             delivered.column_types[str(column_name)] = column_data_type(cleaned_frame[column_name])
+        return True
 
-    def _save_pipeline_metadata(self, dataset_id: str, delivered: DeliveredMetadata) -> None:
+    def save_metadata(self, dataset_id: str, collection: str) -> None:
         """Saves the metadata record built from the ISTP attributes delivered with the data and the attributes themselves.
 
         The attributes are of kind "file", as the master file of the dataset, laid over the record as kind "istp",
@@ -243,96 +256,22 @@ class CdawebPipeline(MongoLoader, BasePipeline):
 
         Args:
             dataset_id: The dataset ID.
-            delivered: The metadata delivered by the chunks of the run.
+            collection: The collection holding the data documents.
         """
+        delivered = self._delivered.get(dataset_id)
+        if delivered is None:
+            return
+        if delivered.not_stored:
+            logger.warning("Dataset %s: variables not stored: %s", dataset_id, sorted(delivered.not_stored))
+        if not delivered.variable_attributes:
+            return
+
         retrieved_at = datetime.now(UTC)
         try:
-            record = DatasetMetadata(
-                dataset_id=dataset_id,
-                collection=sanitize_collection_name(dataset_id),
-                source=SourceInfo(type=SourceType.CDAWEB),
-                time=TimeInfo(timestamp_location=time_stamp_location(delivered.variable_attributes)),
-                variables=self._istp_variables(delivered.variable_attributes, delivered.column_types),
-                not_stored=list(delivered.not_stored.values()),
-                provenance=[MetadataSource(kind=MetadataSourceKind.FILE, retrieved_at=retrieved_at)],
-                updated_at=retrieved_at,
-            )
+            record = build_cdaweb_file_metadata(dataset_id, collection, delivered, retrieved_at)
             self.metadata_repository.save_raw(dataset_id, MetadataSourceKind.FILE, delivered.variable_attributes, None, retrieved_at)
             save_with_overlays(self.metadata_repository, [record])
         except METADATA_SAVE_ERRORS:
             logger.exception("Failed to save metadata of %s", dataset_id)
             return
-        logger.info("Saved metadata of %s.", dataset_id)
-
-    @staticmethod
-    def _istp_variables(variable_attributes: dict[str, Any], stored_column_types: dict[str, DataType | None]) -> list[VariableMetadata]:
-        """Describes each stored column by the ISTP attributes of its variable as delivered with the data.
-
-        Args:
-            variable_attributes: The attributes of each delivered variable, keyed by its name.
-            stored_column_types: The value type of each stored column.
-
-        Returns:
-            One variable per stored column; a column without variable carries only its name and type.
-        """
-        column_sources = map_columns_to_istp_variables(stored_column_types, variable_attributes)
-        variables: list[VariableMetadata] = []
-        for column_name, data_type in stored_column_types.items():
-            variable_name, component_index = column_sources.get(column_name, (column_name, None))
-            attributes = variable_attributes.get(variable_name)
-            if not isinstance(attributes, dict):
-                attributes = {}
-            variables.append(
-                VariableMetadata.from_single_source(
-                    MetadataSourceKind.FILE,
-                    name=column_name,
-                    source_name=variable_name,
-                    component=component_index,
-                    element_index=component_index,
-                    # FIELDNAM is the short name every ISTP variable carries, used when CATDESC is missing
-                    description=istp_text_attribute(attributes, "CATDESC") or istp_text_attribute(attributes, "FIELDNAM"),
-                    label=istp_text_attribute(attributes, "LABLAXIS"),
-                    dtype=data_type,
-                    units=normalize_units(istp_text_attribute(attributes, "UNITS")),
-                    fill=istp_scalar_attribute(attributes.get("FILLVAL")),
-                    valid_min=_numeric_attribute(attributes.get("VALIDMIN")),
-                    valid_max=_numeric_attribute(attributes.get("VALIDMAX")),
-                    var_type=istp_text_attribute(attributes, "VAR_TYPE"),
-                )
-            )
-        return variables
-
-
-def column_data_type(column: pd.Series) -> DataType | None:
-    """Names the value type of a stored column.
-
-    Args:
-        column: The column as stored, after cleaning.
-
-    Returns:
-        'boolean', 'integer', 'double' or 'string', or None for any other pandas type.
-    """
-    if pd.api.types.is_bool_dtype(column):
-        return DataType.BOOLEAN
-    if pd.api.types.is_integer_dtype(column):
-        return DataType.INTEGER
-    if pd.api.types.is_float_dtype(column):
-        return DataType.DOUBLE
-    if pd.api.types.is_string_dtype(column) or pd.api.types.is_object_dtype(column):
-        return DataType.STRING
-    return None
-
-
-def _numeric_attribute(value: Any) -> float | None:
-    """Reads a single-valued numeric ISTP attribute such as VALIDMIN.
-
-    Args:
-        value: The attribute value as delivered with the data.
-
-    Returns:
-        The value as float, or None if the attribute is missing, holds one value per component or is not numeric.
-    """
-    scalar = istp_scalar_attribute(value)
-    if isinstance(scalar, (int, float)) and not isinstance(scalar, bool):
-        return float(scalar)
-    return None
+        logger.info("Saved metadata of %s", dataset_id)

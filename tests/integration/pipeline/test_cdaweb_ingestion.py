@@ -11,8 +11,10 @@ from pipeline_service.pipelines.cdaweb import CdawebPipeline
 from pipeline_service.pipelines.report import IngestionReport
 from space_weather_analysis.catalog.models import CatalogEntryDict
 from space_weather_analysis.catalog.repository import MongoCatalogRepository
+from space_weather_analysis.coverage.repository import MongoCoverageRepository
 from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSourceKind
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
+from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository
 
 StoredData = Callable[[str, datetime], dict[str, Any]]
 StoredTimestampsAndMetadata = Callable[[str], list[tuple[datetime, dict[str, Any]]]]
@@ -46,8 +48,8 @@ ALL_VARIABLES = ["flux", "quality", "B", "spectrum", "image", "unplaced", "slow"
 
 
 def _record_time(day: datetime, record_number: int) -> datetime:
-    """Returns the epoch of one daily record as naive UTC, as pymongo reads it back."""
-    return (day + record_number * RECORD_INTERVAL).replace(tzinfo=None)
+    """Returns the epoch of one daily record."""
+    return day + record_number * RECORD_INTERVAL
 
 
 def _days_touching(start: datetime, stop: datetime) -> list[datetime]:
@@ -155,7 +157,15 @@ def _ingest(db: Database, cdas: FakeCdasWs, start: datetime = DAY_ONE, end: date
     time_range = {"start_time": "2024-01-01T00:00:00Z", "end_time": "2024-01-31T00:00:00Z"}
     source = cast(CatalogEntryDict, {"type": "CDAWEB", "source_id": GROUP, "time_range": time_range})
     MongoCatalogRepository(db).save({"dataset_id": DATASET_ID, "sources": [source]})
-    return CdawebPipeline(db, cdas=cdas, chunk_duration=timedelta(days=1)).run([DATASET_ID], start, end)
+    pipeline = CdawebPipeline(
+        timeseries=MongoTimeSeriesRepository(db),
+        catalog_repository=MongoCatalogRepository(db),
+        metadata_repository=MongoMetadataRepository(db),
+        coverage_repository=MongoCoverageRepository(db),
+        cdas=cdas,
+        chunk_duration=timedelta(days=1),
+    )
+    return pipeline.run([DATASET_ID], start, end)
 
 
 def _dataset_metadata(db: Database) -> DatasetMetadata:
@@ -177,12 +187,10 @@ def _master_variable(var_type: str, record_variance: str = "VARY", dimension_siz
 def test_cdaweb_ingestion_stores_one_document_per_record_at_its_epoch(
     db: Database, stored_timestamps_and_metadata: StoredTimestampsAndMetadata
 ) -> None:
-    """Each record inside the run yields one document at its epoch (naive UTC) with the CDAWeb group as source."""
+    """Each record inside the run yields one document at its epoch with the CDAWeb group as source."""
     _ingest(db, FakeCdasWs())
 
-    expected_times = sorted(
-        [_record_time(DAY_ONE, record_number) for record_number in range(RECORDS_PER_DAY)] + [(DAY_ONE + SLOW_OFFSET).replace(tzinfo=None)]
-    )
+    expected_times = sorted([_record_time(DAY_ONE, record_number) for record_number in range(RECORDS_PER_DAY)] + [DAY_ONE + SLOW_OFFSET])
     assert stored_timestamps_and_metadata(DATASET_ID) == [(time, SOURCE_METADATA) for time in expected_times]
 
 
@@ -196,7 +204,7 @@ def test_cdaweb_chunk_boundary_record_stored_once_and_variable_list_read_once(
     _ingest(db, cdas, end=DAY_THREE)
 
     epoch_times = [_record_time(day, record_number) for day in (DAY_ONE, DAY_TWO) for record_number in range(RECORDS_PER_DAY)]
-    slow_times = [(day + SLOW_OFFSET).replace(tzinfo=None) for day in (DAY_ONE, DAY_TWO)]
+    slow_times = [day + SLOW_OFFSET for day in (DAY_ONE, DAY_TWO)]
     assert [time for time, _ in stored_timestamps_and_metadata(DATASET_ID)] == sorted(epoch_times + slow_times)
     assert (len(cdas.data_calls), cdas.variable_name_calls) == (2, 1)
 
@@ -218,7 +226,7 @@ def test_cdaweb_variables_on_a_second_time_axis_get_own_documents(db: Database, 
     """A variable on its own time axis is stored at its own time stamps, and the records of the other axis lack its field."""
     _ingest(db, FakeCdasWs())
 
-    assert stored_data(DATASET_ID, (DAY_ONE + SLOW_OFFSET).replace(tzinfo=None)) == {"slow": 0.0}
+    assert stored_data(DATASET_ID, DAY_ONE + SLOW_OFFSET) == {"slow": 0.0}
     assert stored_data(DATASET_ID, _record_time(DAY_ONE, 0)) == pytest.approx({"flux": 1.5, "quality": 0, "B_0": 1.0, "B_1": 2.0, "B_2": 3.0})
 
 

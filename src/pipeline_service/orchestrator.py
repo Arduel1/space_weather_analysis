@@ -8,7 +8,7 @@ from typing import Any
 from pymongo.database import Database
 from pymongo.errors import PyMongoError
 
-from pipeline_service.pipelines.base import BasePipeline
+from pipeline_service.pipelines.base import Pipeline
 from pipeline_service.pipelines.factory import PipelineFactory
 from pipeline_service.pipelines.report import IngestionReport
 from space_weather_analysis.catalog.models import SourceType
@@ -34,9 +34,7 @@ class PipelineOrchestrator:
     # The data directory of the project, holding the local dataset files
     DATA_BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent / "data"
 
-    def __init__(
-        self, db: Database, data_dir: pathlib.Path = DATA_BASE_DIR, pipeline_for: Callable[[SourceType], BasePipeline] | None = None
-    ) -> None:
+    def __init__(self, db: Database, data_dir: pathlib.Path = DATA_BASE_DIR, pipeline_for: Callable[[SourceType], Pipeline] | None = None) -> None:
         """Initializes the orchestrator.
 
         Args:

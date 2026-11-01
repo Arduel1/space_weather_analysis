@@ -1,4 +1,5 @@
-from typing import Generator
+from collections.abc import Generator
+from datetime import UTC
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -30,12 +31,12 @@ class TestMongoConnection:
         mock_client_cls.assert_not_called()
 
     def test_get_database_returns_configured_database(self, settings: MongoSettings, mock_client_cls: MagicMock) -> None:
-        """The first call connects with the settings URI, pings and returns the configured database."""
+        """The first call connects with the settings URI and aware UTC times, pings and returns the configured database."""
         client = mock_client_cls.return_value
 
         db = MongoConnection(settings).get_database()
 
-        mock_client_cls.assert_called_once_with(settings.connection_uri(), serverSelectionTimeoutMS=5000)
+        mock_client_cls.assert_called_once_with(settings.connection_uri(), serverSelectionTimeoutMS=5000, tz_aware=True, tzinfo=UTC)
         client.admin.command.assert_called_once_with("ping")
         client.__getitem__.assert_called_once_with("unit_db")
         assert db is client.__getitem__.return_value

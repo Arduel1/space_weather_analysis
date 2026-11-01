@@ -1,35 +1,23 @@
 import logging
 import math
 from datetime import UTC, datetime, timedelta
-from functools import partial
-from typing import Any
 
 import pandas as pd
-from pymongo.database import Database
 
-from pipeline_service.database.mongo_loader import MongoLoader
-from pipeline_service.pipelines.base import METADATA_SAVE_ERRORS, BasePipeline, ProgressCallback
+from pipeline_service.pipelines.base import ProgressCallback
+from pipeline_service.pipelines.chunks import METADATA_SAVE_ERRORS, run_chunked
 from pipeline_service.pipelines.report import IngestionReport
-from pipeline_service.util.documents import DATA_FIELD, TIME_FIELD, dataframe_to_documents
-from pipeline_service.util.time import generate_time_chunks
 from space_weather_analysis.catalog.models import SourceType
-from space_weather_analysis.clients.gfz import GFZ_INDICES, STATUS_MEANINGS, GfzClient, GfzStatus
-from space_weather_analysis.coverage.repository import CoverageRepository, MongoCoverageRepository
-from space_weather_analysis.metadata.models import (
-    CitationInfo,
-    DatasetMetadata,
-    DataType,
-    MetadataSource,
-    MetadataSourceKind,
-    SourceInfo,
-    TimeInfo,
-    TimestampLocation,
-    VariableMetadata,
-)
+from space_weather_analysis.clients.gfz import GFZ_INDICES, GfzClient, GfzStatus
+from space_weather_analysis.coverage.repository import CoverageRepository
+from space_weather_analysis.metadata.gfz import build_gfz_metadata
 from space_weather_analysis.metadata.overlays.layering import save_with_overlays
-from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
+from space_weather_analysis.metadata.repository import MetadataRepository
+from space_weather_analysis.timeseries.documents import frame_to_documents, source_identifier
+from space_weather_analysis.timeseries.models import Granularity
+from space_weather_analysis.timeseries.repository import TimeSeriesRepository
 from space_weather_analysis.util.naming import sanitize_collection_name
-from space_weather_analysis.util.time_utils import ensure_aware, format_iso_duration
+from space_weather_analysis.util.time_utils import ensure_aware
 
 logger = logging.getLogger(__name__)
 
@@ -37,25 +25,35 @@ logger = logging.getLogger(__name__)
 DEFAULT_CHUNK_DURATION = timedelta(days=30)
 
 
-class GfzPipeline(MongoLoader, BasePipeline):
+class GfzPipeline:
     """Ingests the geomagnetic indices of GFZ Potsdam chunk by chunk into MongoDB time series collections.
 
     A chunk is fetched again until it holds a value for every interval of the index and none of them is preliminary.
     """
 
-    def __init__(self, db: Database, client: GfzClient | None = None, chunk_duration: timedelta = DEFAULT_CHUNK_DURATION) -> None:
+    def __init__(
+        self,
+        *,
+        timeseries: TimeSeriesRepository,
+        metadata_repository: MetadataRepository,
+        coverage_repository: CoverageRepository,
+        client: GfzClient,
+        chunk_duration: timedelta = DEFAULT_CHUNK_DURATION,
+    ) -> None:
         """Initializes the GFZ pipeline.
 
         Args:
-            db: The MongoDB database instance.
-            client: The client fetching the index values; a new GfzClient if None.
+            timeseries: The repository storing the data documents.
+            metadata_repository: The repository storing the metadata records.
+            coverage_repository: The repository storing which time ranges are stored.
+            client: The client fetching the index values.
             chunk_duration: The time range covered by one request.
         """
-        super().__init__(db)
-        self.client = client if client is not None else GfzClient()
+        self.timeseries = timeseries
+        self.metadata_repository = metadata_repository
+        self.coverage_repository = coverage_repository
+        self.client = client
         self.chunk_duration = chunk_duration
-        self.metadata_repository: MetadataRepository = MongoMetadataRepository(db)
-        self.coverage_repository: CoverageRepository = MongoCoverageRepository(db)
 
     def run(
         self,
@@ -86,130 +84,106 @@ class GfzPipeline(MongoLoader, BasePipeline):
         if unknown_indices:
             raise ValueError(f"Unknown GFZ indices {unknown_indices}; allowed are {sorted(self.client.ALLOWED_INDICES)}.")
 
-        start_time = ensure_aware(start_time)
-        end_time = ensure_aware(end_time)
-        report = IngestionReport()
+        time_range = (ensure_aware(start_time), ensure_aware(end_time))
+        return run_chunked(
+            GfzChunkSource(self.client, self.timeseries, self.metadata_repository),
+            dict.fromkeys(datasets, time_range),
+            chunk_duration=self.chunk_duration,
+            timeseries=self.timeseries,
+            coverage_repository=self.coverage_repository,
+            progress_callback=progress_callback,
+        )
 
-        for dataset_index, dataset_id in enumerate(datasets):
-            time_chunks = generate_time_chunks(start_time, end_time, self.chunk_duration)
-            collection_name = sanitize_collection_name(dataset_id)
-            self._ensure_timeseries_collection(collection_name)
 
-            # Response of the last chunk with data, the source of the dataset metadata
-            latest_response: pd.DataFrame | None = None
-            for chunk_index, (chunk_start, chunk_stop) in enumerate(time_chunks):
-                self._report_chunk_progress(
-                    progress_callback, dataset_id, dataset_position=(dataset_index, len(datasets)), chunk_position=(chunk_index, len(time_chunks))
-                )
-                if self._is_chunk_complete_and_final(dataset_id, collection_name, chunk_start, chunk_stop):
-                    logger.info("Skipping chunk %s to %s of %s: stored values are complete and definitive.", chunk_start, chunk_stop, dataset_id)
-                    continue
+class GfzChunkSource:
+    """The GFZ steps of a chunked run, keeping the latest response of each index for its metadata."""
 
-                chunk_response = self._ingest_chunk(
-                    report, dataset_id, chunk_start, chunk_stop, partial(self._process_chunk, dataset_id, collection_name, chunk_start, chunk_stop)
-                )
-                if chunk_response is not None:
-                    latest_response = chunk_response
+    # The Kp index has one value every 3 hours
+    granularity = Granularity.HOURS
 
-            if latest_response is not None:
-                self._save_metadata(dataset_id, collection_name, latest_response)
-                self._refresh_coverage(self.coverage_repository, dataset_id, collection_name)
+    def __init__(self, client: GfzClient, timeseries: TimeSeriesRepository, metadata_repository: MetadataRepository) -> None:
+        """Initializes the source for one run.
 
-        return report
+        Args:
+            client: The client fetching the index values.
+            timeseries: The repository storing the data documents.
+            metadata_repository: The repository storing the metadata records.
+        """
+        self.client = client
+        self.timeseries = timeseries
+        self.metadata_repository = metadata_repository
+        self._latest_response: dict[str, pd.DataFrame] = {}
 
-    def _process_chunk(self, dataset_id: str, collection_name: str, chunk_start: datetime, chunk_stop: datetime) -> pd.DataFrame | None:
+    def collection_for(self, dataset_id: str) -> str:
+        """Names the collection of an index after its sanitized name.
+
+        Args:
+            dataset_id: The GFZ index name.
+
+        Returns:
+            The collection name.
+        """
+        return sanitize_collection_name(dataset_id)
+
+    def should_skip(self, dataset_id: str, collection: str, start: datetime, stop: datetime) -> bool:
+        """Skips a chunk whose stored documents hold one value per interval and no preliminary value.
+
+        Args:
+            dataset_id: The GFZ index name.
+            collection: The collection holding the index.
+            start: Start of the chunk (inclusive).
+            stop: End of the chunk (exclusive).
+
+        Returns:
+            True if the stored chunk is complete and definitive.
+        """
+        if self.timeseries.count(collection, start, stop) != count_grid_times(start, stop, GFZ_INDICES[dataset_id].cadence):
+            return False
+        return self.timeseries.count(collection, start, stop, data_values={"status": GfzStatus.PRELIMINARY}) == 0
+
+    def ingest_chunk(self, dataset_id: str, collection: str, start: datetime, stop: datetime) -> bool:
         """Fetches one chunk and replaces its stored documents; stored documents stay if the chunk holds no value.
 
         Args:
             dataset_id: The GFZ index name.
-            collection_name: The collection holding the index.
-            chunk_start: Start of the chunk (inclusive).
-            chunk_stop: End of the chunk (exclusive).
+            collection: The collection holding the index.
+            start: Start of the chunk (inclusive).
+            stop: End of the chunk (exclusive).
 
         Returns:
-            The fetched values, or None if GFZ has no value inside the chunk.
+            True if GFZ has a value inside the chunk.
 
         Raises:
             DataRetrievalError: If the request failed.
             DataProcessingError: If the response is no index data.
             pymongo.errors.PyMongoError: If the documents cannot be replaced.
         """
-        result = self.client.fetch(dataset_id, chunk_start, chunk_stop)
+        result = self.client.fetch(dataset_id, start, stop)
         if result.data is None:
-            logger.info("No value of %s inside chunk %s to %s; stored documents are kept.", dataset_id, chunk_start, chunk_stop)
-            return None
-
-        documents = dataframe_to_documents(result.data, f"{SourceType.GFZ_POTSDAM}/{dataset_id}")
-        self._replace_time_range(collection_name, chunk_start, chunk_stop, documents)
-        return result.data
-
-    def _is_chunk_complete_and_final(self, dataset_id: str, collection_name: str, chunk_start: datetime, chunk_stop: datetime) -> bool:
-        """Tells whether the stored chunk holds one document per interval and no preliminary value.
-
-        Args:
-            dataset_id: The GFZ index name.
-            collection_name: The collection holding the index.
-            chunk_start: Start of the chunk (inclusive).
-            chunk_stop: End of the chunk (exclusive).
-
-        Returns:
-            True if the chunk needs no request.
-        """
-        chunk_filter: dict[str, Any] = {TIME_FIELD: {"$gte": chunk_start, "$lt": chunk_stop}}
-        collection = self.db[collection_name]
-
-        stored_count = collection.count_documents(chunk_filter)
-        if stored_count != count_grid_times(chunk_start, chunk_stop, GFZ_INDICES[dataset_id].cadence):
+            logger.info("No value of %s inside chunk %s to %s; stored documents are kept", dataset_id, start, stop)
             return False
 
-        preliminary_count = collection.count_documents({**chunk_filter, f"{DATA_FIELD}.status": GfzStatus.PRELIMINARY})
-        return preliminary_count == 0
+        documents = frame_to_documents(result.data, source_identifier(SourceType.GFZ_POTSDAM, dataset_id))
+        self.timeseries.replace_range(collection, start, stop, documents)
+        self._latest_response[dataset_id] = result.data
+        return True
 
-    def _save_metadata(self, dataset_id: str, collection_name: str, response: pd.DataFrame) -> None:
-        """Saves the metadata record of an index, with license and provider from the response meta.
+    def save_metadata(self, dataset_id: str, collection: str) -> None:
+        """Saves the metadata record of an index, with license and provider from the meta object of its latest response.
 
-        Description, cadence and status meanings come from the index table of the GFZ client; license and
-        provider come from the meta object GFZ sends with every response. A failing build or save is
-        logged, as the stored data documents stay valid without metadata.
+        A failing build or save is logged, as the stored data documents stay valid without metadata.
 
         Args:
             dataset_id: The GFZ index name.
-            collection_name: The collection holding the index.
-            response: A fetched response of the index, carrying the response meta in attrs["meta"].
+            collection: The collection holding the index.
         """
-        meta: dict[str, Any] = response.attrs.get("meta", {})
+        response = self._latest_response.get(dataset_id)
+        if response is None:
+            return
         retrieved_at = datetime.now(UTC)
-        index = GFZ_INDICES[dataset_id]
         try:
-            variables = [
-                VariableMetadata.from_single_source(
-                    MetadataSourceKind.CURATED, name=dataset_id, source_name=dataset_id, description=index.description, dtype=DataType.DOUBLE
-                )
-            ]
-            if "status" in response.columns:
-                variables.append(
-                    VariableMetadata.from_single_source(
-                        MetadataSourceKind.CURATED,
-                        name="status",
-                        source_name="status",
-                        description="Status of the index value",
-                        dtype=DataType.STRING,
-                        flag_meanings={str(status): meaning for status, meaning in STATUS_MEANINGS.items()},
-                    )
-                )
-            record = DatasetMetadata(
-                dataset_id=dataset_id,
-                collection=collection_name,
-                source=SourceInfo(type=SourceType.GFZ_POTSDAM, provider=meta.get("source"), server_url=self.client.base_url),
-                # GFZ time stamps mark the start of each interval
-                time=TimeInfo(cadence=format_iso_duration(index.cadence), timestamp_location=TimestampLocation.BEGIN),
-                citation=CitationInfo(license=meta.get("license")),
-                variables=variables,
-                provenance=[
-                    MetadataSource(kind=MetadataSourceKind.API, url=self.client.base_url, retrieved_at=retrieved_at),
-                    MetadataSource(kind=MetadataSourceKind.CURATED, retrieved_at=retrieved_at),
-                ],
-                updated_at=retrieved_at,
+            record = build_gfz_metadata(
+                dataset_id, collection, response.attrs.get("meta", {}), "status" in response.columns, self.client.base_url, retrieved_at
             )
             save_with_overlays(self.metadata_repository, [record])
         except METADATA_SAVE_ERRORS:

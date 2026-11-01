@@ -1,30 +1,42 @@
 import pathlib
 from typing import assert_never
 
+from cdasws import CdasWs
 from pymongo.database import Database
 
-from pipeline_service.pipelines.base import BasePipeline
+from pipeline_service.pipelines.base import Pipeline
 from pipeline_service.pipelines.cdaweb import CdawebPipeline
 from pipeline_service.pipelines.gfz import GfzPipeline
 from pipeline_service.pipelines.hapi import HapiPipeline
 from pipeline_service.pipelines.local import LocalPipeline
 from space_weather_analysis.catalog.models import SourceType
+from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
+from space_weather_analysis.clients.gfz import GfzClient
+from space_weather_analysis.coverage.repository import CoverageRepository, MongoCoverageRepository
+from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
+from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository, TimeSeriesRepository
 
 
 class PipelineFactory:
-    """Creates the pipeline of a source type with the dependencies it needs."""
+    """Creates the pipeline of a source type with the repositories and clients it needs, which all pipelines share."""
 
     def __init__(self, db: Database, data_dir: pathlib.Path) -> None:
-        """Initializes the factory with the shared dependencies.
+        """Builds the repositories on the database and the clients of the data providers; no request is sent yet.
 
         Args:
             db: The MongoDB database instance.
             data_dir: The directory holding the local dataset files.
         """
-        self.db = db
         self.data_dir = data_dir
+        self.timeseries: TimeSeriesRepository = MongoTimeSeriesRepository(db)
+        self.catalog_repository: CatalogRepository = MongoCatalogRepository(db)
+        self.metadata_repository: MetadataRepository = MongoMetadataRepository(db)
+        self.coverage_repository: CoverageRepository = MongoCoverageRepository(db)
+        # Without response cache, so every run reads the current data
+        self.cdas = CdasWs(disable_cache=True)
+        self.gfz_client = GfzClient()
 
-    def get_pipeline(self, source_type: SourceType) -> BasePipeline:
+    def get_pipeline(self, source_type: SourceType) -> Pipeline:
         """Creates the pipeline of a source type.
 
         Args:
@@ -35,12 +47,28 @@ class PipelineFactory:
         """
         match source_type:
             case SourceType.HAPI:
-                return HapiPipeline(self.db)
+                return HapiPipeline(
+                    timeseries=self.timeseries,
+                    catalog_repository=self.catalog_repository,
+                    metadata_repository=self.metadata_repository,
+                    coverage_repository=self.coverage_repository,
+                )
             case SourceType.CDAWEB:
-                return CdawebPipeline(self.db)
+                return CdawebPipeline(
+                    timeseries=self.timeseries,
+                    catalog_repository=self.catalog_repository,
+                    metadata_repository=self.metadata_repository,
+                    coverage_repository=self.coverage_repository,
+                    cdas=self.cdas,
+                )
             case SourceType.GFZ_POTSDAM:
-                return GfzPipeline(self.db)
+                return GfzPipeline(
+                    timeseries=self.timeseries,
+                    metadata_repository=self.metadata_repository,
+                    coverage_repository=self.coverage_repository,
+                    client=self.gfz_client,
+                )
             case SourceType.LOCAL:
-                return LocalPipeline(self.db, self.data_dir)
+                return LocalPipeline(timeseries=self.timeseries, coverage_repository=self.coverage_repository, data_dir=self.data_dir)
             case _:
                 assert_never(source_type)

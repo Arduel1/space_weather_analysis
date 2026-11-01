@@ -1,5 +1,6 @@
+from collections.abc import Mapping
 from datetime import datetime
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -20,7 +21,7 @@ class CoverageInterval(BaseModel):
     @field_validator("start", "end")
     @classmethod
     def _times_in_utc(cls, value: datetime) -> datetime:
-        """Reads naive times as UTC, as MongoDB returns stored times without time zone."""
+        """Reads naive times as UTC, as a MongoDB client without tz_aware returns stored times without time zone."""
         return ensure_aware(value)
 
 
@@ -40,20 +41,20 @@ class StoredCoverage(BaseModel):
 
     dataset_id: str
     collection: str
-    first_timestamp: Optional[datetime] = None
-    last_timestamp: Optional[datetime] = None
+    first_timestamp: datetime | None = None
+    last_timestamp: datetime | None = None
     document_count: int
-    intervals: List[CoverageInterval] = Field(default_factory=list)
+    intervals: list[CoverageInterval] = Field(default_factory=list)
     bucket: str
     updated_at: datetime
 
     @field_validator("first_timestamp", "last_timestamp", "updated_at")
     @classmethod
-    def _times_in_utc(cls, value: Optional[datetime]) -> Optional[datetime]:
-        """Reads naive times as UTC, as MongoDB returns stored times without time zone."""
+    def _times_in_utc(cls, value: datetime | None) -> datetime | None:
+        """Reads naive times as UTC, as a MongoDB client without tz_aware returns stored times without time zone."""
         return ensure_aware(value) if value is not None else None
 
-    def to_document(self) -> Dict[str, Any]:
+    def to_document(self) -> dict[str, Any]:
         """Converts the coverage into a MongoDB document with the dataset ID as `_id`.
 
         Returns:

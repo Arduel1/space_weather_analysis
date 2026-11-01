@@ -1,7 +1,6 @@
 import logging
 import time
-from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 import streamlit as st
@@ -22,13 +21,13 @@ from streamlit_app.plots.xray import plot_xray_flux
 
 # Define global constants for date input constraints to prevent Streamlit
 # from defaulting to a narrow +/- 10 year range.
-MIN_ALLOWED_DATE = datetime(1800, 1, 1)
-MAX_ALLOWED_DATE = datetime(2200, 1, 1)
+MIN_ALLOWED_DATE = datetime(1800, 1, 1, tzinfo=UTC)
+MAX_ALLOWED_DATE = datetime(2200, 1, 1, tzinfo=UTC)
 
 logger = logging.getLogger(__name__)
 
 
-def parse_catalog_time(time_str: Optional[str], default: datetime) -> datetime:
+def parse_catalog_time(time_str: str | None, default: datetime) -> datetime:
     """Parses a time string from the catalog into a timezone-aware datetime object.
 
     Args:
@@ -39,17 +38,17 @@ def parse_catalog_time(time_str: Optional[str], default: datetime) -> datetime:
         A datetime object with UTC timezone information.
     """
     if not time_str:
-        return default.replace(tzinfo=timezone.utc)
+        return default.replace(tzinfo=UTC)
     try:
         dt = parser.parse(time_str)
         if dt.tzinfo is None:
-            return dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
+            return dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC)
     except (ValueError, TypeError):
-        return default.replace(tzinfo=timezone.utc)
+        return default.replace(tzinfo=UTC)
 
 
-def calculate_default_range(start_dt: datetime, end_dt: datetime) -> Tuple[datetime, datetime]:
+def calculate_default_range(start_dt: datetime, end_dt: datetime) -> tuple[datetime, datetime]:
     """Calculates a default 1-day selection window centered in the given range.
 
     This ensures that when a user selects a dataset, the initial time picker
@@ -82,7 +81,7 @@ def format_timedelta(td: timedelta) -> str:
     minutes, seconds = divmod(remainder, 60)
     if hours > 0:
         return f"{hours}h {minutes}m {seconds}s"
-    elif minutes > 0:
+    if minutes > 0:
         return f"{minutes}m {seconds}s"
     return f"{seconds}s"
 
@@ -97,20 +96,21 @@ st.set_page_config(
 
 
 @st.cache_resource
-def get_loader() -> Optional[DataLoader]:
+def get_loader() -> DataLoader | None:
     """Returns a cached instance of the DataLoader.
 
     The MongoDB settings and the connection are built only once per Streamlit
     server process, because this function is cached as a shared resource.
 
     Returns:
-        Optional[DataLoader]: The data loader, or None if the MongoDB settings
+        DataLoader | None: The data loader, or None if the MongoDB settings
         in the environment are invalid or incomplete.
     """
     try:
         mongo_settings = MongoSettings()
     except ValidationError as e:
-        logger.error(f"Invalid MongoDB settings, check the MONGO_* environment variables: {format_settings_error(e)}")
+        # The app cannot read data without valid settings; the traceback is left out, as it would show the given values
+        logger.critical("Invalid MongoDB settings, check the MONGO_* environment variables: %s", format_settings_error(e))
         return None
 
     connection = MongoConnection(mongo_settings)
@@ -127,13 +127,13 @@ app_mode = st.sidebar.radio("Choose Mode", ["Dataset Explorer", "Cycle Correlati
 
 st.sidebar.markdown("---")
 
-start_dt = datetime.now(timezone.utc) - timedelta(days=365)
-end_dt = datetime.now(timezone.utc)
+start_dt = datetime.now(UTC) - timedelta(days=365)
+end_dt = datetime.now(UTC)
 
 if app_mode != "Data Downloader":
     st.sidebar.subheader("Time Range Filter")
 
-    default_global_end = datetime.now()
+    default_global_end = datetime.now(UTC)
     default_global_start = default_global_end - timedelta(days=365)
 
     start_date = st.sidebar.date_input(
@@ -149,8 +149,8 @@ if app_mode != "Data Downloader":
         max_value=MAX_ALLOWED_DATE,
     )
 
-    start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
-    end_dt = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
+    start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=UTC)
+    end_dt = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=UTC)
 
 
 if app_mode == "Dataset Explorer":
@@ -302,8 +302,8 @@ elif app_mode == "Data Downloader":
                 with c4:
                     req_end_time = st.time_input("End Time", value=init_end.time())
 
-                req_start_dt = datetime.combine(req_start_date, req_start_time).replace(tzinfo=timezone.utc)
-                req_end_dt = datetime.combine(req_end_date, req_end_time).replace(tzinfo=timezone.utc)
+                req_start_dt = datetime.combine(req_start_date, req_start_time).replace(tzinfo=UTC)
+                req_end_dt = datetime.combine(req_end_date, req_end_time).replace(tzinfo=UTC)
 
                 if st.button("Start Download Job", type="primary"):
                     job_id = loader.create_download_job(
@@ -342,9 +342,9 @@ elif app_mode == "Data Downloader":
                     if status == "RUNNING" and progress_val > 0.01 and started_at:
                         # Ensure started_at is timezone aware for subtraction
                         if started_at.tzinfo is None:
-                            started_at = started_at.replace(tzinfo=timezone.utc)
+                            started_at = started_at.replace(tzinfo=UTC)
 
-                        now = datetime.now(timezone.utc)
+                        now = datetime.now(UTC)
                         elapsed = (now - started_at).total_seconds()
 
                         if elapsed > 0:

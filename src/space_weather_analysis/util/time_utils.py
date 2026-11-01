@@ -26,7 +26,7 @@ def ensure_aware(dt: datetime) -> datetime:
     return dt.astimezone(UTC)
 
 
-# A pydantic field type that reads naive times as UTC, as MongoDB returns stored times without time zone.
+# A pydantic field type that reads naive times as UTC, as a MongoDB client without tz_aware returns stored times without time zone.
 UtcDatetime = Annotated[datetime, AfterValidator(ensure_aware)]
 
 

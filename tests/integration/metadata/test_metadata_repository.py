@@ -51,7 +51,7 @@ def test_record_round_trip_through_repository(db: Database) -> None:
 
     repository.save(record)
 
-    # pymongo reads stored times back without time zone, so the equality also checks that they are read as UTC.
+    # The equality also checks that the stored times are read back in UTC.
     assert repository.get("synthetic/one") == record
     assert db["dataset_metadata"].find_one({"_id": "synthetic/one"}) is not None
     assert repository.get("unknown") is None

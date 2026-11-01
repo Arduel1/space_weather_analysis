@@ -10,7 +10,7 @@ from space_weather_analysis.catalog.models import CatalogEntryDict, CatalogMap, 
 from space_weather_analysis.database.bulk import bulk_write_in_batches
 from space_weather_analysis.util.time_utils import ensure_aware
 
-# Source fields holding times, which MongoDB returns without time zone.
+# Source fields holding times, which a MongoDB client without tz_aware returns without time zone.
 SOURCE_TIME_FIELDS = ("availability_checked_at", "missing_since")
 
 
