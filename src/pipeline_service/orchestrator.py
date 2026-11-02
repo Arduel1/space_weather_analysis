@@ -3,7 +3,6 @@ import pathlib
 import time
 from collections.abc import Callable
 from datetime import datetime
-from typing import Any
 
 from pymongo.database import Database
 from pymongo.errors import PyMongoError
@@ -23,7 +22,7 @@ INVALID_REQUEST_ERRORS = (ValueError, FileNotFoundError)
 
 
 class PipelineOrchestrator:
-    """Runs the pipelines for manual configurations and for the download jobs the frontend stores in MongoDB.
+    """Runs the pipelines for the download jobs stored in MongoDB by the frontend and the startup configuration.
 
     A job ends COMPLETED when at least one of its chunks was ingested or none needed ingesting; the chunks
     that failed are stored with it as missing chunks. It ends FAILED for an invalid request, when every
@@ -31,10 +30,8 @@ class PipelineOrchestrator:
     """
 
     POLLING_INTERVAL_SECONDS = 10
-    # The data directory of the project, holding the local dataset files
-    DATA_BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent / "data"
 
-    def __init__(self, db: Database, data_dir: pathlib.Path = DATA_BASE_DIR, pipeline_for: Callable[[SourceType], Pipeline] | None = None) -> None:
+    def __init__(self, db: Database, data_dir: pathlib.Path, pipeline_for: Callable[[SourceType], Pipeline] | None = None) -> None:
         """Initializes the orchestrator.
 
         Args:
@@ -46,29 +43,6 @@ class PipelineOrchestrator:
         self.job_repository: JobRepository = MongoJobRepository(db)
         self.catalog_repository: CatalogRepository = MongoCatalogRepository(db)
         self.pipeline_for = pipeline_for if pipeline_for is not None else PipelineFactory(self.db, data_dir).get_pipeline
-
-    def run_manual_jobs(self, manual_jobs: dict[SourceType, dict[str, Any]]) -> None:
-        """Runs the pipelines of a manual configuration one after the other; a failing one does not stop the others.
-
-        Args:
-            manual_jobs: The configuration per source type, with 'datasets' and optionally 'start_time' and 'end_time'.
-        """
-        for source_type, config in manual_jobs.items():
-            datasets = config.get("datasets")
-            if not datasets:
-                logger.info("Skipping manual job for %s: no datasets given.", source_type)
-                continue
-            logger.info("Starting manual job for %s", source_type)
-            try:
-                report = self._execute_pipeline(source_type, datasets, config.get("start_time"), config.get("end_time"), job_id=None)
-            except INVALID_REQUEST_ERRORS as error:
-                logger.warning("Manual job for %s rejected: %s", source_type, error)
-                continue
-            except Exception:
-                # A manual job must not keep the service from serving the job queue
-                logger.exception("Manual job for %s failed", source_type)
-                continue
-            logger.info("Manual job for %s done: %d chunks tried, %d missing.", source_type, report.chunks_total, len(report.gaps))
 
     def run_daemon(self) -> None:
         """Claims and runs pending jobs until the process ends, polling every POLLING_INTERVAL_SECONDS."""
