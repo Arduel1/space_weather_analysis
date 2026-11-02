@@ -7,6 +7,7 @@ from pymongo.database import Database
 
 from catalog_collector.cdaweb.datasets import cdaweb_dataset_ids_by_cdas_id, master_file_url
 from catalog_collector.hapi_mirror.files import MIRROR_BASE_URL, MIRROR_INFOS_PATH, mirror_file_url
+from catalog_collector.hapi_mirror.servers import first_hapi_servers
 from catalog_collector.metadata_catalog.cdaweb_masters import CdawebMasterRefresher
 from catalog_collector.metadata_catalog.hapi_coverage import sync_hapi_coverage
 from catalog_collector.metadata_catalog.hapi_metadata import HapiMirrorMetadataRefresher
@@ -17,6 +18,7 @@ from catalog_collector.worker_tasks.settings import TaskIntervalSettings
 from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
 from space_weather_analysis.metadata.models import MetadataSourceKind
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
+from space_weather_analysis.util.error_handling import DataRetrievalError
 
 HAPI_METADATA_KIND = "hapi_mirror_metadata"
 CDAWEB_MASTER_KIND = "cdaweb_master"
@@ -98,6 +100,10 @@ def hapi_metadata_kind(db: Database, settings: TaskIntervalSettings, mirror_base
 
     def refresh_metadata(_task: MetadataTask) -> None:
         """Refreshes the HAPI metadata and the coverage; a failed request raises DataRetrievalError or DataProcessingError."""
+        # On a fresh database the availability task builds the HAPI sources; failing until then retries after the
+        # failure backoff instead of a full interval, and skips the download of the large mirror file
+        if not first_hapi_servers(catalog_repository):
+            raise DataRetrievalError("The master catalog holds no HAPI source yet; the HAPI availability refresh adds them")
         refresher.refresh()
         sync_hapi_coverage(catalog_repository, metadata_repository)
 

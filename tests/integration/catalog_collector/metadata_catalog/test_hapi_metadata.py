@@ -10,6 +10,9 @@ from pytest_httpserver import HTTPServer
 from catalog_collector.metadata_catalog.hapi_coverage import sync_hapi_coverage
 from catalog_collector.metadata_catalog.hapi_metadata import HapiMirrorMetadataRefresher, HapiMirrorMetadataSummary
 from catalog_collector.metadata_catalog.snapshot import MetadataSnapshotLoader
+from catalog_collector.scheduling.models import MetadataTask
+from catalog_collector.worker_tasks.metadata_catalog import HAPI_METADATA_KIND, hapi_metadata_kind
+from catalog_collector.worker_tasks.settings import TaskIntervalSettings
 from space_weather_analysis.catalog.models import CatalogEntryDict
 from space_weather_analysis.catalog.repository import MongoCatalogRepository
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
@@ -206,3 +209,19 @@ def test_coverage_follows_the_refreshed_time_range_of_the_record_server(db: Data
         datetime(2026, 10, 28, tzinfo=UTC),
         other_record,
     )
+
+
+@pytest.mark.integration
+def test_metadata_task_on_a_catalog_without_hapi_sources_fails_for_a_retry_without_download(
+    db: Database, httpserver: HTTPServer, now: datetime
+) -> None:
+    """Before the availability refresh added HAPI sources, the metadata task fails retryable and does not request the mirror file."""
+    mirror_base_url = _serve_mirror(httpserver, {DATASET_ID: CHANGED_INFO})
+    task = MetadataTask(
+        id=f"{HAPI_METADATA_KIND}/all", kind=HAPI_METADATA_KIND, target="all", url=mirror_base_url, interval_seconds=86400, next_due_at=now
+    )
+
+    with pytest.raises(DataRetrievalError):
+        hapi_metadata_kind(db, TaskIntervalSettings(), mirror_base_url).run(task)
+
+    assert (httpserver.log, MongoMetadataRepository(db).get(DATASET_ID)) == ([], None)

@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import timedelta
 
 import requests
@@ -12,18 +13,21 @@ from space_weather_analysis.catalog.repository import MongoCatalogRepository
 HAPI_AVAILABILITY_KIND = "hapi_mirror_availability"
 
 
-def hapi_availability_kind(db: Database, settings: TaskIntervalSettings, mirror_base_url: str = MIRROR_BASE_URL) -> TaskKind:
+def hapi_availability_kind(
+    db: Database, settings: TaskIntervalSettings, server_urls: Sequence[str], mirror_base_url: str = MIRROR_BASE_URL
+) -> TaskKind:
     """Builds the task kind that refreshes the availability of the HAPI sources from the HAPI metadata mirror.
 
     Args:
         db: The MongoDB database instance.
         settings: The intervals of the task kinds.
+        server_urls: The base URLs of the HAPI servers whose mirrored datasets the catalog holds.
         mirror_base_url: The base URL of the mirror files.
 
     Returns:
         The kind with a single task reading the mirror's catalog and dataset table.
     """
-    refresher = HapiMirrorAvailabilityRefresher(MongoCatalogRepository(db), requests.Session(), mirror_base_url)
+    refresher = HapiMirrorAvailabilityRefresher(MongoCatalogRepository(db), requests.Session(), mirror_base_url, server_urls=server_urls)
 
     def refresh_availability(_task: MetadataTask) -> None:
         """Refreshes the availability of the HAPI sources; a failed request raises DataRetrievalError or DataProcessingError."""

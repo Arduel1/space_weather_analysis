@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any
 
 from space_weather_analysis.catalog.models import SourceType
@@ -20,6 +21,21 @@ def describes_hapi_source(record: DatasetMetadata, server_url: str) -> bool:
     if record.source.type != SourceType.HAPI:
         return False
     return not record.source.server_url or normalize_server_url(record.source.server_url) == normalize_server_url(server_url)
+
+
+def read_server_list(path: Path) -> list[str]:
+    """Reads the HAPI server list, one server base URL per line.
+
+    Args:
+        path: The server list file.
+
+    Returns:
+        The server base URLs as written, without blank lines.
+
+    Raises:
+        OSError: If the file cannot be read.
+    """
+    return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 def normalize_server_url(url: str) -> str:

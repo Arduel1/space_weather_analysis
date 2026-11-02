@@ -96,3 +96,42 @@ def test_unlisted_dataset_is_kept_counted_and_reset_on_reappearance(
         "availability_checked_at": now,
         "missing_runs": 0,
     }
+
+
+@pytest.mark.integration
+def test_unknown_datasets_get_a_cdaweb_source_of_their_observatory_group(
+    db: Database,
+    http_session: requests.Session,
+    serve_cdas: Callable[[list[dict[str, Any]]], str],
+    save_catalog: Callable[[dict[str, list[CatalogEntryDict]]], list[MasterCatalogItem]],
+    clock: Callable[[], datetime],
+    now: datetime,
+) -> None:
+    """A listed dataset without CDAWEB source gets one, appended to an existing item; an entry without time range adds nothing."""
+    hapi_source = cast(CatalogEntryDict, {"type": "HAPI", "source_id": "https://cdaweb.gsfc.nasa.gov/hapi", "time_range": dict(CATALOG_TIME_RANGE)})
+    save_catalog({DATASET_ID: [hapi_source]})
+    stop = _cdas_time(now - timedelta(days=5))
+    entries = [
+        {**_entries({DATASET_ID: stop})[0], "ObservatoryGroup": ["SYNTH", "OTHER"]},
+        {**_entries({"SYNTH_NEW": stop})[0], "ObservatoryGroup": ["NEW"]},
+        {"Id": "SYNTH_UNDATED", "ObservatoryGroup": ["NEW"]},
+    ]
+
+    summary = _refresh(db, http_session, serve_cdas(entries), clock)
+
+    def added(group: str) -> dict[str, Any]:
+        """Builds the CDAWEB source the refresh adds for a dataset of the group."""
+        return {
+            "type": "CDAWEB",
+            "source_id": group,
+            "time_range": {"start_time": CDAS_START, "end_time": stop},
+            "ongoing": True,
+            "availability_checked_at": now,
+            "missing_runs": 0,
+        }
+
+    assert MongoCatalogRepository(db).get_all() == [
+        {"dataset_id": DATASET_ID, "sources": [hapi_source, added("SYNTH")]},
+        {"dataset_id": "SYNTH_NEW", "sources": [added("NEW")]},
+    ]
+    assert (summary.added, summary.undated) == (2, 1)

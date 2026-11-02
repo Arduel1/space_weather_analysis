@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -10,11 +10,13 @@ from catalog_collector.data_catalog.availability_state import (
     ONGOING_TOLERANCE,
     AvailabilitySummary,
     LookupOutcome,
+    SourceCandidate,
     SourceLookup,
+    add_new_sources,
     refresh_sources,
 )
 from catalog_collector.hapi_mirror.files import MIRROR_BASE_URL, MIRROR_CATALOGS_PATH, MIRROR_DATASET_TABLE_PATH, fetch_mirror_json
-from catalog_collector.hapi_mirror.servers import index_mirror_servers, mirror_server_id
+from catalog_collector.hapi_mirror.servers import index_mirror_servers, mirror_server_id, normalize_server_url
 from space_weather_analysis.catalog.models import CatalogEntryDict, SourceType
 from space_weather_analysis.catalog.repository import CatalogRepository
 from space_weather_analysis.util.error_handling import DataProcessingError
@@ -68,6 +70,19 @@ class MirrorSnapshot:
         server_id = mirror_server_id(source["source_id"], dataset_id, self.server_ids_by_url, self.listed_datasets)
         if server_id is None:
             return SourceLookup(LookupOutcome.UNTOUCHED)
+        return self.dataset_lookup(server_id, dataset_id)
+
+    def dataset_lookup(self, server_id: str, dataset_id: str) -> SourceLookup:
+        """Answers what the mirror says about one dataset of a mirror server.
+
+        Args:
+            server_id: The mirror server ID.
+            dataset_id: The dataset ID.
+
+        Returns:
+            FOUND with the time range, UNRESOLVED if the mirror lists the dataset without usable dates, or MISSING
+            if the server no longer lists it.
+        """
         if (server_id, dataset_id) in self.availability:
             availability = self.availability[(server_id, dataset_id)]
             if availability is None:
@@ -78,12 +93,55 @@ class MirrorSnapshot:
             return SourceLookup(LookupOutcome.UNRESOLVED)
         return SourceLookup(LookupOutcome.MISSING)
 
+    def source_candidates(self, server_urls: Sequence[str]) -> list[SourceCandidate]:
+        """Lists a HAPI source for every dataset the mirror lists at one of the servers.
+
+        Only mirror servers of the same host can match a server, so the datasets of all other hosts are skipped.
+
+        Args:
+            server_urls: The base URLs of the servers, as the new sources name them.
+
+        Returns:
+            The candidates in server order and dataset ID order.
+        """
+        candidates: list[SourceCandidate] = []
+        for server_url in server_urls:
+            host = normalize_server_url(server_url).split("/", 1)[0]
+            for mirror_url, server_id in self.server_ids_by_url.items():
+                if mirror_url.split("/", 1)[0] != host:
+                    continue
+                candidates.extend(
+                    SourceCandidate(dataset_id, SourceType.HAPI, server_url, self.dataset_lookup(server_id, dataset_id))
+                    for dataset_id in sorted(self.listed_datasets.get(server_id, set()))
+                    if mirror_server_id(server_url, dataset_id, self.server_ids_by_url, self.listed_datasets) == server_id
+                )
+        return candidates
+
+    def covers(self, source: CatalogEntryDict, candidate: SourceCandidate) -> bool:
+        """Checks whether a catalog source names the server of a candidate, by URL or by the mirror server both resolve to.
+
+        Args:
+            source: A source of the candidate's dataset.
+            candidate: The HAPI source the mirror names.
+
+        Returns:
+            True if the source is a HAPI source of the same server.
+        """
+        if source.get("type") != SourceType.HAPI:
+            return False
+        if normalize_server_url(source["source_id"]) == normalize_server_url(candidate.source_id):
+            return True
+        source_server_id = mirror_server_id(source["source_id"], candidate.dataset_id, self.server_ids_by_url, self.listed_datasets)
+        candidate_server_id = mirror_server_id(candidate.source_id, candidate.dataset_id, self.server_ids_by_url, self.listed_datasets)
+        return source_server_id is not None and source_server_id == candidate_server_id
+
 
 class HapiMirrorAvailabilityRefresher:
     """Keeps the time range of the HAPI sources in the master catalog current from the HAPI metadata mirror.
 
     Sources whose dataset is missing in the mirror are kept and only counted as missing, as servers
-    and the mirror itself are unreachable at times.
+    and the mirror itself are unreachable at times. Datasets the mirror lists at a server of the
+    server list get a new HAPI source.
     """
 
     def __init__(
@@ -92,6 +150,7 @@ class HapiMirrorAvailabilityRefresher:
         session: requests.Session,
         mirror_base_url: str = MIRROR_BASE_URL,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        server_urls: Sequence[str] = (),
     ) -> None:
         """Initializes the refresher.
 
@@ -100,14 +159,16 @@ class HapiMirrorAvailabilityRefresher:
             session: The HTTP session for the requests.
             mirror_base_url: The base URL of the mirror files.
             clock: Returns the current time in UTC.
+            server_urls: The base URLs of the HAPI servers whose datasets the catalog holds; none are added if empty.
         """
         self.catalog_repository = catalog_repository
         self.session = session
         self.mirror_base_url = mirror_base_url
         self.clock = clock
+        self.server_urls = server_urls
 
     def refresh(self) -> AvailabilitySummary:
-        """Updates the availability of every HAPI source of a server the mirror maintains.
+        """Updates the availability of every HAPI source of a server the mirror maintains and adds the new datasets of the listed servers.
 
         Returns:
             The summary; untouched_sources names the catalog servers the mirror does not maintain.
@@ -120,13 +181,20 @@ class HapiMirrorAvailabilityRefresher:
         dataset_table = fetch_mirror_json(self.session, self.mirror_base_url, MIRROR_DATASET_TABLE_PATH)
         mirror = parse_mirror(catalogs, dataset_table, self.clock())
 
-        summary = refresh_sources(self.catalog_repository, SourceType.HAPI, mirror.lookup, self.clock(), mirror.created_at - ONGOING_TOLERANCE)
+        checked_at = self.clock()
+        ongoing_since = mirror.created_at - ONGOING_TOLERANCE
+        summary = refresh_sources(self.catalog_repository, SourceType.HAPI, mirror.lookup, checked_at, ongoing_since)
+        candidates = mirror.source_candidates(self.server_urls)
+        add_new_sources(self.catalog_repository, candidates, mirror.covers, summary, checked_at, ongoing_since)
         logger.info(
-            "HAPI mirror availability refresh: %d sources refreshed (%d ongoing), %d missing, %d without usable dates; servers not in the mirror: %s",
+            "HAPI mirror availability refresh: %d sources refreshed (%d ongoing), %d missing, %d without usable dates, %d added, "
+            "%d new datasets without usable dates; servers not in the mirror: %s",
             summary.refreshed,
             summary.ongoing,
             summary.missing,
             summary.unresolved,
+            summary.added,
+            summary.undated,
             summary.untouched_sources,
         )
         return summary

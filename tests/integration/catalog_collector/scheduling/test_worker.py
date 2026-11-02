@@ -196,7 +196,7 @@ def test_hapi_mirror_tasks_record_failure_when_the_mirror_is_unreachable(db: Dat
     """Both HAPI mirror tasks are planned and run at once, and an unreachable mirror counts as failed run instead of success."""
     clock = FakeClock()
     mirror_base_url = f"{closed_port_url}/meta/"
-    kinds = [hapi_metadata_kind(db, TaskIntervalSettings(), mirror_base_url), hapi_availability_kind(db, TaskIntervalSettings(), mirror_base_url)]
+    kinds = [hapi_metadata_kind(db, TaskIntervalSettings(), mirror_base_url), hapi_availability_kind(db, TaskIntervalSettings(), [], mirror_base_url)]
     worker = _worker(db, kinds, clock)
 
     worker.run_once()

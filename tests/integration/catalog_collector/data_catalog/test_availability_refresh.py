@@ -1,4 +1,5 @@
-from collections.abc import Callable
+import pathlib
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import Any, cast
 
@@ -10,6 +11,7 @@ from pytest_httpserver import HTTPServer
 from catalog_collector.data_catalog.availability_state import AvailabilitySummary
 from catalog_collector.data_catalog.hapi_availability import HapiMirrorAvailabilityRefresher
 from catalog_collector.data_catalog.snapshot import CatalogSnapshotLoader
+from catalog_collector.hapi_mirror.servers import read_server_list
 from space_weather_analysis.catalog.models import CatalogEntryDict, MasterCatalogItem
 from space_weather_analysis.catalog.repository import MongoCatalogRepository
 from space_weather_analysis.util.error_handling import DataRetrievalError
@@ -57,9 +59,23 @@ def _source(server_url: str = SERVER_URL, **extra_fields: Any) -> CatalogEntryDi
     return cast(CatalogEntryDict, {"type": "HAPI", "source_id": server_url, "time_range": dict(CATALOG_TIME_RANGE), **extra_fields})
 
 
-def _refresh(db: Database, session: requests.Session, mirror_base_url: str, clock: Callable[[], datetime]) -> AvailabilitySummary:
+def _refresh(
+    db: Database, session: requests.Session, mirror_base_url: str, clock: Callable[[], datetime], server_urls: Sequence[str] = ()
+) -> AvailabilitySummary:
     """Runs one availability refresh against the mirror and returns its summary."""
-    return HapiMirrorAvailabilityRefresher(MongoCatalogRepository(db), session, mirror_base_url, clock).refresh()
+    return HapiMirrorAvailabilityRefresher(MongoCatalogRepository(db), session, mirror_base_url, clock, server_urls).refresh()
+
+
+def _added_source(server_url: str, stop: str, now: datetime) -> dict[str, Any]:
+    """Builds the HAPI source the refresh adds for a mirrored dataset of a listed server."""
+    return {
+        "type": "HAPI",
+        "source_id": server_url,
+        "time_range": {"start_time": MIRROR_START, "end_time": stop},
+        "ongoing": True,
+        "availability_checked_at": now,
+        "missing_runs": 0,
+    }
 
 
 def _stored_source(db: Database, dataset_id: str = DATASET_ID) -> dict[str, Any]:
@@ -211,3 +227,44 @@ def test_unreachable_mirror_raises_and_leaves_catalog_unchanged(
         _refresh(db, http_session, mirror_url_of(httpserver, closed_port_url), clock)
 
     assert MongoCatalogRepository(db).get_all() == stored_items
+
+
+@pytest.mark.integration
+def test_empty_catalog_gets_sources_of_listed_servers_only(
+    db: Database, httpserver: HTTPServer, http_session: requests.Session, clock: Callable[[], datetime], now: datetime, tmp_path: pathlib.Path
+) -> None:
+    """Datasets the mirror lists at a server of the server list become catalog items; other servers and undated rows add nothing."""
+    server_list_file = tmp_path / "all.txt"
+    server_list_file.write_text(f"{SERVER_URL}\n\n", encoding="utf-8")
+    catalogs = {
+        **_catalogs([DATASET_ID, OTHER_DATASET_ID]),
+        "Unlisted": {"about": {"x_url": UNMIRRORED_SERVER_URL}, "catalog": {"catalog": [{"id": "unlisted_P1M"}]}},
+    }
+    table = _dataset_table({DATASET_ID: "2026-10-28T00:00Z"})
+    table["body"] += [
+        [MIRROR_SERVER_ID, OTHER_DATASET_ID, "", "", "", "", ""],
+        ["Unlisted", "unlisted_P1M", "", MIRROR_START, "", "2026-10-28T00:00Z", ""],
+    ]
+    httpserver.expect_request(f"{MIRROR_PATH}/catalogs.json").respond_with_json(catalogs)
+    httpserver.expect_request(f"{MIRROR_PATH}/table/hapi.all.datasets.json").respond_with_json(table)
+
+    summary = _refresh(db, http_session, httpserver.url_for(f"{MIRROR_PATH}/"), clock, read_server_list(server_list_file))
+
+    assert MongoCatalogRepository(db).get_all() == [{"dataset_id": DATASET_ID, "sources": [_added_source(SERVER_URL, "2026-10-28T00:00Z", now)]}]
+    assert (summary.added, summary.undated) == (1, 1)
+
+
+@pytest.mark.integration
+def test_existing_dataset_gains_a_source_of_a_new_server_and_keeps_its_sources(
+    db: Database, httpserver: HTTPServer, http_session: requests.Session, save_catalog: SaveCatalog, clock: Callable[[], datetime], now: datetime
+) -> None:
+    """A dataset held for another server gets the listed server appended, while a dataset already held for the server gets no duplicate."""
+    save_catalog({DATASET_ID: [_source(UNMIRRORED_SERVER_URL)], OTHER_DATASET_ID: [_source()]})
+    stop = "2026-10-28T00:00Z"
+
+    summary = _refresh(db, http_session, _serve_mirror(httpserver, {DATASET_ID: stop, OTHER_DATASET_ID: stop}), clock, [SERVER_URL])
+
+    repository = MongoCatalogRepository(db)
+    assert repository.get_sources(DATASET_ID) == [_source(UNMIRRORED_SERVER_URL), _added_source(SERVER_URL, stop, now)]
+    assert repository.get_sources(OTHER_DATASET_ID) == [_added_source(SERVER_URL, stop, now)]
+    assert (summary.refreshed, summary.added) == (1, 1)

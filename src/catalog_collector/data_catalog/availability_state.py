@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -50,13 +50,76 @@ class AvailabilitySummary:
         missing: Sources whose dataset the provider no longer lists; their state is kept.
         unresolved: Sources whose dataset the provider lists without usable time range; left unchanged.
         untouched_sources: Source IDs of the catalog that the provider listing does not cover; their sources are left unchanged.
+        added: New sources for datasets the provider lists and the catalog did not hold yet.
+        undated: Listed datasets not added, as the provider gives no usable time range for them.
     """
 
     refreshed: int = 0
     ongoing: int = 0
     missing: int = 0
     unresolved: int = 0
+    added: int = 0
+    undated: int = 0
     untouched_sources: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class SourceCandidate:
+    """A source that a provider listing names and that the catalog may not hold yet.
+
+    Attributes:
+        dataset_id: The dataset ID.
+        source_type: The type of the source.
+        source_id: The source ID the new source gets.
+        lookup: What the listing says about the dataset; only FOUND adds a source.
+    """
+
+    dataset_id: str
+    source_type: SourceType
+    source_id: str
+    lookup: SourceLookup
+
+
+def add_new_sources(
+    catalog_repository: CatalogRepository,
+    candidates: Iterable[SourceCandidate],
+    covers: Callable[[CatalogEntryDict, SourceCandidate], bool],
+    summary: AvailabilitySummary,
+    checked_at: datetime,
+    ongoing_since: datetime,
+) -> None:
+    """Adds a source for every candidate that no source of its dataset covers yet and saves the changed items.
+
+    A new source of a dataset already in the catalog is appended to its sources; the other sources stay as they are.
+
+    Args:
+        catalog_repository: The master catalog to extend.
+        candidates: The sources the provider listing names.
+        covers: Checks whether an existing source of the dataset already serves the candidate.
+        summary: The summary of the refresh; added and undated are counted into it.
+        checked_at: The time of this refresh in UTC.
+        ongoing_since: The earliest stop time of a source that still counts as ongoing.
+    """
+    items = {item["dataset_id"]: item for item in catalog_repository.get_all()}
+    changed_items: dict[str, MasterCatalogItem] = {}
+    for candidate in candidates:
+        item = items.setdefault(candidate.dataset_id, {"dataset_id": candidate.dataset_id, "sources": []})
+        if any(covers(source, candidate) for source in item["sources"]):
+            continue
+        result = candidate.lookup
+        if result.outcome != LookupOutcome.FOUND or not (result.start and result.stop and result.stop_time):
+            summary.undated += 1
+            continue
+        source: CatalogEntryDict = {
+            "type": candidate.source_type,
+            "source_id": candidate.source_id,
+            "time_range": {"start_time": result.start, "end_time": result.stop},
+        }
+        apply_availability(source, result.start, result.stop, ongoing=result.stop_time >= ongoing_since, checked_at=checked_at)
+        item["sources"].append(source)
+        changed_items[candidate.dataset_id] = item
+        summary.added += 1
+    catalog_repository.save_many(list(changed_items.values()))
 
 
 def refresh_sources(
