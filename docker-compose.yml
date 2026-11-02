@@ -1,18 +1,4 @@
 services:
-  catalog-collector:
-    build: .
-    restart: "no"
-    depends_on:
-      mongo:
-        condition: service_healthy
-    env_file:
-      - .env
-    volumes:
-      - ./data:/app/data
-    command: ["python", "-m", "catalog_collector.main"]
-    networks:
-      - space-weather-net
-
   # Long-running background process for all recurring metadata requests, paced per provider host
   metadata-worker:
     build: .
@@ -20,8 +6,6 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
-      catalog-collector:
-        condition: service_completed_successfully
     env_file:
       - .env
     command: ["python", "-m", "catalog_collector.metadata_worker"]
@@ -34,8 +18,6 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
-      catalog-collector:
-        condition: service_completed_successfully
     env_file:
       - .env
     volumes:

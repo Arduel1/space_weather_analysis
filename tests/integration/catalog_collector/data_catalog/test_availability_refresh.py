@@ -10,7 +10,6 @@ from pytest_httpserver import HTTPServer
 
 from catalog_collector.data_catalog.availability_state import AvailabilitySummary
 from catalog_collector.data_catalog.hapi_availability import HapiMirrorAvailabilityRefresher
-from catalog_collector.data_catalog.snapshot import CatalogSnapshotLoader
 from catalog_collector.hapi_mirror.servers import read_server_list
 from space_weather_analysis.catalog.models import CatalogEntryDict, MasterCatalogItem
 from space_weather_analysis.catalog.repository import MongoCatalogRepository
@@ -55,7 +54,7 @@ def _serve_mirror(httpserver: HTTPServer, stop_dates: dict[str, str]) -> str:
 
 
 def _source(server_url: str = SERVER_URL, **extra_fields: Any) -> CatalogEntryDict:
-    """Builds a HAPI catalog source with the snapshot time range and the extra fields."""
+    """Builds a HAPI catalog source with the stored time range and the extra fields."""
     return cast(CatalogEntryDict, {"type": "HAPI", "source_id": server_url, "time_range": dict(CATALOG_TIME_RANGE), **extra_fields})
 
 
@@ -168,26 +167,6 @@ def test_sources_of_servers_outside_mirror_stay_untouched(
 
     assert MongoCatalogRepository(db).get_all() == stored_items
     assert (summary.refreshed, summary.missing, summary.untouched_sources) == (0, 0, [UNMIRRORED_SERVER_URL])
-
-
-@pytest.mark.integration
-def test_collector_restart_with_stale_snapshot_keeps_refreshed_availability(
-    db: Database,
-    httpserver: HTTPServer,
-    http_session: requests.Session,
-    snapshot_files: Callable[[dict[str, Any], Any], tuple[Any, Any]],
-    clock: Callable[[], datetime],
-) -> None:
-    """Reloading the stale catalog snapshot keeps the refreshed time range and ongoing state."""
-    catalog_file, _ = snapshot_files({DATASET_ID: [_source()]}, [])
-    catalog_loader = CatalogSnapshotLoader(MongoCatalogRepository(db), catalog_file)
-    catalog_loader.load_to_db()
-    _refresh(db, http_session, _serve_mirror(httpserver, {DATASET_ID: "2026-10-28T00:00Z"}), clock)
-
-    catalog_loader.load_to_db()
-
-    after_restart = _stored_source(db)
-    assert (after_restart["time_range"], after_restart["ongoing"]) == ({"start_time": MIRROR_START, "end_time": "2026-10-28T00:00Z"}, True)
 
 
 @pytest.mark.integration

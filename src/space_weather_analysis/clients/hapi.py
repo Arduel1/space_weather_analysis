@@ -46,53 +46,11 @@ class HapiClient(DataClient[HapiData]):
         """Initializes the client with the HAPI sources it may request data from.
 
         Args:
-            catalog_map: The HAPI sources of each dataset, keyed by dataset ID; None for a client
-                that only uses the methods taking a server URL.
+            catalog_map: The HAPI sources of each dataset, keyed by dataset ID; None for a client without sources.
             retry_backoff_factor: The wait in seconds before asking a transiently failing source again, doubled for every further try.
         """
         self.catalog_map: CatalogMap = catalog_map if catalog_map is not None else {}
         self.retry_backoff_factor = retry_backoff_factor
-
-    @retry_interaction(exceptions=(HAPIError,))
-    def fetch_server_catalog(self, server_url: str) -> list[dict[str, Any]]:
-        """Fetches the /catalog response of a HAPI server.
-
-        Args:
-            server_url: The base URL of the HAPI server.
-
-        Returns:
-            The datasets the server lists.
-        """
-        response = hapi(server_url, **self.HAPI_OPTIONS)
-        catalog: list[dict[str, Any]] = response.get("catalog", [])
-        logger.info("Discovered %d datasets at %s", len(catalog), server_url)
-        return catalog
-
-    @retry_interaction(exceptions=(DataRetrievalError,))
-    def fetch_dataset_metadata_from_server(self, dataset_id: str, server_url: str) -> dict[str, Any] | None:
-        """Fetches the /info response of one dataset from one server, with the server URL in 'x_server_url'.
-
-        Args:
-            dataset_id: The dataset ID.
-            server_url: The base URL of the HAPI server.
-
-        Returns:
-            The /info response, or None if the server answered that it has no such dataset.
-
-        Raises:
-            DataRetrievalError: If the request failed in every attempt.
-        """
-        try:
-            meta = hapi(server_url, dataset_id, **self.HAPI_OPTIONS)
-        except HAPIError as error:
-            self._raise_if_transient(error, server_url, dataset_id)
-            logger.info("Server %s has no metadata of %s: %s", server_url, dataset_id, error)
-            return None
-        if not isinstance(meta, dict):
-            logger.warning("Unexpected metadata format from %s: %s", server_url, type(meta))
-            return None
-        meta["x_server_url"] = server_url
-        return meta
 
     def fetch(self, dataset_id: str, start: datetime, stop: datetime) -> FetchResult[HapiData]:
         """Fetches every parameter of a dataset for a time range from the first catalog source that has data.

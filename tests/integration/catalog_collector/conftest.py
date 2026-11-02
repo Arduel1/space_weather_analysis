@@ -1,5 +1,3 @@
-import json
-import pathlib
 import socket
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
@@ -59,21 +57,6 @@ def save_catalog(db: Database) -> Callable[[dict[str, list[CatalogEntryDict]]], 
         return repository.get_all()
 
     return save
-
-
-@pytest.fixture
-def snapshot_files(tmp_path: pathlib.Path) -> Callable[[dict[str, Any], Any], tuple[pathlib.Path, pathlib.Path]]:
-    """Writes a catalog snapshot and a metadata snapshot as files and returns their paths."""
-
-    def write(catalog: dict[str, Any], metadata: Any) -> tuple[pathlib.Path, pathlib.Path]:
-        """Writes both files in the snapshot formats and returns catalog file and metadata file."""
-        catalog_file = tmp_path / "master_catalog.json"
-        metadata_file = tmp_path / "dataset_metadata.json"
-        catalog_file.write_text(json.dumps(catalog), encoding="utf-8")
-        metadata_file.write_text(json.dumps(metadata), encoding="utf-8")
-        return catalog_file, metadata_file
-
-    return write
 
 
 @pytest.fixture

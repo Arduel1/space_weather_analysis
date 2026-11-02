@@ -101,18 +101,6 @@ class GfzClient(DataClient[pd.DataFrame]):
             }
         ]
 
-    @staticmethod
-    def get_dataset_metadata(dataset_id: str) -> dict[str, Any]:
-        """Describes an index for the discovery.
-
-        Args:
-            dataset_id: The GFZ index name.
-
-        Returns:
-            The index name, source type, unit and description.
-        """
-        return {"id": dataset_id, "source": SourceType.GFZ_POTSDAM, "units": "Index (0-9)", "description": "Global geomagnetic storm index."}
-
     def fetch(self, dataset_id: str, start: datetime, stop: datetime) -> FetchResult[pd.DataFrame]:
         """Fetches the values of an index for a time range.
 

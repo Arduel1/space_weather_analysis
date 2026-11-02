@@ -41,14 +41,14 @@ class CatalogEntryDict(TypedDict):
         source_id: The identifier of the source within its type: the server URL for HAPI,
             the group name for CDAWEB and 'GFZ' for GFZ_POTSDAM.
         time_range: The temporal coverage of this dataset at this source.
-        dataset_id: Optional dataset identifier, added by some discoverers.
+        dataset_id: Optional dataset identifier, set on the GFZ sources.
         description: Optional human-readable description of the dataset.
         ongoing: Whether the source still receives new data, so its stop time moves forward; set by the
             availability refreshes.
         availability_checked_at: When an availability refresh last found the dataset at its source, in UTC.
-        missing_runs: How many refreshes or discovery runs in a row did not find the dataset at its source;
+        missing_runs: How many refreshes in a row did not find the dataset at its source;
             0 once it is found again.
-        missing_since: When a refresh or discovery run first missed the dataset in the current run of misses,
+        missing_since: When a refresh first missed the dataset in the current run of misses,
             in UTC; absent while the dataset is found.
     """
 

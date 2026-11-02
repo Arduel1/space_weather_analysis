@@ -112,8 +112,8 @@ def mirror_server_id(server_url: str, dataset_id: str, server_ids_by_url: dict[s
 def first_hapi_servers(catalog_repository: CatalogRepository) -> dict[str, str]:
     """Reads the first HAPI server of each dataset from the master catalog, the one server its HAPI metadata record describes.
 
-    Every writer of HAPI records builds them for this server, so the snapshot load, the mirror refresh and the coverage
-    sync agree on which record belongs to which source; the server a response came from is kept only in the raw metadata.
+    Every writer of HAPI records builds them for this server, so the mirror refresh and the coverage sync agree on which
+    record belongs to which source; the server a response came from is kept only in the raw metadata.
 
     Args:
         catalog_repository: The master catalog.

@@ -18,7 +18,7 @@ CDAS_START = "2016-07-26T00:00:00.000Z"
 
 
 def _source() -> CatalogEntryDict:
-    """Builds a CDAWEB catalog source with the snapshot time range."""
+    """Builds a CDAWEB catalog source with the stored time range."""
     return cast(CatalogEntryDict, {"type": "CDAWEB", "source_id": "SYNTH", "time_range": dict(CATALOG_TIME_RANGE)})
 
 

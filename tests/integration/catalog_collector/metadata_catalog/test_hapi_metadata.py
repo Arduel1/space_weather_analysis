@@ -9,7 +9,6 @@ from pytest_httpserver import HTTPServer
 
 from catalog_collector.metadata_catalog.hapi_coverage import sync_hapi_coverage
 from catalog_collector.metadata_catalog.hapi_metadata import HapiMirrorMetadataRefresher, HapiMirrorMetadataSummary
-from catalog_collector.metadata_catalog.snapshot import MetadataSnapshotLoader
 from catalog_collector.scheduling.models import MetadataTask
 from catalog_collector.worker_tasks.metadata_catalog import HAPI_METADATA_KIND, hapi_metadata_kind
 from catalog_collector.worker_tasks.settings import TaskIntervalSettings
@@ -162,27 +161,6 @@ def test_record_of_another_source_kind_is_not_replaced(
     summary = _refresh(db, http_session, _serve_mirror(httpserver, {DATASET_ID: CHANGED_INFO}), clock)
 
     assert (summary.other_source, _stored_metadata(db)) == (1, stored)
-
-
-@pytest.mark.integration
-def test_collector_restart_with_stale_snapshot_keeps_refreshed_metadata(
-    db: Database,
-    httpserver: HTTPServer,
-    http_session: requests.Session,
-    snapshot_files: Callable[[dict[str, Any], Any], tuple[Any, Any]],
-    clock: Callable[[], datetime],
-) -> None:
-    """Reloading the snapshot after a refresh keeps the refreshed metadata."""
-    _, metadata_file = snapshot_files({}, [{"dataset_id": DATASET_ID, "metadata": {**STORED_INFO, "x_server_url": SERVER_URL}}])
-    MongoCatalogRepository(db).save({"dataset_id": DATASET_ID, "sources": [CATALOG_SOURCE]})
-    loader = MetadataSnapshotLoader(MongoCatalogRepository(db), MongoMetadataRepository(db), metadata_file, clock)
-    loader.load_metadata_to_db()
-    _refresh(db, http_session, _serve_mirror(httpserver, {DATASET_ID: CHANGED_INFO}), clock)
-    refreshed = _stored_metadata(db)
-
-    loader.load_metadata_to_db()
-
-    assert _stored_metadata(db) == refreshed
 
 
 @pytest.mark.integration

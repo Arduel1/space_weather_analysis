@@ -24,20 +24,19 @@ The data model follows the physical chain of space weather: phenomena originate 
 ## Features
 
 - Ingestion of time-series data from NASA CDAWeb, GFZ, HAPI servers, and local catalogs through a common pipeline.
-- A catalog layer that discovers available datasets and maintains a master catalog the dashboard queries.
+- A catalog layer that builds and maintains a master catalog of the available datasets, which the dashboard queries.
 - Descriptive metadata stored for every dataset and shown in the dashboard alongside the data.
 - Storage of all ingested data in MongoDB, using GridFS for large binary files.
 - A Streamlit dashboard for selecting a dataset and timeframe, loading it from storage, and rendering type-appropriate plots.
 - Domain-specific visualizations for sunspots and solar cycles, CME events, the Kp geomagnetic index, X-ray flux, and particle measurements.
 - On-demand fetching: when requested data is not yet stored, the frontend queues a job for the pipeline service to retrieve it.
-- A Docker Compose stack that runs the collector, pipeline, frontend, database, and database admin UI together.
+- A Docker Compose stack that runs the metadata worker, pipeline, frontend, database, and database admin UI together.
 
 ## Architecture
 
 The system is a modular monolith: a shared core library (`space_weather_analysis`) plus three separately-runnable components. All components share one codebase and one Docker image and communicate through MongoDB rather than over the network.
 
-- Catalog Collector: loads the master catalog and the dataset metadata from the snapshot files in `data/` and exits with an error if they cannot be loaded. The discovery of all provider datasets is switched off by default (`CATALOG_COLLECTOR_DISCOVERY_ENABLED`), as a full pass takes hours; it never deletes catalog entries, it only counts sources a provider no longer lists.
-- Metadata Worker: a long-running background process that repeats all metadata requests (HAPI metadata mirror, CDAWeb dataset list, per-dataset master files and SPASE records, dataset availability) on a schedule, one request at a time with a random pause per provider host, keeping the last good state when a provider is unreachable.
+- Metadata Worker: a long-running background process that builds and maintains the master catalog and the dataset metadata. It repeats all metadata requests (HAPI metadata mirror, CDAWeb dataset list, per-dataset master files and SPASE records, dataset availability) on a schedule, one request at a time with a random pause per provider host, keeping the last good state when a provider is unreachable. It never deletes catalog entries, it only counts sources a provider no longer lists.
 - Pipeline Service: fetches, parses, and normalizes data for a dataset and stores it in MongoDB, adding dataset metadata from the source where available. It also processes on-demand fetch jobs requested by the frontend.
 - Frontend: the Streamlit dashboard, which reads the catalog, the dataset metadata, and the time-series data from MongoDB and renders them.
 - MongoDB: the shared data store, holding the dataset catalog, descriptive metadata for each dataset, the per-dataset time-series data, and the fetch-job queue. `mongo-express` provides a web admin UI.
@@ -54,13 +53,12 @@ The MIT License of this repository covers the source code only. This repository 
 
 ### Local data files
 
-The following files are not part of this repository. They are downloaded from their providers or built by the catalog collector and stored locally in `data/`.
+The following files are not part of this repository. They are downloaded from their providers and stored locally in `data/`.
 
 | File | Provider | How to obtain | License / terms |
 | --- | --- | --- | --- |
 | `data/SN_d_tot_V2.0.csv` | WDC-SILSO, Royal Observatory of Belgium | [Download](https://www.sidc.be/SILSO/INFO/sndtotcsv.php) | [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) |
 | `data/cme_catalog.txt` | CDAW Data Center (NASA, The Catholic University of America, Naval Research Laboratory) | [Download](https://cdaw.gsfc.nasa.gov/CME_list/UNIVERSAL_ver2/text_ver/univ_all.txt) | No formal license; [acknowledgement requested](https://cdaw.gsfc.nasa.gov/CME_list/) |
-| `data/config/master_catalog.json`, `data/config/dataset_metadata.json` | Providers listed below | Built by the catalog collector | Descriptive metadata from the providers' services; subject to each provider's terms |
 
 Details on each file: [docs/local-data.md](docs/local-data.md).
 
@@ -177,7 +175,7 @@ The full stack runs in Docker. uv is only required for local development, tests,
    | `mongo-express` | MongoDB web admin UI | <http://localhost:8081> |
    | `mongo` | MongoDB database | `localhost:27017` |
    | `pipeline-service` | ETL / data pipeline | (no public port) |
-   | `catalog-collector` | Dataset catalog builder | (no public port) |
+   | `metadata-worker` | Catalog and metadata maintenance | (no public port) |
 
    The ports shown are the defaults; the published ports can be changed in `.env` (see `example.env`).
 
@@ -220,7 +218,7 @@ Tools started outside Docker, such as the notebooks, can load the variables from
 
 ```text
 .
-├── docker-compose.yml          # Six-service stack definition
+├── docker-compose.yml          # Five-service stack definition
 ├── Dockerfile                  # Shared image for all Python services
 ├── pyproject.toml              # Project metadata, dependencies, tool config
 ├── uv.lock                     # Locked dependency versions
@@ -231,9 +229,9 @@ Tools started outside Docker, such as the notebooks, can load the variables from
 ├── src/
 │   ├── space_weather_analysis/ # Shared core library (clients, config, DB, logging, utils)
 │   │   └── timeseries/         # Time series documents and their storage in MongoDB time series collections
-│   ├── catalog_collector/      # Collector (main.py) and metadata worker (metadata_worker.py)
-│   │   ├── data_catalog/       # Master catalog: snapshot load, availability, dataset discovery
-│   │   ├── metadata_catalog/   # Dataset metadata: snapshot load, HAPI, CDAS, master file and SPASE metadata refresh
+│   ├── catalog_collector/      # Metadata worker (metadata_worker.py)
+│   │   ├── data_catalog/       # Master catalog: GFZ entries and availability refresh
+│   │   ├── metadata_catalog/   # Dataset metadata: HAPI, CDAS, master file and SPASE metadata refresh
 │   │   ├── cdaweb/             # CDAWeb access: dataset list (CDAS web services) and master files
 │   │   ├── spase/              # SPASE records of the datasets (spase-metadata.org)
 │   │   ├── hapi_mirror/        # HAPI metadata mirror files and the server lookup shared by its refreshes

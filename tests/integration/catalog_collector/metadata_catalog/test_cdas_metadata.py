@@ -1,4 +1,3 @@
-import pathlib
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -8,9 +7,8 @@ import requests
 from pymongo.database import Database
 
 from catalog_collector.cdaweb.datasets import fetch_cdas_datasets
-from catalog_collector.data_catalog.snapshot import CatalogSnapshotLoader
 from catalog_collector.metadata_catalog.cdas_metadata import CdasMetadataRefresher, CdasMetadataSummary
-from catalog_collector.metadata_catalog.snapshot import MetadataSnapshotLoader
+from space_weather_analysis.catalog.models import CatalogEntryDict, MasterCatalogItem, TimeRangeDict
 from space_weather_analysis.catalog.repository import MongoCatalogRepository
 from space_weather_analysis.metadata.hapi import build_hapi_metadata
 from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSourceKind, SourceInfo
@@ -22,9 +20,9 @@ OTHER_HAPI_URL = "https://hapi.example.org/hapi"
 CDAWEB_DATASET = "SYNTH_K0_CDAWEB"
 SPLIT_DATASET = "SYNTH_H0_MAG"
 OTHER_DATASET = "synthetic_other_P1M"
-TIME_RANGE = {"start_time": "2020-01-01T00:00:00Z", "end_time": "2020-02-01T00:00:00Z"}
+TIME_RANGE: TimeRangeDict = {"start_time": "2020-01-01T00:00:00Z", "end_time": "2020-02-01T00:00:00Z"}
 
-CATALOG: dict[str, list[dict[str, Any]]] = {
+CATALOG: dict[str, list[CatalogEntryDict]] = {
     CDAWEB_DATASET: [{"type": "CDAWEB", "source_id": "SYNTH", "time_range": TIME_RANGE}],
     f"{SPLIT_DATASET}@0": [{"type": "HAPI", "source_id": CDAWEB_HAPI_URL, "time_range": TIME_RANGE}],
     OTHER_DATASET: [{"type": "HAPI", "source_id": OTHER_HAPI_URL, "time_range": TIME_RANGE}],
@@ -42,7 +40,7 @@ HAPI_INFO: dict[str, Any] = {
 }
 
 type ServeCdas = Callable[[list[dict[str, Any]]], str]
-type SnapshotFiles = Callable[[dict[str, Any], Any], tuple[pathlib.Path, pathlib.Path]]
+type SaveCatalog = Callable[[dict[str, list[CatalogEntryDict]]], list[MasterCatalogItem]]
 
 
 def _cdas_entry(dataset_id: str) -> dict[str, Any]:
@@ -57,15 +55,14 @@ def _cdas_entry(dataset_id: str) -> dict[str, Any]:
     }
 
 
-def _load_snapshots(db: Database, snapshot_files: SnapshotFiles, clock: Callable[[], datetime]) -> None:
-    """Loads the catalog and the HAPI snapshot of both HAPI datasets and saves the record of the CDAWeb dataset."""
-    snapshot = [
-        {"dataset_id": f"{SPLIT_DATASET}@0", "metadata": {**HAPI_INFO, "x_server_url": CDAWEB_HAPI_URL}},
-        {"dataset_id": OTHER_DATASET, "metadata": {**HAPI_INFO, "x_server_url": OTHER_HAPI_URL}},
+def _seed(db: Database, save_catalog: SaveCatalog, now: datetime) -> None:
+    """Saves the catalog, the HAPI records of both HAPI datasets and the record of the CDAWeb dataset."""
+    save_catalog(CATALOG)
+    hapi_records = [
+        build_hapi_metadata(f"{SPLIT_DATASET}@0", f"{SPLIT_DATASET}_0", HAPI_INFO, CDAWEB_HAPI_URL, now),
+        build_hapi_metadata(OTHER_DATASET, OTHER_DATASET, HAPI_INFO, OTHER_HAPI_URL, now),
     ]
-    catalog_file, metadata_file = snapshot_files(CATALOG, snapshot)
-    CatalogSnapshotLoader(MongoCatalogRepository(db), catalog_file).load_to_db()
-    MetadataSnapshotLoader(MongoCatalogRepository(db), MongoMetadataRepository(db), metadata_file, clock).load_metadata_to_db()
+    save_with_overlays(MongoMetadataRepository(db), hapi_records)
     MongoMetadataRepository(db).save(DatasetMetadata(dataset_id=CDAWEB_DATASET, collection=CDAWEB_DATASET, source=SourceInfo(type="CDAWEB")))
 
 
@@ -90,10 +87,10 @@ def _cdas_fields(db: Database, dataset_id: str) -> dict[str, Any]:
 
 @pytest.mark.integration
 def test_overlay_lands_on_cdaweb_records_only(
-    db: Database, http_session: requests.Session, serve_cdas: ServeCdas, snapshot_files: SnapshotFiles, clock: Callable[[], datetime]
+    db: Database, http_session: requests.Session, serve_cdas: ServeCdas, save_catalog: SaveCatalog, clock: Callable[[], datetime], now: datetime
 ) -> None:
     """The CDAS fields reach the CDAWeb record with its coverage and the HAPI split record by its base ID, but no record of another server."""
-    _load_snapshots(db, snapshot_files, clock)
+    _seed(db, save_catalog, now)
 
     summary = _refresh(
         db, http_session, serve_cdas([_cdas_entry(dataset_id) for dataset_id in (CDAWEB_DATASET, SPLIT_DATASET, OTHER_DATASET)]), clock
@@ -126,10 +123,10 @@ def test_overlay_lands_on_cdaweb_records_only(
 
 @pytest.mark.integration
 def test_record_rebuilt_from_its_own_source_keeps_the_cdas_fields(
-    db: Database, http_session: requests.Session, serve_cdas: ServeCdas, snapshot_files: SnapshotFiles, clock: Callable[[], datetime], now: datetime
+    db: Database, http_session: requests.Session, serve_cdas: ServeCdas, save_catalog: SaveCatalog, clock: Callable[[], datetime], now: datetime
 ) -> None:
     """A split record rebuilt from its /info response and saved by any writer gets the stored CDAS entry laid over it again."""
-    _load_snapshots(db, snapshot_files, clock)
+    _seed(db, save_catalog, now)
     _refresh(db, http_session, serve_cdas([_cdas_entry(CDAWEB_DATASET), _cdas_entry(SPLIT_DATASET)]), clock)
     overlaid = _cdas_fields(db, f"{SPLIT_DATASET}@0")
 
@@ -141,10 +138,10 @@ def test_record_rebuilt_from_its_own_source_keeps_the_cdas_fields(
 
 @pytest.mark.integration
 def test_unchanged_entries_are_not_rewritten_and_unlisted_ones_kept(
-    db: Database, http_session: requests.Session, serve_cdas: ServeCdas, snapshot_files: SnapshotFiles, clock: Callable[[], datetime]
+    db: Database, http_session: requests.Session, serve_cdas: ServeCdas, save_catalog: SaveCatalog, clock: Callable[[], datetime], now: datetime
 ) -> None:
     """A second refresh with the same list stores nothing, and a dataset CDAS stops listing keeps its stored entry."""
-    _load_snapshots(db, snapshot_files, clock)
+    _seed(db, save_catalog, now)
     cdas_url = serve_cdas([_cdas_entry(CDAWEB_DATASET), _cdas_entry(SPLIT_DATASET)])
     _refresh(db, http_session, cdas_url, clock)
     stored_raw = MongoMetadataRepository(db).get_raw_many([CDAWEB_DATASET, SPLIT_DATASET], MetadataSourceKind.CDAS)
