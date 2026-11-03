@@ -9,7 +9,7 @@ ProgressCallback = Callable[[float, str], None]
 
 
 class Pipeline(Protocol):
-    """The interface by which the orchestrator runs every data pipeline."""
+    """The interface by which the job runner runs every data pipeline."""
 
     def run(
         self,

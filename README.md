@@ -237,7 +237,7 @@ Tools started outside Docker, such as the notebooks, can load the variables from
 │   │   ├── hapi_mirror/        # HAPI metadata mirror files and the server lookup shared by its refreshes
 │   │   ├── scheduling/         # Task queue and worker for recurring metadata requests
 │   │   └── worker_tasks/       # Task kinds the metadata worker runs, with their intervals
-│   ├── pipeline_service/       # Ingestion service (main.py) and job orchestrator (orchestrator.py)
+│   ├── pipeline_service/       # Ingestion service (main.py) and job runner (jobs/runner.py)
 │   │   ├── pipelines/          # One pipeline per source type, the shared chunk loop and the pipeline factory
 │   │   └── parsing/            # Conversion of delivered data and local files into frames
 │   └── streamlit_app/          # Streamlit dashboard and plots

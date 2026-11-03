@@ -12,7 +12,7 @@ from space_weather_analysis.util.time_utils import UtcDatetime
 class JobStatus(StrEnum):
     """The life cycle of a download job.
 
-    The frontend creates a job as PENDING, the orchestrator claims it as RUNNING and ends it as COMPLETED or FAILED.
+    The frontend creates a job as PENDING, the job runner claims it as RUNNING and ends it as COMPLETED or FAILED.
     """
 
     PENDING = "PENDING"
@@ -62,15 +62,16 @@ class Job(BaseModel):
         id: The job ID, the text of the MongoDB ObjectId stored as `_id`.
         status: The current status.
         parameters: What the job ingests.
-        source_type: The source type of the pipeline to run; None lets the orchestrator resolve it from the master catalog.
+        source_type: The source type of the pipeline to run; None lets the job runner resolve it from the master catalog.
         created_at: When the job was created.
-        started_at: When the orchestrator claimed the job.
+        started_at: When the job runner claimed the job.
         updated_at: When the progress was last reported.
         completed_at: When the job ended.
         progress: The share of the work done, from 0.0 to 1.0.
         message: The latest progress message.
         error: The error description of a failed job.
         missing_chunks: The time ranges a completed job could not ingest.
+        retry_at: The earliest time a job put back into the queue is claimed again; None if it may run at once.
     """
 
     id: str
@@ -85,6 +86,7 @@ class Job(BaseModel):
     message: str | None = None
     error: str | None = None
     missing_chunks: list[ChunkGap] = Field(default_factory=list)
+    retry_at: UtcDatetime | None = None
 
     def to_document(self) -> dict[str, Any]:
         """Converts the job into its MongoDB document.

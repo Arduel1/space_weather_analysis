@@ -198,7 +198,7 @@ class DataLoader:
     ) -> str | None:
         """Creates a new download job in the database without specifying the source explicitly.
 
-        The Orchestrator will resolve the correct source based on the dataset_id.
+        The job runner resolves the correct source based on the dataset_id.
 
         Args:
             dataset_id: The specific dataset identifier to download.

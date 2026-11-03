@@ -5,7 +5,7 @@ import sys
 from pydantic import ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from pipeline_service.orchestrator import PipelineOrchestrator
+from pipeline_service.jobs.runner import JobRunner
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.config.errors import format_settings_error
 from space_weather_analysis.database.connection import connect_from_environment
@@ -20,7 +20,7 @@ class StartupJob(JobParameters):
     """A download job queued when the service starts.
 
     Attributes:
-        source_type: The source type of the pipeline to run; None lets the orchestrator resolve it from the master catalog.
+        source_type: The source type of the pipeline to run; None lets the job runner resolve it from the master catalog.
     """
 
     source_type: SourceType | None = None
@@ -64,8 +64,13 @@ def main() -> None:
 
     connection, db = connect_from_environment()
     try:
-        enqueue_startup_jobs(MongoJobRepository(db), settings.startup_jobs)
-        PipelineOrchestrator(db, settings.data_dir).run_daemon()
+        job_repository = MongoJobRepository(db)
+        # One job runner serves the queue, so a running job found at start was interrupted by the previous run
+        requeued = job_repository.requeue_running()
+        if requeued:
+            logger.info("Requeued %d jobs interrupted by the previous run", requeued)
+        enqueue_startup_jobs(job_repository, settings.startup_jobs)
+        JobRunner(db, settings.data_dir).run_daemon()
     except KeyboardInterrupt:
         logger.info("Pipeline service stopped.")
     except Exception:

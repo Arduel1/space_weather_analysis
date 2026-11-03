@@ -7,11 +7,12 @@ from pymongo.database import Database
 from pytest_httpserver import HTTPServer
 from werkzeug import Request, Response
 
-from pipeline_service.orchestrator import PipelineOrchestrator
+from pipeline_service.jobs.runner import CATALOG_RETRY_DELAY, CATALOG_WAIT_LIMIT, JobRunner
 from pipeline_service.pipelines.base import Pipeline
 from pipeline_service.pipelines.factory import PipelineFactory
 from pipeline_service.pipelines.gfz import GfzPipeline
-from space_weather_analysis.catalog.models import SourceType
+from space_weather_analysis.catalog.models import SourceType, TimeRangeDict
+from space_weather_analysis.catalog.repository import MongoCatalogRepository
 from space_weather_analysis.clients.gfz import GfzClient
 from space_weather_analysis.coverage.repository import MongoCoverageRepository
 from space_weather_analysis.jobs.models import Job, JobStatus
@@ -26,6 +27,7 @@ DAY_ONE = datetime(2024, 1, 1, tzinfo=UTC)
 DAY_TWO = DAY_ONE + timedelta(days=1)
 DAY_THREE = DAY_ONE + timedelta(days=2)
 KP_INTERVAL = timedelta(hours=3)
+CATALOG_RANGE: TimeRangeDict = {"start_time": "1932-01-01T00:00:00Z", "end_time": "2024-12-31T00:00:00Z"}
 
 
 class FakeGfzServer:
@@ -75,7 +77,7 @@ def _run_job(
     start: datetime = DAY_ONE,
     end: datetime = DAY_THREE,
 ) -> Job:
-    """Creates a job, lets the orchestrator process it and returns the stored job; with a GFZ URL the GFZ pipeline uses that server."""
+    """Creates a job, lets the job runner process it and returns the stored job; with a GFZ URL the GFZ pipeline uses that server."""
     repository = MongoJobRepository(db)
     job_id = repository.create(datasets, start, end, source_type=source_type)
     factory = PipelineFactory(db, data_dir)
@@ -86,7 +88,7 @@ def _run_job(
             return _gfz_pipeline(db, gfz_url)
         return factory.get_pipeline(requested_type)
 
-    assert PipelineOrchestrator(db, data_dir, pipeline_for=pipeline_for).process_next_job()
+    assert JobRunner(db, data_dir, pipeline_for=pipeline_for).process_next_job()
 
     job = repository.get(job_id)
     assert job is not None
@@ -140,3 +142,48 @@ def test_rejected_write_is_reported_as_gap(db: Database, tmp_path: pathlib.Path,
 
     assert [(gap.start, gap.reason.split(":")[0]) for gap in report.gaps] == [(DAY_ONE, "BulkWriteError")]
     assert db[INDEX].count_documents({}) == 0
+
+
+def _uncatalogued_kp_job(db: Database) -> tuple[MongoJobRepository, Job]:
+    """Creates a job for the Kp index without source type while the catalog does not list Kp, and returns it as stored."""
+    repository = MongoJobRepository(db)
+    job = repository.get(repository.create([INDEX], DAY_ONE, DAY_TWO))
+    assert job is not None
+    return repository, job
+
+
+@pytest.mark.integration
+def test_job_for_a_dataset_not_yet_in_the_catalog_waits_and_runs_once_the_catalog_lists_it(
+    db: Database, tmp_path: pathlib.Path, gfz_server: FakeGfzServer
+) -> None:
+    """The job goes back to the queue until its retry time and completes after the catalog lists the dataset."""
+    repository, job = _uncatalogued_kp_job(db)
+    clock_times = [job.created_at]
+    runner = JobRunner(db, tmp_path, pipeline_for=lambda source_type: _gfz_pipeline(db, gfz_server.url), clock=lambda: clock_times[-1])
+
+    runner.process_next_job()
+    waiting = repository.get(job.id)
+    claimed_before_retry = runner.process_next_job()
+    MongoCatalogRepository(db).save(
+        {"dataset_id": INDEX, "sources": [{"type": SourceType.GFZ_POTSDAM, "source_id": "GFZ", "time_range": CATALOG_RANGE}]}
+    )
+    clock_times.append(job.created_at + CATALOG_RETRY_DELAY)
+    runner.process_next_job()
+
+    assert waiting is not None
+    assert (waiting.status, waiting.retry_at, claimed_before_retry) == (JobStatus.PENDING, job.created_at + CATALOG_RETRY_DELAY, False)
+    finished = repository.get(job.id)
+    assert finished is not None and finished.status == JobStatus.COMPLETED
+
+
+@pytest.mark.integration
+def test_job_for_a_dataset_the_catalog_never_lists_fails_after_the_wait_limit(db: Database, tmp_path: pathlib.Path) -> None:
+    """A job still naming an unknown dataset once the wait limit has passed ends FAILED with the reason."""
+    repository, job = _uncatalogued_kp_job(db)
+    runner = JobRunner(db, tmp_path, clock=lambda: job.created_at + CATALOG_WAIT_LIMIT)
+
+    runner.process_next_job()
+
+    failed = repository.get(job.id)
+    assert failed is not None
+    assert (failed.status, INDEX in (failed.error or "")) == (JobStatus.FAILED, True)

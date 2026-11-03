@@ -14,7 +14,7 @@ from space_weather_analysis.jobs.models import ChunkGap, FinalJobStatus, Job, Jo
 class JobRepository(ABC):
     """Stores the download jobs the frontend requests and the pipeline service executes.
 
-    Frontend and orchestrator read and write jobs only through this interface.
+    Frontend and job runner read and write jobs only through this interface.
     """
 
     @abstractmethod
@@ -25,7 +25,7 @@ class JobRepository(ABC):
             datasets: The IDs of the datasets to ingest.
             start_time: The start of the requested time range; None lets the pipeline choose.
             end_time: The end of the requested time range; None lets the pipeline choose.
-            source_type: The source type of the pipeline to run; None lets the orchestrator resolve it.
+            source_type: The source type of the pipeline to run; None lets the job runner resolve it.
 
         Returns:
             The ID of the new job.
@@ -43,11 +43,32 @@ class JobRepository(ABC):
         """
 
     @abstractmethod
-    def claim_next_pending(self) -> Job | None:
-        """Atomically marks the oldest pending job as running, so no other worker takes it.
+    def claim_next_pending(self, now: datetime | None = None) -> Job | None:
+        """Atomically marks the oldest pending job whose retry time has come as running, so no other worker takes it.
+
+        Args:
+            now: The current time; the system time if None.
 
         Returns:
-            The claimed job with status RUNNING and its start time, or None if no job is pending.
+            The claimed job with status RUNNING and its start time, or None if no job is due.
+        """
+
+    @abstractmethod
+    def requeue(self, job_id: str, retry_at: datetime, message: str) -> None:
+        """Puts a claimed job back into the queue until its retry time.
+
+        Args:
+            job_id: The job ID.
+            retry_at: The earliest time the job is claimed again.
+            message: Why the job waits.
+        """
+
+    @abstractmethod
+    def requeue_running(self) -> int:
+        """Puts every running job back into the queue, for a job runner starting after an interrupted run.
+
+        Returns:
+            The number of requeued jobs.
         """
 
     @abstractmethod
@@ -100,7 +121,7 @@ class MongoJobRepository(JobRepository):
             datasets: The IDs of the datasets to ingest.
             start_time: The start of the requested time range; None lets the pipeline choose.
             end_time: The end of the requested time range; None lets the pipeline choose.
-            source_type: The source type of the pipeline to run; None lets the orchestrator resolve it.
+            source_type: The source type of the pipeline to run; None lets the job runner resolve it.
 
         Returns:
             The ID of the new job.
@@ -131,21 +152,49 @@ class MongoJobRepository(JobRepository):
         document = self.collection.find_one({"_id": ObjectId(job_id)})
         return Job.from_document(document) if document else None
 
-    def claim_next_pending(self) -> Job | None:
-        """Atomically marks the oldest pending job as running, so no other worker takes it.
+    def claim_next_pending(self, now: datetime | None = None) -> Job | None:
+        """Atomically marks the oldest pending job whose retry time has come as running, so no other worker takes it.
+
+        Args:
+            now: The current time; the system time if None.
 
         Returns:
-            The claimed job with status RUNNING and its start time, or None if no job is pending.
+            The claimed job with status RUNNING and its start time, or None if no job is due.
         """
         self._ensure_index()
+        claimed_at = now or datetime.now(UTC)
+        due = {"status": JobStatus.PENDING, "$or": [{"retry_at": {"$exists": False}}, {"retry_at": {"$lte": claimed_at}}]}
         # ObjectIds grow with their creation time, so the smallest `_id` is the oldest job
         document = self.collection.find_one_and_update(
-            {"status": JobStatus.PENDING},
-            {"$set": {"status": JobStatus.RUNNING, "started_at": datetime.now(UTC)}},
+            due,
+            {"$set": {"status": JobStatus.RUNNING, "started_at": claimed_at}},
             sort=[("_id", ASCENDING)],
             return_document=ReturnDocument.AFTER,
         )
         return Job.from_document(document) if document else None
+
+    def requeue(self, job_id: str, retry_at: datetime, message: str) -> None:
+        """Puts a claimed job back into the queue until its retry time.
+
+        Args:
+            job_id: The job ID.
+            retry_at: The earliest time the job is claimed again.
+            message: Why the job waits.
+
+        Raises:
+            bson.errors.InvalidId: If the job ID is malformed.
+        """
+        update = {"$set": {"status": JobStatus.PENDING, "retry_at": retry_at, "message": message}, "$unset": {"started_at": ""}}
+        self.collection.update_one({"_id": ObjectId(job_id)}, update)
+
+    def requeue_running(self) -> int:
+        """Puts every running job back into the queue, for a job runner starting after an interrupted run.
+
+        Returns:
+            The number of requeued jobs.
+        """
+        update = {"$set": {"status": JobStatus.PENDING, "message": "Requeued after an interrupted run"}, "$unset": {"started_at": ""}}
+        return self.collection.update_many({"status": JobStatus.RUNNING}, update).modified_count
 
     def update_progress(self, job_id: str, progress: float, message: str) -> None:
         """Records the progress of a running job.

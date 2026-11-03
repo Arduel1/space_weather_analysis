@@ -30,3 +30,7 @@ class DataProcessingError(SpaceWeatherError):
 
 class CatalogError(SpaceWeatherError):
     """Raised when catalog operations fail."""
+
+
+class DatasetNotCataloguedError(CatalogError):
+    """Raised when a requested dataset has no source in the master catalog, which may still be adding it."""

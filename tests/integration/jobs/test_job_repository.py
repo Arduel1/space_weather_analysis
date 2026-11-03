@@ -83,3 +83,21 @@ def test_completed_job_keeps_its_missing_chunks(db: Database) -> None:
 def test_get_returns_none_for_missing_job(db: Database, job_id: str) -> None:
     """A malformed or unknown job ID reads as no job."""
     assert MongoJobRepository(db).get(job_id) is None
+
+
+@pytest.mark.integration
+def test_running_jobs_are_requeued_and_a_requeued_job_waits_for_its_retry_time(db: Database) -> None:
+    """Requeuing running jobs sets them back to PENDING, and a job requeued with a retry time is claimed only from that time on."""
+    repository = MongoJobRepository(db)
+    repository.create(["synthetic/one"], START, END)
+    interrupted = repository.claim_next_pending(START)
+    assert interrupted is not None
+
+    requeued_count = repository.requeue_running()
+    reclaimed = repository.claim_next_pending(START)
+    assert reclaimed is not None
+    repository.requeue(reclaimed.id, END, "waits")
+
+    assert (requeued_count, reclaimed.id, repository.claim_next_pending(START)) == (1, interrupted.id, None)
+    claimed_at_retry = repository.claim_next_pending(END)
+    assert claimed_at_retry is not None and claimed_at_retry.id == interrupted.id
