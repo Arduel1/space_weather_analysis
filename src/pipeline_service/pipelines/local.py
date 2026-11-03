@@ -22,7 +22,7 @@ from space_weather_analysis.util.naming import sanitize_collection_name
 
 logger = logging.getLogger(__name__)
 
-# A file holds the whole time range of its dataset, so a failed file is a gap over all time.
+# A file holds the whole time range of its dataset, so its documents replace all time and a failed file is a gap over all time.
 WHOLE_FILE_START = datetime.min.replace(tzinfo=UTC)
 WHOLE_FILE_STOP = datetime.max.replace(tzinfo=UTC)
 
@@ -114,16 +114,16 @@ class LocalPipeline:
         return report
 
     def _replace_with_file(self, dataset: LocalDataset, collection: str) -> int:
-        """Replaces the stored documents of a dataset with the documents built from its whole file.
+        """Makes the stored documents of a dataset equal the documents built from its whole file, writing only the differences.
 
-        The file is read completely before the stored documents are deleted, so an unreadable file keeps them.
+        The file is read completely before anything is written, so an unreadable file keeps the stored documents.
 
         Args:
             dataset: The local dataset.
             collection: The collection holding the data documents.
 
         Returns:
-            The number of stored documents.
+            The number of documents built from the file.
 
         Raises:
             FileNotFoundError: If the file does not exist.
@@ -133,6 +133,8 @@ class LocalPipeline:
         frame = dataset.parse(self.data_dir / dataset.file_name)
         documents = frame_to_documents(frame, source_identifier(SourceType.LOCAL, dataset.provider_id))
         self.timeseries.ensure_collection(collection, LOCAL_GRANULARITY)
-        stored_count = self.timeseries.replace_all(collection, documents)
-        logger.info("Replaced the content of %s with %d documents", collection, stored_count)
-        return stored_count
+        changes = self.timeseries.replace_range(collection, WHOLE_FILE_START, WHOLE_FILE_STOP, documents)
+        logger.info(
+            "Synchronized %s with its file of %d documents: %d inserted, %d deleted", collection, len(documents), changes.inserted, changes.deleted
+        )
+        return len(documents)

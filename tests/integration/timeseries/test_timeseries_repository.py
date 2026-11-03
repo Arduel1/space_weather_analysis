@@ -18,6 +18,11 @@ def _documents(times: list[datetime], value: float) -> list[TimeSeriesDocument]:
     return [{"timestamp": time, "metadata": {"source": "LOCAL/SYNTHETIC"}, "data": {"value": value}} for time in times]
 
 
+def _ids_by_time(db: Database) -> dict[datetime, object]:
+    """Maps the time stamp of each stored document to its ID."""
+    return {document["timestamp"]: document["_id"] for document in db[COLLECTION].find()}
+
+
 @pytest.fixture
 def repository(db: Database) -> MongoTimeSeriesRepository:
     """Repository with an empty hourly time series collection."""
@@ -48,29 +53,36 @@ def test_insert_then_count_in_range(repository: MongoTimeSeriesRepository) -> No
 
 
 @pytest.mark.integration
-def test_replace_range_replaces_only_documents_inside_range(repository: MongoTimeSeriesRepository) -> None:
-    """Documents outside the range keep their values; the range holds only the new documents."""
-    repository.insert(COLLECTION, _documents(HOURLY_TIMES, 1.0))
-    range_start, range_stop = START + timedelta(hours=2), START + timedelta(hours=4)
+def test_replace_range_writes_only_differences_inside_range(db: Database, repository: MongoTimeSeriesRepository) -> None:
+    """Unchanged documents keep their IDs; changed, missing and new ones are written; documents outside the range stay."""
+    repository.insert(COLLECTION, _documents(HOURLY_TIMES[:5], 1.0))
+    ids_before = _ids_by_time(db)
+    range_start, range_stop = HOURLY_TIMES[1], HOURLY_TIMES[5]
+    new_documents = [*_documents(HOURLY_TIMES[1:2], 1.0), *_documents(HOURLY_TIMES[2:3], 2.0), *_documents(HOURLY_TIMES[4:6], 1.0)]
 
-    inserted = repository.replace_range(COLLECTION, range_start, range_stop, _documents([range_start], 2.0))
+    changes = repository.replace_range(COLLECTION, range_start, range_stop, new_documents)
 
-    assert inserted == 1
-    assert repository.count(COLLECTION, range_start, range_stop) == 1
-    assert repository.count(COLLECTION, range_start, range_stop, {"value": 2.0}) == 1
-    assert repository.count(COLLECTION, START, START + timedelta(hours=6), {"value": 1.0}) == 4
+    stored = {document["timestamp"]: document["data"]["value"] for document in db[COLLECTION].find()}
+    assert changes == (2, 2)
+    assert stored == {HOURLY_TIMES[0]: 1.0, HOURLY_TIMES[1]: 1.0, HOURLY_TIMES[2]: 2.0, HOURLY_TIMES[4]: 1.0, HOURLY_TIMES[5]: 1.0}
+    ids_after = _ids_by_time(db)
+    assert [ids_after[time] == ids_before[time] for time in (HOURLY_TIMES[0], HOURLY_TIMES[1], HOURLY_TIMES[2], HOURLY_TIMES[4])] == [
+        True,
+        True,
+        False,
+        True,
+    ]
 
 
 @pytest.mark.integration
-def test_replace_all_keeps_only_new_documents(repository: MongoTimeSeriesRepository) -> None:
-    """Every stored document is replaced, also outside the time span of the new documents."""
-    repository.insert(COLLECTION, _documents(HOURLY_TIMES, 1.0))
+def test_replace_range_with_stored_documents_writes_nothing(repository: MongoTimeSeriesRepository) -> None:
+    """Documents equal to the stored ones need no write, also when repeated or timed finer than MongoDB stores."""
+    times = [START + timedelta(microseconds=1500), START + timedelta(hours=1), START + timedelta(hours=1)]
+    repository.insert(COLLECTION, _documents(times, 1.0))
 
-    inserted = repository.replace_all(COLLECTION, _documents(HOURLY_TIMES[:2], 3.0))
+    changes = repository.replace_range(COLLECTION, START, START + timedelta(hours=2), _documents(times, 1.0))
 
-    assert inserted == 2
-    assert repository.count(COLLECTION, START, START + timedelta(hours=6)) == 2
-    assert repository.count(COLLECTION, START, START + timedelta(hours=6), {"value": 3.0}) == 2
+    assert changes == (0, 0)
 
 
 @pytest.mark.integration

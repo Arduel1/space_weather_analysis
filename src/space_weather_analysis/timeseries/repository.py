@@ -1,18 +1,33 @@
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Mapping, Sequence
+from collections import defaultdict
+from collections.abc import Hashable, Mapping, Sequence
 from datetime import UTC, datetime
 from itertools import batched
-from typing import Any
+from typing import Any, NamedTuple
 
 import pandas as pd
+from bson import ObjectId
 from pymongo import ASCENDING, DESCENDING
 from pymongo.database import Database
 
 from space_weather_analysis.timeseries.documents import DATA_FIELD, META_FIELD, TIME_FIELD, TimeSeriesDocument
 from space_weather_analysis.timeseries.models import Granularity, TimeBucket
+from space_weather_analysis.util.time_utils import ensure_aware
 
 logger = logging.getLogger(__name__)
+
+
+class RangeChanges(NamedTuple):
+    """The writes a replacement of a time range needed.
+
+    Attributes:
+        inserted: The number of inserted documents.
+        deleted: The number of deleted documents.
+    """
+
+    inserted: int
+    deleted: int
 
 
 class TimeSeriesRepository(ABC):
@@ -43,8 +58,8 @@ class TimeSeriesRepository(ABC):
         """
 
     @abstractmethod
-    def replace_range(self, collection: str, start: datetime, stop: datetime, documents: Sequence[TimeSeriesDocument]) -> int:
-        """Replaces the stored documents of a time range with the given documents.
+    def replace_range(self, collection: str, start: datetime, stop: datetime, documents: Sequence[TimeSeriesDocument]) -> RangeChanges:
+        """Makes a time range hold exactly the given documents, writing only the documents that differ from the stored ones.
 
         Args:
             collection: The name of the collection.
@@ -53,19 +68,7 @@ class TimeSeriesRepository(ABC):
             documents: The new documents; their time stamps must lie inside the range.
 
         Returns:
-            The number of inserted documents.
-        """
-
-    @abstractmethod
-    def replace_all(self, collection: str, documents: Sequence[TimeSeriesDocument]) -> int:
-        """Replaces every stored document of a collection with the given documents.
-
-        Args:
-            collection: The name of the collection.
-            documents: The new documents.
-
-        Returns:
-            The number of inserted documents.
+            The numbers of inserted and deleted documents.
         """
 
     @abstractmethod
@@ -187,8 +190,12 @@ class MongoTimeSeriesRepository(TimeSeriesRepository):
         logger.info("Inserted %d documents into %s", inserted, collection)
         return inserted
 
-    def replace_range(self, collection: str, start: datetime, stop: datetime, documents: Sequence[TimeSeriesDocument]) -> int:
-        """Deletes the stored documents of a time range, then inserts the given documents; the two steps are not atomic.
+    def replace_range(self, collection: str, start: datetime, stop: datetime, documents: Sequence[TimeSeriesDocument]) -> RangeChanges:
+        """Compares the new with the stored documents of a time range and writes only the differences.
+
+        A document whose time stamp, metadata and data equal a stored one is kept; a changed document counts as deleted
+        and inserted. The new documents are inserted before the obsolete ones are deleted, so an interrupted call leaves
+        surplus documents, which the next call for the range deletes, but never missing ones. The steps are not atomic.
 
         Args:
             collection: The name of the collection.
@@ -197,25 +204,27 @@ class MongoTimeSeriesRepository(TimeSeriesRepository):
             documents: The new documents; their time stamps must lie inside the range.
 
         Returns:
-            The number of inserted documents.
+            The numbers of inserted and deleted documents.
         """
-        deleted = self.db[collection].delete_many(_time_range_filter(start, stop))
-        logger.info("Deleted %d documents of %s between %s and %s for replacement", deleted.deleted_count, collection, start, stop)
-        return self.insert(collection, documents)
+        # IDs of the stored documents per content; several documents may share time stamp and content
+        stored_ids: defaultdict[Hashable, list[ObjectId]] = defaultdict(list)
+        for stored in self.db[collection].find(_time_range_filter(start, stop)):
+            stored_ids[_content_key(stored)].append(stored["_id"])
 
-    def replace_all(self, collection: str, documents: Sequence[TimeSeriesDocument]) -> int:
-        """Deletes every stored document of a collection, then inserts the given documents; the two steps are not atomic.
+        new_documents = []
+        for document in documents:
+            matching_ids = stored_ids.get(_content_key(document))
+            if matching_ids:
+                matching_ids.pop()
+            else:
+                new_documents.append(document)
+        obsolete_ids = [document_id for ids in stored_ids.values() for document_id in ids]
 
-        Args:
-            collection: The name of the collection.
-            documents: The new documents.
-
-        Returns:
-            The number of inserted documents.
-        """
-        deleted = self.db[collection].delete_many({})
-        logger.info("Deleted all %d documents of %s for replacement", deleted.deleted_count, collection)
-        return self.insert(collection, documents)
+        inserted = self.insert(collection, new_documents)
+        for batch in batched(obsolete_ids, self.BATCH_SIZE):
+            self.db[collection].delete_many({"_id": {"$in": list(batch)}})
+        logger.info("Replaced %s between %s and %s: %d inserted, %d deleted", collection, start, stop, inserted, len(obsolete_ids))
+        return RangeChanges(inserted, len(obsolete_ids))
 
     def has_documents(self, collection: str, start: datetime, stop: datetime) -> bool:
         """Checks whether a time range holds at least one stored document.
@@ -325,6 +334,29 @@ def _time_range_filter(start: datetime, stop: datetime) -> dict[str, Any]:
         The filter on the time field.
     """
     return {TIME_FIELD: {"$gte": start, "$lt": stop}}
+
+
+def _content_key(document: Mapping[str, Any]) -> Hashable:
+    """Builds a key that is equal for documents with equal time stamp, metadata and data, whether new or read from MongoDB.
+
+    Args:
+        document: A time series document.
+
+    Returns:
+        The time stamp and the sorted metadata and data fields, with every time cut to milliseconds as MongoDB stores it.
+    """
+    return (_stored_time(document[TIME_FIELD]), _sorted_fields(document.get(META_FIELD, {})), _sorted_fields(document.get(DATA_FIELD, {})))
+
+
+def _sorted_fields(fields: Mapping[str, Any]) -> tuple[tuple[str, Any], ...]:
+    """Lists the fields of a document part sorted by name, with times cut to milliseconds."""
+    return tuple(sorted((name, _stored_time(value) if isinstance(value, datetime) else value) for name, value in fields.items()))
+
+
+def _stored_time(time: datetime) -> datetime:
+    """Returns a time as MongoDB stores it: in UTC and cut to whole milliseconds; a naive time counts as UTC."""
+    aware_time = ensure_aware(time)
+    return aware_time.replace(microsecond=aware_time.microsecond // 1000 * 1000)
 
 
 def _data_projection(fields: Sequence[str] | None) -> dict[str, int]:

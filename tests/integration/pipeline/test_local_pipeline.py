@@ -97,3 +97,17 @@ def test_file_without_valid_row_leaves_gap_and_keeps_stored_documents(
 
     assert ([gap.reason.split(":")[0] for gap in report.gaps], report.chunks_total) == (["DataProcessingError"], 1)
     assert db[SUNSPOT_COLLECTION].count_documents({}) == ROWS_PER_INPUT_FILE
+
+
+@pytest.mark.integration
+def test_rerun_with_one_appended_row_inserts_only_that_row(db: Database, sunspot_dir: pathlib.Path, local_pipeline: LocalPipelineFor) -> None:
+    """A second run keeps the unchanged documents with their IDs and inserts only the document of the new row."""
+    local_pipeline(sunspot_dir).run([SUNSPOT_COLLECTION])
+    ids_before = {document["_id"] for document in db[SUNSPOT_COLLECTION].find()}
+    with (sunspot_dir / "SN_d_tot_V2.0.csv").open("a", encoding="utf-8") as file:
+        file.write("2001;03;17;2001.207;   42;  3.0;  20;0\n")
+
+    local_pipeline(sunspot_dir).run([SUNSPOT_COLLECTION])
+
+    ids_after = {document["_id"] for document in db[SUNSPOT_COLLECTION].find()}
+    assert (len(ids_after), ids_before <= ids_after) == (ROWS_PER_INPUT_FILE + 1, True)
