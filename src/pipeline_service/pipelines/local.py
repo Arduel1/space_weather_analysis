@@ -9,7 +9,7 @@ from types import MappingProxyType
 import pandas as pd
 
 from pipeline_service.parsing.cme_catalog import CME_PROVIDER_ID, parse_cme_catalog
-from pipeline_service.parsing.silso import SILSO_PROVIDER_ID, parse_silso_daily
+from pipeline_service.parsing.silso import SILSO_PROVIDER_ID, parse_silso_daily, parse_silso_monthly
 from pipeline_service.pipelines.base import ProgressCallback
 from pipeline_service.pipelines.chunks import ingest_or_record_gap, refresh_coverage
 from pipeline_service.pipelines.report import IngestionReport
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 WHOLE_FILE_START = datetime.min.replace(tzinfo=UTC)
 WHOLE_FILE_STOP = datetime.max.replace(tzinfo=UTC)
 
-# Daily sunspot numbers and CME events lie hours to days apart
+# Sunspot numbers and CME events lie hours to months apart, hours is the coarsest MongoDB granularity.
 LOCAL_GRANULARITY = Granularity.HOURS
 
 
@@ -49,6 +49,8 @@ class LocalDataset:
 LOCAL_DATASETS: Mapping[str, LocalDataset] = MappingProxyType(
     {
         "silso_sunspot_daily": LocalDataset("SN_d_tot_V2.0.csv", parse_silso_daily, SILSO_PROVIDER_ID),
+        "silso_sunspot_monthly": LocalDataset("SN_m_tot_V2.0.csv", parse_silso_monthly, SILSO_PROVIDER_ID),
+        "silso_sunspot_smoothed": LocalDataset("SN_ms_tot_V2.0.csv", parse_silso_monthly, SILSO_PROVIDER_ID),
         "cme_catalog": LocalDataset("cme_catalog.txt", parse_cme_catalog, CME_PROVIDER_ID),
     }
 )

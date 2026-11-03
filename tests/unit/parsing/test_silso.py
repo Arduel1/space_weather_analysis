@@ -3,11 +3,17 @@ import pathlib
 import pandas as pd
 import pytest
 
-from pipeline_service.parsing.silso import parse_silso_daily
+from pipeline_service.parsing.silso import parse_silso_daily, parse_silso_monthly
 from space_weather_analysis.util.error_handling import DataProcessingError
 
 # Days in synthetic_sunspots.csv (invented values, SILSO layout): a definitive day, a day without a number (-1), a provisional day with 0.
-SYNTHETIC_FILE = pathlib.Path(__file__).parents[2] / "integration" / "pipeline" / "data" / "synthetic_sunspots.csv"
+SYNTHETIC_DATA_DIR = pathlib.Path(__file__).parents[2] / "integration" / "pipeline" / "data"
+SYNTHETIC_FILE = SYNTHETIC_DATA_DIR / "synthetic_sunspots.csv"
+# Months in synthetic_sunspots_monthly.csv (invented values, SILSO layout): definitive, without a value (-1), provisional.
+SYNTHETIC_MONTHLY_FILE = SYNTHETIC_DATA_DIR / "synthetic_sunspots_monthly.csv"
+# Months in synthetic_sunspots_smoothed.csv (invented values, SILSO layout): definitive, provisional, not yet smoothed (-1).
+SYNTHETIC_SMOOTHED_FILE = SYNTHETIC_DATA_DIR / "synthetic_sunspots_smoothed.csv"
+MONTHS = pd.DatetimeIndex(["2001-03-01", "2001-04-01", "2001-05-01"], tz="UTC", name="timestamp")
 DAYS = pd.DatetimeIndex(["2001-03-14", "2001-03-15", "2001-03-16"], tz="UTC", name="timestamp")
 
 
@@ -59,3 +65,40 @@ def test_silso_missing_file_and_file_without_valid_row_are_rejected(tmp_path: pa
     invalid_only.write_text("2001;13;01;2001.900;  10; 1.0;   5;1\n")
     with pytest.raises(DataProcessingError):
         parse_silso_daily(invalid_only)
+
+
+@pytest.mark.parametrize(
+    ("path", "sunspot_number", "std_dev", "is_provisional"),
+    [
+        pytest.param(SYNTHETIC_MONTHLY_FILE, [123.4, float("nan"), 95.0], [11.5, float("nan"), 9.8], [False, False, True], id="monthly_mean"),
+        pytest.param(SYNTHETIC_SMOOTHED_FILE, [118.2, 114.9, float("nan")], [6.1, 5.9, float("nan")], [False, True, True], id="smoothed"),
+    ],
+)
+def test_silso_months_parsed_at_month_start_with_missing_value_as_na(
+    path: pathlib.Path, sunspot_number: list[float], std_dev: list[float], is_provisional: list[bool]
+) -> None:
+    """Each month becomes a row at its first day 00:00 UTC; -1 leaves number and deviation NA and keeps the observations."""
+    frame = parse_silso_monthly(path)
+
+    expected = pd.DataFrame(
+        {
+            "sunspot_number": sunspot_number,
+            "std_dev": std_dev,
+            "num_observations": pd.array([827, 760, 801], dtype="Int64"),
+            "is_provisional": is_provisional,
+            "decimal_year": [2001.204, 2001.288, 2001.371],
+        },
+        index=MONTHS,
+    )
+    pd.testing.assert_frame_equal(frame, expected)
+
+
+def test_silso_monthly_missing_file_and_file_without_valid_row_are_rejected(tmp_path: pathlib.Path) -> None:
+    """A missing file raises FileNotFoundError; a file without a valid month raises DataProcessingError."""
+    with pytest.raises(FileNotFoundError):
+        parse_silso_monthly(tmp_path / "missing.csv")
+
+    invalid_only = tmp_path / "invalid.csv"
+    invalid_only.write_text("2001;13;2001.950;  10.0; 1.0;   5;1\n")
+    with pytest.raises(DataProcessingError):
+        parse_silso_monthly(invalid_only)

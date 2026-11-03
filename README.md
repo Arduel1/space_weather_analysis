@@ -58,6 +58,8 @@ The following files are not part of this repository. They are downloaded from th
 | File | Provider | How to obtain | License / terms |
 | --- | --- | --- | --- |
 | `data/SN_d_tot_V2.0.csv` | WDC-SILSO, Royal Observatory of Belgium | [Download](https://www.sidc.be/SILSO/INFO/sndtotcsv.php) | [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) |
+| `data/SN_m_tot_V2.0.csv` | WDC-SILSO, Royal Observatory of Belgium | [Download](https://www.sidc.be/SILSO/INFO/snmtotcsv.php) | [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) |
+| `data/SN_ms_tot_V2.0.csv` | WDC-SILSO, Royal Observatory of Belgium | [Download](https://www.sidc.be/SILSO/INFO/snmstotcsv.php) | [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) |
 | `data/cme_catalog.txt` | CDAW Data Center (NASA, The Catholic University of America, Naval Research Laboratory) | [Download](https://cdaw.gsfc.nasa.gov/CME_list/UNIVERSAL_ver2/text_ver/univ_all.txt) | No formal license; [acknowledgement requested](https://cdaw.gsfc.nasa.gov/CME_list/) |
 
 Details on each file: [docs/local-data.md](docs/local-data.md).
@@ -158,6 +160,8 @@ The full stack runs in Docker. uv is only required for local development, tests,
 
    ```bash
    curl -o data/SN_d_tot_V2.0.csv https://www.sidc.be/SILSO/INFO/sndtotcsv.php
+   curl -o data/SN_m_tot_V2.0.csv https://www.sidc.be/SILSO/INFO/snmtotcsv.php
+   curl -o data/SN_ms_tot_V2.0.csv https://www.sidc.be/SILSO/INFO/snmstotcsv.php
    curl -o data/cme_catalog.txt https://cdaw.gsfc.nasa.gov/CME_list/UNIVERSAL_ver2/text_ver/univ_all.txt
    ```
 

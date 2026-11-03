@@ -10,3 +10,12 @@ class Granularity(StrEnum):
     SECONDS = "seconds"
     MINUTES = "minutes"
     HOURS = "hours"
+
+
+class TimeBucket(StrEnum):
+    """The length of the time buckets that aggregated reads group documents into, named by the units of MongoDB $dateTrunc."""
+
+    HOUR = "hour"
+    DAY = "day"
+    MONTH = "month"
+    YEAR = "year"
