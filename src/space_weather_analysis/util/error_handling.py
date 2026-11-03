@@ -20,6 +20,10 @@ class DataRetrievalError(SpaceWeatherError):
         self.retry_after_seconds = retry_after_seconds
 
 
+class SourceUnreachableError(DataRetrievalError):
+    """Raised when a provider sent no answer at all: the connection failed or timed out, so further requests are pointless for now."""
+
+
 class ResourceNotFoundError(DataRetrievalError):
     """Raised when a provider answers that the requested document does not exist (HTTP 404)."""
 

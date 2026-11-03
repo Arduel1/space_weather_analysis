@@ -91,7 +91,7 @@ def _run_job(
             return _gfz_pipeline(db, gfz_url)
         return factory.get_pipeline(requested_type)
 
-    assert JobRunner(db, data_dir, pipeline_for=pipeline_for).process_next_job()
+    assert JobRunner(db, data_dir, pipeline_for=pipeline_for).process_next_job(source_type)
 
     job = repository.get(job_id)
     assert job is not None
@@ -164,14 +164,15 @@ def test_job_for_a_dataset_not_yet_in_the_catalog_waits_and_runs_once_the_catalo
     clock_times = [job.created_at]
     runner = JobRunner(db, tmp_path, pipeline_for=lambda source_type: _gfz_pipeline(db, gfz_server.url), clock=lambda: clock_times[-1])
 
-    runner.process_next_job()
+    runner.dispatch_next_job()
     waiting = repository.get(job.id)
-    claimed_before_retry = runner.process_next_job()
+    claimed_before_retry = runner.dispatch_next_job()
     MongoCatalogRepository(db).save(
         {"dataset_id": INDEX, "sources": [{"type": SourceType.GFZ_POTSDAM, "source_id": "GFZ", "time_range": CATALOG_RANGE}]}
     )
     clock_times.append(job.created_at + CATALOG_RETRY_DELAY)
-    runner.process_next_job()
+    runner.dispatch_next_job()
+    runner.process_next_job(SourceType.GFZ_POTSDAM)
 
     assert waiting is not None
     assert (waiting.status, waiting.retry_at, claimed_before_retry) == (JobStatus.PENDING, job.created_at + CATALOG_RETRY_DELAY, False)
@@ -185,8 +186,27 @@ def test_job_for_a_dataset_the_catalog_never_lists_fails_after_the_wait_limit(db
     repository, job = _uncatalogued_kp_job(db)
     runner = JobRunner(db, tmp_path, clock=lambda: job.created_at + CATALOG_WAIT_LIMIT)
 
-    runner.process_next_job()
+    runner.dispatch_next_job()
 
     failed = repository.get(job.id)
     assert failed is not None
     assert (failed.status, INDEX in (failed.error or "")) == (JobStatus.FAILED, True)
+
+
+@pytest.mark.integration
+def test_job_with_datasets_of_two_source_types_is_split_into_one_job_per_lane(db: Database, tmp_path: pathlib.Path) -> None:
+    """The job keeps the datasets of its first source type for that lane and a new job takes the others to their lane."""
+    catalog = MongoCatalogRepository(db)
+    catalog.save({"dataset_id": INDEX, "sources": [{"type": SourceType.GFZ_POTSDAM, "source_id": "GFZ", "time_range": CATALOG_RANGE}]})
+    catalog.save({"dataset_id": "cme_catalog", "sources": [{"type": SourceType.LOCAL, "source_id": "cme_catalog", "time_range": CATALOG_RANGE}]})
+    repository = MongoJobRepository(db)
+    job_id = repository.create([INDEX, "cme_catalog"], DAY_ONE, DAY_TWO)
+    runner = JobRunner(db, tmp_path)
+
+    runner.dispatch_next_job()
+
+    gfz_job = repository.claim_next_pending(source_types=[SourceType.GFZ_POTSDAM])
+    local_job = repository.claim_next_pending(source_types=[SourceType.LOCAL])
+    assert gfz_job is not None and local_job is not None
+    assert (gfz_job.id, gfz_job.parameters.datasets, local_job.parameters.datasets) == (job_id, [INDEX], ["cme_catalog"])
+    assert repository.claim_next_pending() is None

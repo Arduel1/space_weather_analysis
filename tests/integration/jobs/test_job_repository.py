@@ -49,6 +49,20 @@ def test_claim_next_pending_takes_each_pending_job_once(db: Database) -> None:
 
 
 @pytest.mark.integration
+def test_claim_next_pending_takes_only_jobs_of_the_given_source_types(db: Database) -> None:
+    """A claim limited to source types skips older jobs of other types; None stands for jobs without source type."""
+    repository = MongoJobRepository(db)
+    untyped_id = repository.create(["synthetic/one"], START, END)
+    hapi_id = repository.create(["synthetic/two"], START, END, source_type=SourceType.HAPI)
+
+    claimed_hapi = repository.claim_next_pending(source_types=[SourceType.HAPI])
+    claimed_gfz = repository.claim_next_pending(source_types=[SourceType.GFZ_POTSDAM])
+    claimed_untyped = repository.claim_next_pending(source_types=[None])
+
+    assert (claimed_hapi and claimed_hapi.id, claimed_gfz, claimed_untyped and claimed_untyped.id) == (hapi_id, None, untyped_id)
+
+
+@pytest.mark.integration
 def test_progress_and_failure_are_recorded(db: Database) -> None:
     """Progress updates and a FAILED finish are stored with their times and the error description."""
     repository = MongoJobRepository(db)

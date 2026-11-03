@@ -305,6 +305,16 @@ def test_hapi_failing_source_is_asked_again_and_leaves_a_gap(db: Database, serve
 
 
 @pytest.mark.integration
+def test_hapi_unreachable_sources_leave_remaining_chunks_unrequested(db: Database) -> None:
+    """When no catalog source accepts a connection, the run requests no further chunk and reports every chunk as gap."""
+    _add_catalog_entry(db, ["http://127.0.0.1:1/hapi", "http://127.0.0.1:2/hapi"])
+
+    report = _pipeline(db, chunk_unit=TimeBucket.HOUR).run([DATASET_ID], RUN_START, RUN_START + timedelta(hours=2))
+
+    assert [gap.reason.split(":")[0] for gap in report.gaps] == ["SourceUnreachableError", "Not requested, the provider was unreachable"]
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("extra_fields", "expected_stop"),
     [

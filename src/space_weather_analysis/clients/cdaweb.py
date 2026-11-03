@@ -10,7 +10,7 @@ from cdasws.datarepresentation import DataRepresentation
 
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.clients.base import DataClient, FetchResult
-from space_weather_analysis.util.error_handling import DataProcessingError, DataRetrievalError
+from space_weather_analysis.util.error_handling import DataProcessingError, DataRetrievalError, SourceUnreachableError
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +58,7 @@ class CdawebClient(DataClient[xr.Dataset]):
 
         Raises:
             DataRetrievalError: If the request failed or CDAS answered with an error status.
+            SourceUnreachableError: If CDAS sent no answer.
             DataProcessingError: If CDAS answered successfully but delivered no data.
         """
         variables = self.variables(dataset_id)
@@ -67,6 +68,8 @@ class CdawebClient(DataClient[xr.Dataset]):
 
         try:
             status, data = self.cdas.get_data(dataset_id, list(variables), start, stop, dataRepresentation=DataRepresentation.XARRAY)
+        except (requests.ConnectionError, requests.Timeout) as error:
+            raise SourceUnreachableError(f"CDAS is unreachable for {dataset_id}: {error}") from error
         except (requests.RequestException, OSError) as error:
             raise DataRetrievalError(f"CDAS request for {dataset_id} failed: {error}") from error
 
@@ -91,6 +94,7 @@ class CdawebClient(DataClient[xr.Dataset]):
 
         Raises:
             DataRetrievalError: If the variable list cannot be read from CDAS.
+            SourceUnreachableError: If CDAS sent no answer.
         """
         if self.variables_for is not None:
             resolved = self.variables_for(dataset_id)
@@ -99,6 +103,8 @@ class CdawebClient(DataClient[xr.Dataset]):
         if dataset_id not in self._listed_variables:
             try:
                 self._listed_variables[dataset_id] = self.cdas.get_variable_names(dataset_id)
+            except (requests.ConnectionError, requests.Timeout) as error:
+                raise SourceUnreachableError(f"CDAS is unreachable for the variable list of {dataset_id}: {error}") from error
             except (requests.RequestException, OSError) as error:
                 raise DataRetrievalError(f"CDAS variable list of {dataset_id} could not be read: {error}") from error
         return self._listed_variables[dataset_id]

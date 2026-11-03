@@ -1,8 +1,10 @@
 import logging
 import pathlib
+import threading
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from functools import partial
 
 from pymongo.database import Database
 from pymongo.errors import PyMongoError
@@ -30,6 +32,10 @@ CATALOG_RETRY_DELAY = timedelta(minutes=1)
 
 class JobRunner:
     """Runs the pipelines for the download jobs stored in MongoDB by the frontend and the startup configuration.
+
+    Each source type has its own lane that runs its jobs one after the other, so the lanes work in parallel while
+    no provider gets more than one request at a time, and an unreachable provider holds up only its own lane.
+    A job without source type is first assigned to the lane of its datasets, or split into one job per source type.
 
     A job ends COMPLETED when at least one of its chunks was ingested or none needed ingesting; the chunks
     that failed are stored with it as missing chunks. It ends FAILED for an invalid request, when every
@@ -61,19 +67,34 @@ class JobRunner:
         self.pipeline_for = pipeline_for if pipeline_for is not None else PipelineFactory(self.db, data_dir).get_pipeline
 
     def run_daemon(self) -> None:
-        """Claims and runs pending jobs until the process ends, polling every POLLING_INTERVAL_SECONDS."""
+        """Runs one lane thread per source type and assigns jobs without source type in this thread, until the process ends."""
         logger.info("Job runner daemon started.")
+        for source_type in SourceType:
+            # Daemon threads end with the process, as the lanes never return
+            lane = threading.Thread(target=self._poll, args=(partial(self.process_next_job, source_type),), name=f"lane-{source_type}", daemon=True)
+            lane.start()
+        self._poll(self.dispatch_next_job)
+
+    def _poll(self, take_next_job: Callable[[], bool]) -> None:
+        """Takes jobs until the process ends, waiting POLLING_INTERVAL_SECONDS whenever no job was due.
+
+        Args:
+            take_next_job: Claims and handles the next due job; returns whether one was due.
+        """
         while True:
             try:
-                processed_job = self.process_next_job()
+                took_job = take_next_job()
             except PyMongoError:
                 logger.exception("Claiming or finishing a job failed")
-                processed_job = False
-            if not processed_job:
+                took_job = False
+            if not took_job:
                 time.sleep(self.POLLING_INTERVAL_SECONDS)
 
-    def process_next_job(self) -> bool:
-        """Claims the oldest pending job, runs it and stores how it ended.
+    def process_next_job(self, source_type: SourceType) -> bool:
+        """Claims the oldest pending job of a source type, runs its pipeline and stores how it ended.
+
+        Args:
+            source_type: The source type of the lane.
 
         Returns:
             True if a job was pending.
@@ -81,10 +102,42 @@ class JobRunner:
         Raises:
             pymongo.errors.PyMongoError: If the job cannot be claimed or its end cannot be stored.
         """
-        job = self.job_repository.claim_next_pending(self.clock())
+        job = self.job_repository.claim_next_pending(self.clock(), source_types=[source_type])
         if job is None:
             return False
-        self._process_job(job)
+        self._process_job(job, source_type)
+        return True
+
+    def dispatch_next_job(self) -> bool:
+        """Claims the oldest pending job without source type and hands its datasets to the lanes of their source types.
+
+        The job keeps the datasets of the first source type, and a new job is created for each further source type.
+
+        Returns:
+            True if a job was pending.
+
+        Raises:
+            pymongo.errors.PyMongoError: If the job cannot be claimed or updated.
+        """
+        job = self.job_repository.claim_next_pending(self.clock(), source_types=[None])
+        if job is None:
+            return False
+        try:
+            groups = self._group_by_source_type(job.parameters.datasets)
+        except DatasetNotCataloguedError as error:
+            self._wait_for_catalog(job, error)
+            return True
+        except ValueError as error:
+            logger.warning("Job %s rejected: %s", job.id, error)
+            self.job_repository.finish(job.id, JobStatus.FAILED, str(error))
+            return True
+
+        (first_type, first_datasets), *further_groups = groups.items()
+        for source_type, datasets in further_groups:
+            new_job_id = self.job_repository.create(datasets, job.parameters.start_time, job.parameters.end_time, source_type)
+            logger.info("Job %s: datasets %s of source type %s moved to job %s", job.id, datasets, source_type, new_job_id)
+        self.job_repository.assign_source_type(job.id, first_type, first_datasets)
+        logger.info("Job %s assigned to source type %s: %s", job.id, first_type, first_datasets)
         return True
 
     def _group_by_source_type(self, datasets: list[str]) -> dict[SourceType, list[str]]:
@@ -110,21 +163,16 @@ class JobRunner:
             groups.setdefault(SourceType(sources[0]["type"]), []).append(dataset_id)
         return groups
 
-    def _process_job(self, job: Job) -> None:
-        """Runs one claimed job and stores how it ended.
+    def _process_job(self, job: Job, source_type: SourceType) -> None:
+        """Runs the pipeline of a claimed job and stores how it ended.
 
         Args:
             job: The claimed job.
+            source_type: The source type of the job.
         """
         try:
-            if job.source_type is not None:
-                groups = {job.source_type: job.parameters.datasets}
-            else:
-                groups = self._group_by_source_type(job.parameters.datasets)
-            report = IngestionReport()
-            for source_type, datasets in groups.items():
-                logger.info("Processing job %s for source type %s: %s", job.id, source_type, datasets)
-                report.merge(self._execute_pipeline(source_type, datasets, job.parameters.start_time, job.parameters.end_time, job_id=job.id))
+            logger.info("Processing job %s for source type %s: %s", job.id, source_type, job.parameters.datasets)
+            report = self._execute_pipeline(source_type, job.parameters.datasets, job.parameters.start_time, job.parameters.end_time, job_id=job.id)
         except DatasetNotCataloguedError as error:
             self._wait_for_catalog(job, error)
             return

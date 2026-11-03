@@ -11,7 +11,7 @@ from hapiclient.util import HAPIError
 
 from space_weather_analysis.catalog.models import CatalogEntryDict, CatalogMap, SourceType
 from space_weather_analysis.clients.base import DataClient, FetchResult
-from space_weather_analysis.util.error_handling import DataRetrievalError
+from space_weather_analysis.util.error_handling import DataRetrievalError, SourceUnreachableError
 from space_weather_analysis.util.resilience import retry_interaction
 from space_weather_analysis.util.time_utils import calculate_time_intersection, parse_iso_time
 
@@ -38,6 +38,8 @@ class HapiClient(DataClient[HapiData]):
     # hapiclient appends this hint to the errors it raises itself (connection problems, error responses without a
     # HAPI status); errors without it carry the status message of a server that answered according to HAPI.
     HAPICLIENT_FAILURE_HINT = "hapi-server.org/servers"
+    # Starts of the messages hapiclient raises when a server sent no answer: connection failed, refused or timed out
+    HAPICLIENT_UNREACHABLE_PREFIXES = ("Connection error for", "Connection timeout for", "Failed to connect to", "Read timeout for")
 
     # An empty parameter list makes the server deliver every parameter of the dataset.
     ALL_PARAMETERS = ""
@@ -65,12 +67,14 @@ class HapiClient(DataClient[HapiData]):
 
         Raises:
             DataRetrievalError: If the catalog lists no HAPI source for the dataset, or if a source failed and no source delivered data.
+            SourceUnreachableError: If no source sent an answer.
         """
         entries = self.catalog_map.get(dataset_id)
         if not entries:
             raise DataRetrievalError(f"The master catalog lists no HAPI source for dataset '{dataset_id}'.")
 
         failures: list[str] = []
+        unreachable_count = 0
         for source_number, entry in enumerate(entries, start=1):
             server_url = entry.get("source_id", "")
             logger.info("Trying source %d/%d for %s: %s", source_number, len(entries), dataset_id, server_url)
@@ -79,13 +83,19 @@ class HapiClient(DataClient[HapiData]):
             except DataRetrievalError as error:
                 logger.warning("Source %s failed for %s: %s", server_url, dataset_id, error)
                 failures.append(f"{server_url}: {error}")
+                if isinstance(error, SourceUnreachableError):
+                    unreachable_count += 1
                 continue
             if result.data is not None:
                 return result
 
         # A failed source may hold data the other sources lack, so the range counts as failed
         if failures:
-            raise DataRetrievalError(f"No source delivered data for '{dataset_id}' and {len(failures)} failed: {'; '.join(failures)}")
+            message = f"No source delivered data for '{dataset_id}' and {len(failures)} failed: {'; '.join(failures)}"
+            # Only when no source answered at all, as an answering source may serve the next range
+            if unreachable_count == len(entries):
+                raise SourceUnreachableError(message)
+            raise DataRetrievalError(message)
         logger.info("No source has data for %s between %s and %s.", dataset_id, start, stop)
         return FetchResult(None)
 
@@ -157,7 +167,7 @@ class HapiClient(DataClient[HapiData]):
             logger.info("Server %s has no data for %s [%s -> %s]: %s", server_url, dataset_id, start_text, stop_text, error)
             return FetchResult(None, server_url)
         except (requests.ConnectionError, requests.Timeout) as error:
-            raise DataRetrievalError(f"Request to {server_url} for {dataset_id} failed: {error}") from error
+            raise SourceUnreachableError(f"{server_url} is unreachable for {dataset_id}: {error}") from error
 
         if data is None or len(data) == 0:
             logger.info("Server %s returned no data for %s [%s -> %s].", server_url, dataset_id, start_text, stop_text)
@@ -174,7 +184,10 @@ class HapiClient(DataClient[HapiData]):
             dataset_id: The requested dataset.
 
         Raises:
+            SourceUnreachableError: If the error says that the server sent no answer.
             DataRetrievalError: If the error carries the hint hapiclient adds to its own failures.
         """
+        if str(error).startswith(self.HAPICLIENT_UNREACHABLE_PREFIXES):
+            raise SourceUnreachableError(f"{server_url} is unreachable for {dataset_id}: {error}") from error
         if self.HAPICLIENT_FAILURE_HINT in str(error):
             raise DataRetrievalError(f"Request to {server_url} for {dataset_id} failed: {error}") from error

@@ -1,7 +1,6 @@
 import logging
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
-from functools import partial
 from typing import NamedTuple, Protocol
 
 from pydantic import ValidationError
@@ -17,7 +16,7 @@ from space_weather_analysis.metadata.repository import MetadataRepository
 from space_weather_analysis.timeseries.documents import TIME_FIELD
 from space_weather_analysis.timeseries.models import Granularity, TimeBucket
 from space_weather_analysis.timeseries.repository import TimeSeriesRepository
-from space_weather_analysis.util.error_handling import DataProcessingError, DataRetrievalError
+from space_weather_analysis.util.error_handling import DataProcessingError, DataRetrievalError, SourceUnreachableError
 from space_weather_analysis.util.time_utils import parse_iso_duration
 from space_weather_analysis.util.types import TimeRange
 
@@ -141,8 +140,9 @@ def run_chunked(
     """Ingests each dataset over its time range in chunks on a calendar grid, skipping chunks whose last fetch is current.
 
     A fetched chunk records its status; a chunk that fails with one of CHUNK_ERRORS records none, becomes a gap and
-    the run goes on. After the chunks of a dataset its metadata is saved, and its coverage is refreshed if at least
-    one chunk delivered data.
+    the run goes on. Once the provider of a dataset sent no answer at all, the remaining chunks of that dataset become
+    gaps without a request. After the chunks of a dataset its metadata is saved, and its coverage is refreshed if at
+    least one chunk delivered data.
 
     Args:
         source: The source-specific steps of the run.
@@ -164,15 +164,27 @@ def run_chunked(
         timeseries.ensure_collection(collection, source.granularity)
 
         delivered_any_chunk = False
+        unreachable: SourceUnreachableError | None = None
         for chunk_index, chunk in enumerate(grid_chunks):
             status = chunk_status.get(dataset_id, chunk.cell_start)
             if status is not None and status.is_current(chunk.start, chunk.stop, datetime.now(UTC)):
                 logger.info("Skipping chunk %s to %s of %s: its last fetch is current", chunk.start, chunk.stop, dataset_id)
+            elif unreachable is not None:
+                report.chunks_total += 1
+                record_gap(report, dataset_id, chunk.start, chunk.stop, f"Not requested, the provider was unreachable: {unreachable}")
             else:
                 fetch_start, fetch_stop = _fetch_range(chunk, status)
-                fetch = partial(_fetch_chunk, source, chunk_status, dataset_id, collection, chunk.cell_start, (fetch_start, fetch_stop))
-                if ingest_or_record_gap(report, dataset_id, fetch_start, fetch_stop, fetch):
-                    delivered_any_chunk = True
+                report.chunks_total += 1
+                try:
+                    if _fetch_chunk(source, chunk_status, dataset_id, collection, chunk.cell_start, (fetch_start, fetch_stop)):
+                        delivered_any_chunk = True
+                except SourceUnreachableError as error:
+                    logger.warning("Provider of %s unreachable, the remaining chunks of this run are not requested: %s", dataset_id, error)
+                    record_gap(report, dataset_id, fetch_start, fetch_stop, f"{type(error).__name__}: {error}")
+                    unreachable = error
+                except CHUNK_ERRORS as error:
+                    logger.warning("Chunk %s to %s of %s not ingested: %s", fetch_start, fetch_stop, dataset_id, error)
+                    record_gap(report, dataset_id, fetch_start, fetch_stop, f"{type(error).__name__}: {error}")
             _report_chunk_progress(
                 progress_callback, dataset_id, dataset_position=(dataset_index, len(time_ranges)), chunks_done=(chunk_index + 1, len(grid_chunks))
             )
@@ -370,8 +382,21 @@ def ingest_or_record_gap[T](report: IngestionReport, dataset_id: str, start: dat
         return ingest()
     except CHUNK_ERRORS as error:
         logger.warning("Chunk %s to %s of %s not ingested: %s", start, stop, dataset_id, error)
-        report.gaps.append(ChunkGap(dataset_id=dataset_id, start=start, stop=stop, reason=f"{type(error).__name__}: {error}"))
+        record_gap(report, dataset_id, start, stop, f"{type(error).__name__}: {error}")
         return None
+
+
+def record_gap(report: IngestionReport, dataset_id: str, start: datetime, stop: datetime, reason: str) -> None:
+    """Adds a chunk that was not ingested to the gaps of a report.
+
+    Args:
+        report: The report of the run, changed in place.
+        dataset_id: The dataset ID.
+        start: The start of the chunk (inclusive).
+        stop: The end of the chunk (exclusive).
+        reason: Why the chunk was not ingested.
+    """
+    report.gaps.append(ChunkGap(dataset_id=dataset_id, start=start, stop=stop, reason=reason))
 
 
 def refresh_coverage(coverage_repository: CoverageRepository, dataset_id: str, collection: str) -> None:

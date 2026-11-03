@@ -43,14 +43,25 @@ class JobRepository(ABC):
         """
 
     @abstractmethod
-    def claim_next_pending(self, now: datetime | None = None) -> Job | None:
+    def claim_next_pending(self, now: datetime | None = None, source_types: Sequence[SourceType | None] | None = None) -> Job | None:
         """Atomically marks the oldest pending job whose retry time has come as running, so no other worker takes it.
 
         Args:
             now: The current time; the system time if None.
+            source_types: The source types of the jobs to consider, None standing for jobs without source type; every job if None.
 
         Returns:
             The claimed job with status RUNNING and its start time, or None if no job is due.
+        """
+
+    @abstractmethod
+    def assign_source_type(self, job_id: str, source_type: SourceType, datasets: list[str]) -> None:
+        """Puts a claimed job back into the queue with the source type of its pipeline and the datasets of that type.
+
+        Args:
+            job_id: The job ID.
+            source_type: The source type of the pipeline to run.
+            datasets: The datasets of the job that belong to the source type.
         """
 
     @abstractmethod
@@ -152,18 +163,22 @@ class MongoJobRepository(JobRepository):
         document = self.collection.find_one({"_id": ObjectId(job_id)})
         return Job.from_document(document) if document else None
 
-    def claim_next_pending(self, now: datetime | None = None) -> Job | None:
+    def claim_next_pending(self, now: datetime | None = None, source_types: Sequence[SourceType | None] | None = None) -> Job | None:
         """Atomically marks the oldest pending job whose retry time has come as running, so no other worker takes it.
 
         Args:
             now: The current time; the system time if None.
+            source_types: The source types of the jobs to consider, None standing for jobs without source type; every job if None.
 
         Returns:
             The claimed job with status RUNNING and its start time, or None if no job is due.
         """
         self._ensure_index()
         claimed_at = now or datetime.now(UTC)
-        due = {"status": JobStatus.PENDING, "$or": [{"retry_at": {"$exists": False}}, {"retry_at": {"$lte": claimed_at}}]}
+        due: dict[str, Any] = {"status": JobStatus.PENDING, "$or": [{"retry_at": {"$exists": False}}, {"retry_at": {"$lte": claimed_at}}]}
+        if source_types is not None:
+            # None in $in also matches documents without the field
+            due["source_type"] = {"$in": list(source_types)}
         # ObjectIds grow with their creation time, so the smallest `_id` is the oldest job
         document = self.collection.find_one_and_update(
             due,
@@ -185,6 +200,20 @@ class MongoJobRepository(JobRepository):
             bson.errors.InvalidId: If the job ID is malformed.
         """
         update = {"$set": {"status": JobStatus.PENDING, "retry_at": retry_at, "message": message}, "$unset": {"started_at": ""}}
+        self.collection.update_one({"_id": ObjectId(job_id)}, update)
+
+    def assign_source_type(self, job_id: str, source_type: SourceType, datasets: list[str]) -> None:
+        """Puts a claimed job back into the queue with the source type of its pipeline and the datasets of that type.
+
+        Args:
+            job_id: The job ID.
+            source_type: The source type of the pipeline to run.
+            datasets: The datasets of the job that belong to the source type.
+
+        Raises:
+            bson.errors.InvalidId: If the job ID is malformed.
+        """
+        update = {"$set": {"status": JobStatus.PENDING, "source_type": source_type, "parameters.datasets": datasets}, "$unset": {"started_at": ""}}
         self.collection.update_one({"_id": ObjectId(job_id)}, update)
 
     def requeue_running(self) -> int:

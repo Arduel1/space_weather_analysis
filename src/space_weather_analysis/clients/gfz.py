@@ -13,7 +13,7 @@ from urllib3.util.retry import Retry
 
 from space_weather_analysis.catalog.models import CatalogEntryDict, SourceType
 from space_weather_analysis.clients.base import DataClient, FetchResult
-from space_weather_analysis.util.error_handling import DataProcessingError, DataRetrievalError
+from space_weather_analysis.util.error_handling import DataProcessingError, DataRetrievalError, SourceUnreachableError
 from space_weather_analysis.util.resilience import RETRY_AFTER_STATUSES, retry_after_seconds
 from space_weather_analysis.util.time_utils import ensure_aware
 
@@ -120,6 +120,7 @@ class GfzClient(DataClient[pd.DataFrame]):
         Raises:
             ValueError: If GFZ offers no index of this name.
             DataRetrievalError: If the request failed.
+            SourceUnreachableError: If GFZ sent no answer.
             DataProcessingError: If the response is no index data.
         """
         if dataset_id not in self.ALLOWED_INDICES:
@@ -136,6 +137,8 @@ class GfzClient(DataClient[pd.DataFrame]):
 
         try:
             response = self.session.get(self.base_url, params=params, timeout=self.TIMEOUT_SECONDS)
+        except (requests.ConnectionError, requests.Timeout) as error:
+            raise SourceUnreachableError(f"GFZ is unreachable for {dataset_id}: {error}") from error
         except requests.RequestException as error:
             raise DataRetrievalError(f"GFZ request for {dataset_id} failed: {error}") from error
         if not response.ok:

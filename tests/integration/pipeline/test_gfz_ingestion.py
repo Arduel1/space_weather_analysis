@@ -204,6 +204,22 @@ def test_gfz_second_run_completes_incomplete_chunk(db: Database, gfz_server: Fak
     assert _stored_kp_and_status(db, DAY_ONE) == pytest.approx([(kp_value, "def") for kp_value in KP_DAY_ONE])
 
 
+# Address on which no server listens, so every connection is refused at once.
+UNREACHABLE_URL = "http://127.0.0.1:1/app/json/"
+
+
+@pytest.mark.integration
+def test_gfz_unreachable_server_leaves_remaining_chunks_unrequested(db: Database, gfz_server: FakeGfzServer) -> None:
+    """After a refused connection the run requests no further chunk and reports every chunk as gap."""
+    pipeline = _pipeline(db, gfz_server)
+    pipeline.client = GfzClient(base_url=UNREACHABLE_URL, retry_backoff_factor=0)
+
+    report = pipeline.run([INDEX], DAY_ONE, DAY_THREE)
+
+    assert [gap.reason.split(":")[0] for gap in report.gaps] == ["SourceUnreachableError", "Not requested, the provider was unreachable"]
+    assert report.all_failed
+
+
 @pytest.mark.integration
 def test_gfz_failed_chunk_keeps_stored_documents_and_next_chunk_runs(db: Database, gfz_server: FakeGfzServer) -> None:
     """A chunk whose request fails with HTTP 500 keeps its stored documents, is reported as gap and does not stop the next chunk."""
