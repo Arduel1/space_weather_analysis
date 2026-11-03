@@ -57,13 +57,18 @@ class FakeGfzServer:
             self.values[day + interval_number * KP_INTERVAL] = (kp_value, status)
 
     def handle(self, request: Request) -> Response:
-        """Answers like GFZ with every value whose time lies in [start, end], HTTP 500 for a failing start."""
+        """Answers like GFZ with every value whose time lies in [start, end], its no-data message without one, HTTP 500 for a failing start."""
         start = _parse_time(request.args["start"])
         end = _parse_time(request.args["end"])
         if request.args["index"] != INDEX or start in self.failing_starts:
             return Response("<html>Internal Server Error</html>", status=500, content_type="text/html")
 
         times = sorted(time for time in self.values if start <= time <= end)
+        if not times:
+            return Response(
+                json.dumps({"message": f"No data available for the selection (datetime >= '{start}' and datetime <= '{end}')"}),
+                content_type="application/json",
+            )
         body = {
             INDEX: [self.values[time][0] for time in times],
             "datetime": [time.strftime(TIME_FORMAT) for time in times],
@@ -233,6 +238,18 @@ def test_gfz_failed_chunk_keeps_stored_documents_and_next_chunk_runs(db: Databas
     assert _stored_kp_and_status(db, DAY_ONE) == pytest.approx([(kp_value, "pre") for kp_value in KP_DAY_ONE])
     assert _stored_kp_and_status(db, DAY_TWO) == pytest.approx([(kp_value, "def") for kp_value in KP_DAY_TWO])
     assert ([(gap.start, gap.stop) for gap in report.gaps], report.chunks_total) == ([(DAY_ONE, DAY_TWO)], 2)
+
+
+@pytest.mark.integration
+def test_gfz_no_data_message_keeps_stored_documents_without_gap(db: Database, gfz_server: FakeGfzServer) -> None:
+    """When GFZ answers that the range holds no value, the stored documents stay and the run reports no gap."""
+    gfz_server.set_day(DAY_ONE, KP_DAY_ONE, "pre")
+    _ingest(db, gfz_server)
+    gfz_server.values.clear()
+
+    report = _ingest(db, gfz_server)
+
+    assert (report.gaps, _stored_kp_and_status(db, DAY_ONE)) == ([], pytest.approx([(kp_value, "pre") for kp_value in KP_DAY_ONE]))
 
 
 @pytest.mark.integration

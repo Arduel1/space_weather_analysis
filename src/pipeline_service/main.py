@@ -1,6 +1,7 @@
 import logging
 import pathlib
 import sys
+import threading
 import tomllib
 from datetime import UTC, datetime
 
@@ -8,7 +9,7 @@ from pydantic import ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from pipeline_service.feeds.models import load_feeds
-from pipeline_service.feeds.scheduler import queue_feed_jobs
+from pipeline_service.feeds.scheduler import queue_feed_jobs, run_feed_scheduler
 from pipeline_service.jobs.runner import JobRunner
 from space_weather_analysis.config.errors import format_settings_error
 from space_weather_analysis.database.connection import connect_from_environment
@@ -23,7 +24,7 @@ class PipelineSettings(BaseSettings):
 
     Attributes:
         data_dir: The directory holding the local dataset files.
-        feeds_file: The TOML file listing the feeds whose jobs are queued on every start.
+        feeds_file: The TOML file listing the feeds whose jobs are queued on start and then periodically.
     """
 
     model_config = SettingsConfigDict(env_prefix="PIPELINE_", frozen=True)
@@ -33,7 +34,7 @@ class PipelineSettings(BaseSettings):
 
 
 def main() -> None:
-    """Queues the jobs of the configured feeds and runs the job daemon until the process ends."""
+    """Queues the jobs of the configured feeds, repeats them in their intervals and runs the job daemon until the process ends."""
     setup_logging(service_name="PipelineService")
 
     try:
@@ -57,7 +58,11 @@ def main() -> None:
         requeued = job_repository.requeue_running()
         if requeued:
             logger.info("Requeued %d jobs interrupted by the previous run", requeued)
-        queue_feed_jobs(job_repository, feeds, datetime.now(UTC))
+        started_at = datetime.now(UTC)
+        queue_feed_jobs(job_repository, feeds, started_at)
+        if any(feed.interval is not None for feed in feeds):
+            # Daemon thread, as the scheduler never returns and ends with the process
+            threading.Thread(target=run_feed_scheduler, args=(job_repository, feeds, started_at), name="feed-scheduler", daemon=True).start()
         JobRunner(db, settings.data_dir).run_daemon()
     except KeyboardInterrupt:
         logger.info("Pipeline service stopped.")

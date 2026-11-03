@@ -65,6 +65,8 @@ class GfzClient(DataClient[pd.DataFrame]):
 
     TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
     TIMEOUT_SECONDS = 10
+    # Start of the message GFZ answers with HTTP 200 instead of the index lists when the range holds no value
+    NO_DATA_MESSAGE_START = "No data available"
     DEFAULT_RETRY_COUNT = 3
     # Statuses of an overloaded or failing server that a repeated request may not get
     RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
@@ -149,6 +151,9 @@ class GfzClient(DataClient[pd.DataFrame]):
             body = response.json()
         except ValueError as error:
             raise DataProcessingError(f"GFZ response for {dataset_id} is no JSON: {error}") from error
+        if isinstance(body, dict) and str(body.get("message", "")).startswith(self.NO_DATA_MESSAGE_START):
+            logger.info("GFZ has no value of %s from %s to %s", dataset_id, params["start"], params["end"])
+            return FetchResult(None, self.base_url)
         if not isinstance(body, dict) or "datetime" not in body or dataset_id not in body:
             raise DataProcessingError(f"GFZ response for {dataset_id} lacks the keys 'datetime' and '{dataset_id}'.")
 

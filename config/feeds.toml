@@ -1,4 +1,5 @@
-# Feeds the pipeline service keeps loaded: on every start it queues one job per feed that has no open job.
+# Feeds the pipeline service keeps loaded: on every start and then every `interval` (ISO 8601 duration) it queues
+# one job per feed that has no open job; a feed without interval is queued only on start.
 # Each feed takes a time range of either `lookback` (ISO 8601 duration up to now) or `start` and optional `end`
 # (UTC times, `end` defaults to now); a feed without range lets its pipeline choose.
 # `source_type` names the pipeline; without it the job runner looks the datasets up in the master catalog.
@@ -8,12 +9,16 @@
 name = "goes"
 datasets = ["goesp_xray_flux_P1M", "goesp_part_flux_P5M"]
 lookback = "P90D"
+# 1-minute data, fetched again every quarter hour
+interval = "PT15M"
 
 # Kp index of GFZ Potsdam
 [[feed]]
 name = "kp"
 datasets = ["Kp"]
 start = 2020-01-01T00:00:00Z
+# One value per 3 hours; hourly fetches take up new and revised preliminary values soon after GFZ publishes them
+interval = "PT1H"
 
 # Local files, which hold their whole dataset and are not in the master catalog
 [[feed]]

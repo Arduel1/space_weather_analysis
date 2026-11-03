@@ -24,7 +24,7 @@ IsoDuration = Annotated[timedelta, BeforeValidator(_duration)]
 
 
 class Feed(BaseModel):
-    """A group of datasets the pipeline service keeps loaded, queued as one job.
+    """A group of datasets the pipeline service keeps loaded, queued as one job on every start and then every interval.
 
     The time range is either a lookback up to now or fixed bounds; without both, the pipelines choose the range.
 
@@ -35,6 +35,7 @@ class Feed(BaseModel):
         lookback: The length of the time range that ends now.
         start: The fixed start of the time range.
         end: The fixed end of the time range; None ends a range with lookback or start now.
+        interval: The time between two jobs of the feed; None queues a job only on start.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -45,6 +46,7 @@ class Feed(BaseModel):
     lookback: IsoDuration | None = None
     start: UtcDatetime | None = None
     end: UtcDatetime | None = None
+    interval: IsoDuration | None = None
 
     @model_validator(mode="after")
     def _one_kind_of_range(self) -> Self:

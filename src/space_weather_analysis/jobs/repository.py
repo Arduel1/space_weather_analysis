@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from bson.objectid import ObjectId
@@ -127,9 +127,11 @@ class MongoJobRepository(JobRepository):
     """Job repository on MongoDB; each job is one document in 'jobs' with an ObjectId as `_id`."""
 
     COLLECTION = "jobs"
+    # Time an ended job is kept, so recent outcomes stay visible while periodic feed jobs do not pile up
+    ENDED_JOB_RETENTION = timedelta(days=30)
 
     def __init__(self, db: Database) -> None:
-        """Initializes the repository; the index is created before the first claim.
+        """Initializes the repository; the indexes are created before the first claim.
 
         Args:
             db: The MongoDB database instance.
@@ -138,10 +140,12 @@ class MongoJobRepository(JobRepository):
         self._index_ensured = False
 
     def _ensure_index(self) -> None:
-        """Creates the index for finding the oldest pending job, once per instance."""
+        """Creates the index for finding the oldest pending job and the one that expires ended jobs, once per instance."""
         if self._index_ensured:
             return
         self.collection.create_index([("status", ASCENDING), ("_id", ASCENDING)])
+        # MongoDB deletes a job once its end lies ENDED_JOB_RETENTION back; jobs that have not ended lack the field
+        self.collection.create_index("completed_at", expireAfterSeconds=int(self.ENDED_JOB_RETENTION.total_seconds()))
         self._index_ensured = True
 
     def create(

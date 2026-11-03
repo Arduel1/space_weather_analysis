@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from pipeline_service.feeds.models import Feed, load_feeds
+from pipeline_service.feeds.scheduler import due_feeds
 
 PROJECT_FEED_FILE = pathlib.Path(__file__).parents[3] / "config" / "feeds.toml"
 NOW = datetime(2024, 3, 1, tzinfo=UTC)
@@ -38,14 +39,21 @@ def test_time_range_resolved_at_queue_time(feed: Feed, expected_range: tuple[dat
 
 
 def test_feed_file_reads_iso_durations_and_toml_times(tmp_path: pathlib.Path) -> None:
-    """Lookbacks are ISO 8601 durations and fixed bounds TOML date-times."""
+    """Lookbacks and intervals are ISO 8601 durations and fixed bounds TOML date-times."""
     path = _write(
-        tmp_path, '[[feed]]\nname = "a"\ndatasets = ["x"]\nlookback = "P1M"\n\n[[feed]]\nname = "b"\ndatasets = ["y"]\nstart = 2020-01-01T00:00:00Z\n'
+        tmp_path,
+        '[[feed]]\nname = "a"\ndatasets = ["x"]\nlookback = "P1M"\ninterval = "PT15M"\n\n'
+        '[[feed]]\nname = "b"\ndatasets = ["y"]\nstart = 2020-01-01T00:00:00Z\n',
     )
 
     feeds = load_feeds(path)
 
-    assert (feeds[0].lookback, feeds[1].start) == (timedelta(days=365.2425 / 12), datetime(2020, 1, 1, tzinfo=UTC))
+    assert (feeds[0].lookback, feeds[0].interval, feeds[1].start, feeds[1].interval) == (
+        timedelta(days=365.2425 / 12),
+        timedelta(minutes=15),
+        datetime(2020, 1, 1, tzinfo=UTC),
+        None,
+    )
 
 
 @pytest.mark.parametrize(
@@ -62,3 +70,16 @@ def test_invalid_feed_file_is_rejected(tmp_path: pathlib.Path, content: str) -> 
     """Contradicting ranges, malformed values, repeated names and unknown keys fail validation."""
     with pytest.raises(ValidationError):
         load_feeds(_write(tmp_path, content))
+
+
+def test_due_feeds_are_those_whose_interval_has_passed() -> None:
+    """A feed is due once its interval has passed or if it was never queued; a feed without interval never is."""
+    hourly = Feed(name="hourly", datasets=["a"], interval=timedelta(hours=1))
+    quarter_hourly = Feed(name="quarter", datasets=["b"], interval=timedelta(minutes=15))
+    never_queued = Feed(name="new", datasets=["c"], interval=timedelta(days=1))
+    start_only = Feed(name="start-only", datasets=["d"])
+    last_queued = {"hourly": NOW - timedelta(minutes=30), "quarter": NOW - timedelta(minutes=15), "start-only": NOW - timedelta(days=9)}
+
+    due = due_feeds([hourly, quarter_hourly, never_queued, start_only], last_queued, NOW)
+
+    assert [feed.name for feed in due] == ["quarter", "new"]

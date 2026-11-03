@@ -187,7 +187,7 @@ class MongoTimeSeriesRepository(TimeSeriesRepository):
             # ordered=False inserts the other documents of a batch even if one fails
             self.db[collection].insert_many(batch, ordered=False)
             inserted += len(batch)
-        logger.info("Inserted %d documents into %s", inserted, collection)
+        logger.debug("Inserted %d documents into %s", inserted, collection)
         return inserted
 
     def replace_range(self, collection: str, start: datetime, stop: datetime, documents: Sequence[TimeSeriesDocument]) -> RangeChanges:

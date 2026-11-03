@@ -134,7 +134,7 @@ class LocalPipeline:
         documents = frame_to_documents(frame, source_identifier(SourceType.LOCAL, dataset.provider_id))
         self.timeseries.ensure_collection(collection, LOCAL_GRANULARITY)
         changes = self.timeseries.replace_range(collection, WHOLE_FILE_START, WHOLE_FILE_STOP, documents)
-        logger.info(
+        logger.debug(
             "Synchronized %s with its file of %d documents: %d inserted, %d deleted", collection, len(documents), changes.inserted, changes.deleted
         )
         return len(documents)
