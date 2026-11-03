@@ -8,11 +8,13 @@ from pymongo.database import Database
 from pytest_httpserver import HTTPServer
 from werkzeug import Request, Response
 
+from pipeline_service.chunk_status.repository import MongoChunkStatusRepository
 from pipeline_service.pipelines.gfz import GfzPipeline
 from pipeline_service.pipelines.report import IngestionReport
 from space_weather_analysis.clients.gfz import GfzClient
 from space_weather_analysis.coverage.repository import MongoCoverageRepository
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
+from space_weather_analysis.timeseries.models import TimeBucket
 from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository
 
 StoredData = Callable[[str, datetime], dict[str, Any]]
@@ -90,8 +92,9 @@ def _pipeline(db: Database, gfz_server: FakeGfzServer) -> GfzPipeline:
         timeseries=MongoTimeSeriesRepository(db),
         metadata_repository=MongoMetadataRepository(db),
         coverage_repository=MongoCoverageRepository(db),
+        chunk_status=MongoChunkStatusRepository(db),
         client=GfzClient(base_url=gfz_server.url, retry_backoff_factor=0),
-        chunk_duration=timedelta(days=1),
+        chunk_unit=TimeBucket.DAY,
     )
 
 

@@ -4,6 +4,7 @@ from typing import assert_never
 from cdasws import CdasWs
 from pymongo.database import Database
 
+from pipeline_service.chunk_status.repository import ChunkStatusRepository, MongoChunkStatusRepository
 from pipeline_service.pipelines.base import Pipeline
 from pipeline_service.pipelines.cdaweb import CdawebPipeline
 from pipeline_service.pipelines.gfz import GfzPipeline
@@ -32,6 +33,7 @@ class PipelineFactory:
         self.catalog_repository: CatalogRepository = MongoCatalogRepository(db)
         self.metadata_repository: MetadataRepository = MongoMetadataRepository(db)
         self.coverage_repository: CoverageRepository = MongoCoverageRepository(db)
+        self.chunk_status: ChunkStatusRepository = MongoChunkStatusRepository(db)
         # Without response cache, so every run reads the current data
         self.cdas = CdasWs(disable_cache=True)
         self.gfz_client = GfzClient()
@@ -52,6 +54,7 @@ class PipelineFactory:
                     catalog_repository=self.catalog_repository,
                     metadata_repository=self.metadata_repository,
                     coverage_repository=self.coverage_repository,
+                    chunk_status=self.chunk_status,
                 )
             case SourceType.CDAWEB:
                 return CdawebPipeline(
@@ -59,6 +62,7 @@ class PipelineFactory:
                     catalog_repository=self.catalog_repository,
                     metadata_repository=self.metadata_repository,
                     coverage_repository=self.coverage_repository,
+                    chunk_status=self.chunk_status,
                     cdas=self.cdas,
                 )
             case SourceType.GFZ_POTSDAM:
@@ -66,6 +70,7 @@ class PipelineFactory:
                     timeseries=self.timeseries,
                     metadata_repository=self.metadata_repository,
                     coverage_repository=self.coverage_repository,
+                    chunk_status=self.chunk_status,
                     client=self.gfz_client,
                 )
             case SourceType.LOCAL:

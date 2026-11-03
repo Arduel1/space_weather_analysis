@@ -12,6 +12,7 @@ from pymongo.database import Database
 from pytest_httpserver import HTTPServer
 from werkzeug import Request, Response
 
+from pipeline_service.chunk_status.repository import MongoChunkStatusRepository
 from pipeline_service.pipelines.hapi import HapiPipeline
 from pipeline_service.pipelines.report import IngestionReport
 from space_weather_analysis.catalog.models import CatalogEntryDict
@@ -20,6 +21,7 @@ from space_weather_analysis.clients.hapi import HapiClient
 from space_weather_analysis.coverage.repository import MongoCoverageRepository
 from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSourceKind
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
+from space_weather_analysis.timeseries.models import TimeBucket
 from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository
 
 StoredData = Callable[[str, datetime], dict[str, Any]]
@@ -122,15 +124,16 @@ def _add_catalog_entry(db: Database, server_urls: list[str], extra_fields: dict[
     MongoCatalogRepository(db).save({"dataset_id": DATASET_ID, "sources": sources})
 
 
-def _pipeline(db: Database, chunk_duration: timedelta = timedelta(days=7)) -> HapiPipeline:
+def _pipeline(db: Database, chunk_unit: TimeBucket = TimeBucket.DAY) -> HapiPipeline:
     """Builds the HAPI pipeline with a client that asks a failing source again without waiting."""
     return HapiPipeline(
         timeseries=MongoTimeSeriesRepository(db),
         catalog_repository=MongoCatalogRepository(db),
         metadata_repository=MongoMetadataRepository(db),
         coverage_repository=MongoCoverageRepository(db),
+        chunk_status=MongoChunkStatusRepository(db),
         client_factory=partial(HapiClient, retry_backoff_factor=0),
-        chunk_duration=chunk_duration,
+        chunk_unit=chunk_unit,
     )
 
 
@@ -246,8 +249,8 @@ def test_hapi_arrays_above_column_limit_are_not_stored(db: Database, httpserver:
     httpserver.expect_request(f"{SERVER_PATH}/data").respond_with_handler(_large_array_rows_in_requested_range)
 
     _add_catalog_entry(db, [httpserver.url_for(SERVER_PATH)])
-    # Two chunks with one row each.
-    _pipeline(db, chunk_duration=timedelta(hours=3)).run([DATASET_ID], RUN_START, RUN_END)
+    # Hourly chunks, two of them with one row each.
+    _pipeline(db, chunk_unit=TimeBucket.HOUR).run([DATASET_ID], RUN_START, RUN_END)
 
     assert db[DATASET_ID].count_documents({}) == 2
     assert stored_data(DATASET_ID, REGULAR_TIME + timedelta(hours=4)) == pytest.approx({"Short_Wave": 1.5e-07})

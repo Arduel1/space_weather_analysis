@@ -1,13 +1,14 @@
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
+from pipeline_service.chunk_status.repository import ChunkStatusRepository
 from pipeline_service.parsing.hapi import convert_hapi_to_frame
 from pipeline_service.pipelines.base import ProgressCallback
-from pipeline_service.pipelines.chunks import METADATA_SAVE_ERRORS, run_chunked
+from pipeline_service.pipelines.chunks import METADATA_SAVE_ERRORS, chunk_unit_for_cadence, run_chunked, settled, stored_cadence
 from pipeline_service.pipelines.report import IngestionReport
 from space_weather_analysis.catalog.models import CatalogEntryDict, CatalogMap, SourceType
 from space_weather_analysis.catalog.repository import CatalogRepository
@@ -18,7 +19,7 @@ from space_weather_analysis.metadata.models import MAX_ARRAY_COLUMNS, MetadataSo
 from space_weather_analysis.metadata.overlays.layering import save_with_overlays
 from space_weather_analysis.metadata.repository import MetadataRepository
 from space_weather_analysis.timeseries.documents import frame_to_documents, source_identifier
-from space_weather_analysis.timeseries.models import Granularity
+from space_weather_analysis.timeseries.models import Granularity, TimeBucket
 from space_weather_analysis.timeseries.repository import TimeSeriesRepository
 from space_weather_analysis.util.error_handling import DataProcessingError
 from space_weather_analysis.util.hapi_parameters import parameters_too_large_for_columns
@@ -27,9 +28,6 @@ from space_weather_analysis.util.time_utils import ensure_aware, parse_iso_time
 from space_weather_analysis.util.types import TimeRange
 
 logger = logging.getLogger(__name__)
-
-# Time span of one data request and of one check for already stored documents.
-DEFAULT_CHUNK_DURATION = timedelta(days=7)
 
 # Keys hapiclient adds to the /info response to describe its own request, cache files and timing.
 HAPICLIENT_REQUEST_KEYS = frozenset(
@@ -80,8 +78,9 @@ class HapiPipeline:
         catalog_repository: CatalogRepository,
         metadata_repository: MetadataRepository,
         coverage_repository: CoverageRepository,
+        chunk_status: ChunkStatusRepository,
         client_factory: Callable[[CatalogMap], HapiClient] = HapiClient,
-        chunk_duration: timedelta = DEFAULT_CHUNK_DURATION,
+        chunk_unit: TimeBucket | None = None,
     ) -> None:
         """Initializes the pipeline with its repositories.
 
@@ -90,15 +89,17 @@ class HapiPipeline:
             catalog_repository: The repository of the master catalog, which lists the HAPI sources.
             metadata_repository: The repository storing the metadata records.
             coverage_repository: The repository storing which time ranges are stored.
+            chunk_status: The repository storing the status of each fetched chunk.
             client_factory: Builds the client from the HAPI sources of the master catalog at the start of each run.
-            chunk_duration: The time span of one data request.
+            chunk_unit: The calendar unit of the chunks; None selects it per dataset from the cadence in its metadata record.
         """
         self.timeseries = timeseries
         self.catalog_repository = catalog_repository
         self.metadata_repository = metadata_repository
         self.coverage_repository = coverage_repository
+        self.chunk_status = chunk_status
         self.client_factory = client_factory
-        self.chunk_duration = chunk_duration
+        self.chunk_unit = chunk_unit
 
     def run(
         self,
@@ -107,7 +108,7 @@ class HapiPipeline:
         end_time: datetime | None,
         progress_callback: ProgressCallback | None = None,
     ) -> IngestionReport:
-        """Ingests each dataset in chunks of the chunk duration, skipping chunks that already hold documents.
+        """Ingests each dataset in chunks of a calendar grid, skipping chunks whose last fetch is current.
 
         The time range of every dataset is resolved before the first chunk, so an invalid request stores nothing.
 
@@ -128,11 +129,11 @@ class HapiPipeline:
         client = self.client_factory(self.catalog_repository.get_source_map(SourceType.HAPI))
         time_ranges = {dataset_id: _resolve_time_range(client, dataset_id, start_time, end_time) for dataset_id in datasets}
         return run_chunked(
-            HapiChunkSource(client, self.timeseries, self.metadata_repository),
+            HapiChunkSource(client, self.timeseries, self.metadata_repository, self.chunk_unit),
             time_ranges,
-            chunk_duration=self.chunk_duration,
             timeseries=self.timeseries,
             coverage_repository=self.coverage_repository,
+            chunk_status=self.chunk_status,
             progress_callback=progress_callback,
         )
 
@@ -143,17 +144,21 @@ class HapiChunkSource:
     # HAPI datasets have cadences from seconds to minutes
     granularity = Granularity.SECONDS
 
-    def __init__(self, client: HapiClient, timeseries: TimeSeriesRepository, metadata_repository: MetadataRepository) -> None:
+    def __init__(
+        self, client: HapiClient, timeseries: TimeSeriesRepository, metadata_repository: MetadataRepository, unit: TimeBucket | None
+    ) -> None:
         """Initializes the source for one run.
 
         Args:
             client: The client holding the HAPI sources of the master catalog.
             timeseries: The repository storing the data documents.
             metadata_repository: The repository storing the metadata records.
+            unit: The calendar unit of the chunks; None selects it per dataset from its cadence.
         """
         self.client = client
         self.timeseries = timeseries
         self.metadata_repository = metadata_repository
+        self.unit = unit
         self._latest_info: dict[str, FetchedInfo] = {}
 
     def collection_for(self, dataset_id: str) -> str:
@@ -167,23 +172,35 @@ class HapiChunkSource:
         """
         return sanitize_collection_name(dataset_id)
 
-    def should_skip(self, dataset_id: str, collection: str, start: datetime, stop: datetime) -> bool:
-        """Skips a chunk that holds at least one stored document.
+    def chunk_unit(self, dataset_id: str) -> TimeBucket:
+        """Names the calendar cell unit of a dataset, the given unit or the one fitting the cadence in its metadata record.
+
+        Args:
+            dataset_id: The dataset ID.
+
+        Returns:
+            The cell unit.
+        """
+        return self.unit or chunk_unit_for_cadence(stored_cadence(self.metadata_repository, dataset_id))
+
+    def is_stable(self, dataset_id: str, collection: str, start: datetime, stop: datetime, fetched_at: datetime) -> bool:
+        """Counts fetched data as stable once the fetched range ended SETTLE_DELAY before the fetch.
 
         Args:
             dataset_id: The dataset ID.
             collection: The collection holding the data documents.
-            start: The start of the chunk (inclusive).
-            stop: The end of the chunk (exclusive).
+            start: The start of the fetched range (inclusive).
+            stop: The end of the fetched range (exclusive).
+            fetched_at: When the fetch finished.
 
         Returns:
-            True if the chunk holds a stored document.
+            True if the fetched range ended long enough before the fetch.
         """
-        del dataset_id
-        return self.timeseries.has_documents(collection, start, stop)
+        del dataset_id, collection, start
+        return settled(stop, fetched_at)
 
     def ingest_chunk(self, dataset_id: str, collection: str, start: datetime, stop: datetime) -> bool:
-        """Fetches one chunk and stores its rows as documents.
+        """Fetches one chunk and replaces its stored documents with its rows; stored documents stay if no source delivers data.
 
         Args:
             dataset_id: The dataset ID.
@@ -197,7 +214,7 @@ class HapiChunkSource:
         Raises:
             DataRetrievalError: If the request failed.
             DataProcessingError: If the response cannot be converted into columns or names no server.
-            pymongo.errors.PyMongoError: If the documents cannot be stored.
+            pymongo.errors.PyMongoError: If the documents cannot be replaced.
         """
         result = self.client.fetch(dataset_id, start, stop)
         if result.data is None:
@@ -208,7 +225,8 @@ class HapiChunkSource:
         retrieved_at = datetime.now(UTC)
 
         frame = convert_hapi_to_frame(data, info)
-        self.timeseries.insert(collection, frame_to_documents(frame, hapi_source_identifier(result.source_url), server_url=result.source_url))
+        documents = frame_to_documents(frame, hapi_source_identifier(result.source_url), server_url=result.source_url)
+        self.timeseries.replace_range(collection, start, stop, documents)
         self._latest_info[dataset_id] = FetchedInfo(info, result.source_url, retrieved_at)
         return True
 

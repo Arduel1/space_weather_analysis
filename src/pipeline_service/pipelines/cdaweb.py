@@ -1,13 +1,14 @@
 import logging
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from cdasws import CdasWs
 
+from pipeline_service.chunk_status.repository import ChunkStatusRepository
 from pipeline_service.parsing.cdaweb_xarray import VariablePlan, dataset_to_frame, plan_master_variables
 from pipeline_service.parsing.istp import clean_istp_columns
 from pipeline_service.pipelines.base import ProgressCallback
-from pipeline_service.pipelines.chunks import METADATA_SAVE_ERRORS, run_chunked
+from pipeline_service.pipelines.chunks import METADATA_SAVE_ERRORS, chunk_unit_for_cadence, run_chunked, settled, stored_cadence
 from pipeline_service.pipelines.report import IngestionReport
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.catalog.repository import CatalogRepository
@@ -19,7 +20,7 @@ from space_weather_analysis.metadata.overlays.cdaweb import cdas_dataset_id
 from space_weather_analysis.metadata.overlays.layering import save_with_overlays
 from space_weather_analysis.metadata.repository import MetadataRepository
 from space_weather_analysis.timeseries.documents import frame_to_documents, source_identifier
-from space_weather_analysis.timeseries.models import Granularity
+from space_weather_analysis.timeseries.models import Granularity, TimeBucket
 from space_weather_analysis.timeseries.repository import TimeSeriesRepository
 from space_weather_analysis.util.naming import sanitize_collection_name
 from space_weather_analysis.util.time_utils import ensure_aware
@@ -27,7 +28,6 @@ from space_weather_analysis.util.time_utils import ensure_aware
 logger = logging.getLogger(__name__)
 
 # Time span of one request and of one check for already stored documents.
-DEFAULT_CHUNK_DURATION = timedelta(days=7)
 
 
 class CdawebPipeline:
@@ -46,8 +46,9 @@ class CdawebPipeline:
         catalog_repository: CatalogRepository,
         metadata_repository: MetadataRepository,
         coverage_repository: CoverageRepository,
+        chunk_status: ChunkStatusRepository,
         cdas: CdasWs,
-        chunk_duration: timedelta = DEFAULT_CHUNK_DURATION,
+        chunk_unit: TimeBucket | None = None,
     ) -> None:
         """Initializes the pipeline.
 
@@ -56,14 +57,16 @@ class CdawebPipeline:
             catalog_repository: The repository of the master catalog, which names the observatory group of each dataset.
             metadata_repository: The repository storing the metadata records and holding the stored master files.
             coverage_repository: The repository storing which time ranges are stored.
+            chunk_status: The repository storing the status of each fetched chunk.
             cdas: The CDAS web service client the data are requested with.
-            chunk_duration: The time span of one request.
+            chunk_unit: The calendar unit of the chunks; None selects it per dataset from the cadence in its metadata record.
         """
         self.timeseries = timeseries
         self.catalog_repository = catalog_repository
         self.metadata_repository = metadata_repository
         self.coverage_repository = coverage_repository
-        self.chunk_duration = chunk_duration
+        self.chunk_status = chunk_status
+        self.chunk_unit = chunk_unit
         self._variable_plans: dict[str, VariablePlan] = {}
         self.client = CdawebClient(cdas=cdas, variables_for=self._requested_variables)
 
@@ -74,7 +77,7 @@ class CdawebPipeline:
         end_time: datetime | None,
         progress_callback: ProgressCallback | None = None,
     ) -> IngestionReport:
-        """Ingests each dataset in chunks of the chunk duration, skipping chunks that already hold documents.
+        """Ingests each dataset in chunks of a calendar grid, skipping chunks whose last fetch is current.
 
         The metadata record of a dataset is built once after its chunks, from what all of them delivered.
 
@@ -99,11 +102,11 @@ class CdawebPipeline:
 
         time_range = (ensure_aware(start_time), ensure_aware(end_time))
         return run_chunked(
-            CdawebChunkSource(self.client, self.timeseries, self.metadata_repository, group_names, self._variable_plans),
+            CdawebChunkSource(self.client, self.timeseries, self.metadata_repository, group_names, self._variable_plans, self.chunk_unit),
             dict.fromkeys(datasets, time_range),
-            chunk_duration=self.chunk_duration,
             timeseries=self.timeseries,
             coverage_repository=self.coverage_repository,
+            chunk_status=self.chunk_status,
             progress_callback=progress_callback,
         )
 
@@ -169,6 +172,7 @@ class CdawebChunkSource:
         metadata_repository: MetadataRepository,
         group_names: Mapping[str, str],
         variable_plans: Mapping[str, VariablePlan],
+        unit: TimeBucket | None,
     ) -> None:
         """Initializes the source for one run.
 
@@ -178,12 +182,14 @@ class CdawebChunkSource:
             metadata_repository: The repository storing the metadata records.
             group_names: The observatory group of each dataset, part of the source identifier of its documents.
             variable_plans: The variables planned from the stored master file of each dataset that has one.
+            unit: The calendar unit of the chunks; None selects it per dataset from its cadence.
         """
         self.client = client
         self.timeseries = timeseries
         self.metadata_repository = metadata_repository
         self.group_names = group_names
         self.variable_plans = variable_plans
+        self.unit = unit
         self._delivered: dict[str, DeliveredMetadata] = {}
 
     def collection_for(self, dataset_id: str) -> str:
@@ -197,23 +203,35 @@ class CdawebChunkSource:
         """
         return sanitize_collection_name(dataset_id)
 
-    def should_skip(self, dataset_id: str, collection: str, start: datetime, stop: datetime) -> bool:
-        """Skips a chunk that holds at least one stored document.
+    def chunk_unit(self, dataset_id: str) -> TimeBucket:
+        """Names the calendar cell unit of a dataset, the given unit or the one fitting the cadence in its metadata record.
+
+        Args:
+            dataset_id: The dataset ID.
+
+        Returns:
+            The cell unit.
+        """
+        return self.unit or chunk_unit_for_cadence(stored_cadence(self.metadata_repository, dataset_id))
+
+    def is_stable(self, dataset_id: str, collection: str, start: datetime, stop: datetime, fetched_at: datetime) -> bool:
+        """Counts fetched data as stable once the fetched range ended SETTLE_DELAY before the fetch.
 
         Args:
             dataset_id: The dataset ID.
             collection: The collection holding the data documents.
-            start: The start of the chunk (inclusive).
-            stop: The end of the chunk (exclusive).
+            start: The start of the fetched range (inclusive).
+            stop: The end of the fetched range (exclusive).
+            fetched_at: When the fetch finished.
 
         Returns:
-            True if the chunk holds a stored document.
+            True if the fetched range ended long enough before the fetch.
         """
-        del dataset_id
-        return self.timeseries.has_documents(collection, start, stop)
+        del dataset_id, collection, start
+        return settled(stop, fetched_at)
 
     def ingest_chunk(self, dataset_id: str, collection: str, start: datetime, stop: datetime) -> bool:
-        """Requests, cleans and stores one chunk of a dataset and adds what it delivered to the metadata of the run.
+        """Requests and cleans one chunk, replaces its stored documents and adds what it delivered to the metadata of the run.
 
         Args:
             dataset_id: The dataset ID.
@@ -237,7 +255,7 @@ class CdawebChunkSource:
         dataset_frame = dataset_to_frame(result.data, self.client.variables(dataset_id), start, stop)
         cleaned_frame = clean_istp_columns(dataset_frame.frame, dataset_frame.attributes)
         source = source_identifier(SourceType.CDAWEB, self.group_names[dataset_id])
-        self.timeseries.insert(collection, frame_to_documents(cleaned_frame, source))
+        self.timeseries.replace_range(collection, start, stop, frame_to_documents(cleaned_frame, source))
 
         delivered = self._delivered.setdefault(dataset_id, DeliveredMetadata())
         plan = self.variable_plans.get(dataset_id)

@@ -7,6 +7,7 @@ from pymongo.database import Database
 from pytest_httpserver import HTTPServer
 from werkzeug import Request, Response
 
+from pipeline_service.chunk_status.repository import MongoChunkStatusRepository
 from pipeline_service.jobs.runner import CATALOG_RETRY_DELAY, CATALOG_WAIT_LIMIT, JobRunner
 from pipeline_service.pipelines.base import Pipeline
 from pipeline_service.pipelines.factory import PipelineFactory
@@ -18,6 +19,7 @@ from space_weather_analysis.coverage.repository import MongoCoverageRepository
 from space_weather_analysis.jobs.models import Job, JobStatus
 from space_weather_analysis.jobs.repository import MongoJobRepository
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
+from space_weather_analysis.timeseries.models import TimeBucket
 from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository
 
 INDEX = "Kp"
@@ -63,8 +65,9 @@ def _gfz_pipeline(db: Database, gfz_url: str) -> GfzPipeline:
         timeseries=MongoTimeSeriesRepository(db),
         metadata_repository=MongoMetadataRepository(db),
         coverage_repository=MongoCoverageRepository(db),
+        chunk_status=MongoChunkStatusRepository(db),
         client=GfzClient(base_url=gfz_url, retry_count=0),
-        chunk_duration=timedelta(days=1),
+        chunk_unit=TimeBucket.DAY,
     )
 
 

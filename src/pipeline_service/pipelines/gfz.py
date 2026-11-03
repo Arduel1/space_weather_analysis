@@ -4,8 +4,9 @@ from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 
+from pipeline_service.chunk_status.repository import ChunkStatusRepository
 from pipeline_service.pipelines.base import ProgressCallback
-from pipeline_service.pipelines.chunks import METADATA_SAVE_ERRORS, run_chunked
+from pipeline_service.pipelines.chunks import METADATA_SAVE_ERRORS, chunk_unit_for_cadence, run_chunked
 from pipeline_service.pipelines.report import IngestionReport
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.clients.gfz import GFZ_INDICES, GfzClient, GfzStatus
@@ -14,21 +15,18 @@ from space_weather_analysis.metadata.gfz import build_gfz_metadata
 from space_weather_analysis.metadata.overlays.layering import save_with_overlays
 from space_weather_analysis.metadata.repository import MetadataRepository
 from space_weather_analysis.timeseries.documents import frame_to_documents, source_identifier
-from space_weather_analysis.timeseries.models import Granularity
+from space_weather_analysis.timeseries.models import Granularity, TimeBucket
 from space_weather_analysis.timeseries.repository import TimeSeriesRepository
 from space_weather_analysis.util.naming import sanitize_collection_name
 from space_weather_analysis.util.time_utils import ensure_aware
 
 logger = logging.getLogger(__name__)
 
-# Time range covered by one API request.
-DEFAULT_CHUNK_DURATION = timedelta(days=30)
-
 
 class GfzPipeline:
     """Ingests the geomagnetic indices of GFZ Potsdam chunk by chunk into MongoDB time series collections.
 
-    A chunk is fetched again until it holds a value for every interval of the index and none of them is preliminary.
+    A chunk counts as stable once it holds a value for every interval of the index and none of them is preliminary.
     """
 
     def __init__(
@@ -37,8 +35,9 @@ class GfzPipeline:
         timeseries: TimeSeriesRepository,
         metadata_repository: MetadataRepository,
         coverage_repository: CoverageRepository,
+        chunk_status: ChunkStatusRepository,
         client: GfzClient,
-        chunk_duration: timedelta = DEFAULT_CHUNK_DURATION,
+        chunk_unit: TimeBucket | None = None,
     ) -> None:
         """Initializes the GFZ pipeline.
 
@@ -46,14 +45,16 @@ class GfzPipeline:
             timeseries: The repository storing the data documents.
             metadata_repository: The repository storing the metadata records.
             coverage_repository: The repository storing which time ranges are stored.
+            chunk_status: The repository storing the status of each fetched chunk.
             client: The client fetching the index values.
-            chunk_duration: The time range covered by one request.
+            chunk_unit: The calendar unit of the chunks; None selects it per index from its cadence.
         """
         self.timeseries = timeseries
         self.metadata_repository = metadata_repository
         self.coverage_repository = coverage_repository
+        self.chunk_status = chunk_status
         self.client = client
-        self.chunk_duration = chunk_duration
+        self.chunk_unit = chunk_unit
 
     def run(
         self,
@@ -62,7 +63,7 @@ class GfzPipeline:
         end_time: datetime | None,
         progress_callback: ProgressCallback | None = None,
     ) -> IngestionReport:
-        """Ingests each index in chunks of the chunk duration.
+        """Ingests each index in chunks of a calendar grid, skipping chunks whose last fetch is current.
 
         Args:
             datasets: The GFZ index names.
@@ -86,11 +87,11 @@ class GfzPipeline:
 
         time_range = (ensure_aware(start_time), ensure_aware(end_time))
         return run_chunked(
-            GfzChunkSource(self.client, self.timeseries, self.metadata_repository),
+            GfzChunkSource(self.client, self.timeseries, self.metadata_repository, self.chunk_unit),
             dict.fromkeys(datasets, time_range),
-            chunk_duration=self.chunk_duration,
             timeseries=self.timeseries,
             coverage_repository=self.coverage_repository,
+            chunk_status=self.chunk_status,
             progress_callback=progress_callback,
         )
 
@@ -101,17 +102,19 @@ class GfzChunkSource:
     # The Kp index has one value every 3 hours
     granularity = Granularity.HOURS
 
-    def __init__(self, client: GfzClient, timeseries: TimeSeriesRepository, metadata_repository: MetadataRepository) -> None:
+    def __init__(self, client: GfzClient, timeseries: TimeSeriesRepository, metadata_repository: MetadataRepository, unit: TimeBucket | None) -> None:
         """Initializes the source for one run.
 
         Args:
             client: The client fetching the index values.
             timeseries: The repository storing the data documents.
             metadata_repository: The repository storing the metadata records.
+            unit: The calendar unit of the chunks; None selects it per index from its cadence.
         """
         self.client = client
         self.timeseries = timeseries
         self.metadata_repository = metadata_repository
+        self.unit = unit
         self._latest_response: dict[str, pd.DataFrame] = {}
 
     def collection_for(self, dataset_id: str) -> str:
@@ -125,18 +128,31 @@ class GfzChunkSource:
         """
         return sanitize_collection_name(dataset_id)
 
-    def should_skip(self, dataset_id: str, collection: str, start: datetime, stop: datetime) -> bool:
-        """Skips a chunk whose stored documents hold one value per interval and no preliminary value.
+    def chunk_unit(self, dataset_id: str) -> TimeBucket:
+        """Names the calendar cell unit of an index, the given unit or the one fitting its cadence.
+
+        Args:
+            dataset_id: The GFZ index name.
+
+        Returns:
+            The cell unit.
+        """
+        return self.unit or chunk_unit_for_cadence(GFZ_INDICES[dataset_id].cadence)
+
+    def is_stable(self, dataset_id: str, collection: str, start: datetime, stop: datetime, fetched_at: datetime) -> bool:
+        """Counts a fetched range as stable once its stored documents hold one value per interval and no preliminary value.
 
         Args:
             dataset_id: The GFZ index name.
             collection: The collection holding the index.
-            start: Start of the chunk (inclusive).
-            stop: End of the chunk (exclusive).
+            start: Start of the fetched range (inclusive).
+            stop: End of the fetched range (exclusive).
+            fetched_at: When the fetch finished.
 
         Returns:
-            True if the stored chunk is complete and definitive.
+            True if the stored range is complete and definitive.
         """
+        del fetched_at
         if self.timeseries.count(collection, start, stop) != count_grid_times(start, stop, GFZ_INDICES[dataset_id].cadence):
             return False
         return self.timeseries.count(collection, start, stop, data_values={"status": GfzStatus.PRELIMINARY}) == 0

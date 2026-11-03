@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
@@ -83,6 +84,40 @@ def format_iso_duration(duration: timedelta) -> str:
         time_part += f"{seconds}S"
 
     return f"P{date_part}T{time_part}" if time_part else f"P{date_part}"
+
+
+# ISO 8601 duration `P{years}Y{months}M{weeks}W{days}DT{hours}H{minutes}M{seconds}S`, every part optional
+_ISO_DURATION = re.compile(
+    r"P(?:(?P<years>\d+(?:\.\d+)?)Y)?(?:(?P<months>\d+(?:\.\d+)?)M)?(?:(?P<weeks>\d+(?:\.\d+)?)W)?(?:(?P<days>\d+(?:\.\d+)?)D)?"
+    r"(?:T(?:(?P<hours>\d+(?:\.\d+)?)H)?(?:(?P<minutes>\d+(?:\.\d+)?)M)?(?:(?P<seconds>\d+(?:\.\d+)?)S)?)?"
+)
+# Length of the calendar parts of a duration, which vary with the date, as averages over the Gregorian 400-year cycle
+_DAYS_PER_YEAR = 365.2425
+_DAYS_PER_MONTH = _DAYS_PER_YEAR / 12
+
+
+def parse_iso_duration(text: str) -> timedelta | None:
+    """Parses an ISO 8601 duration into an approximate timedelta.
+
+    Years and months have no fixed length without a start date, so they count as their Gregorian averages.
+
+    Args:
+        text: The ISO 8601 duration text.
+
+    Returns:
+        The duration; None if the text is no ISO 8601 duration or the duration is zero.
+    """
+    match = _ISO_DURATION.fullmatch(text.strip().upper())
+    if match is None:
+        return None
+    parts = {name: float(value) for name, value in match.groupdict().items() if value is not None}
+    duration = timedelta(
+        days=parts.get("years", 0) * _DAYS_PER_YEAR + parts.get("months", 0) * _DAYS_PER_MONTH + parts.get("weeks", 0) * 7 + parts.get("days", 0),
+        hours=parts.get("hours", 0),
+        minutes=parts.get("minutes", 0),
+        seconds=parts.get("seconds", 0),
+    )
+    return duration if duration > timedelta(0) else None
 
 
 def calculate_time_intersection(

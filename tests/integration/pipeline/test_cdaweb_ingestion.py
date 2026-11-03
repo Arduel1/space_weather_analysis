@@ -7,6 +7,7 @@ import pytest
 import xarray as xr
 from pymongo.database import Database
 
+from pipeline_service.chunk_status.repository import MongoChunkStatusRepository
 from pipeline_service.pipelines.cdaweb import CdawebPipeline
 from pipeline_service.pipelines.report import IngestionReport
 from space_weather_analysis.catalog.models import CatalogEntryDict
@@ -14,6 +15,7 @@ from space_weather_analysis.catalog.repository import MongoCatalogRepository
 from space_weather_analysis.coverage.repository import MongoCoverageRepository
 from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSourceKind
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
+from space_weather_analysis.timeseries.models import TimeBucket
 from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository
 
 StoredData = Callable[[str, datetime], dict[str, Any]]
@@ -162,8 +164,9 @@ def _ingest(db: Database, cdas: FakeCdasWs, start: datetime = DAY_ONE, end: date
         catalog_repository=MongoCatalogRepository(db),
         metadata_repository=MongoMetadataRepository(db),
         coverage_repository=MongoCoverageRepository(db),
+        chunk_status=MongoChunkStatusRepository(db),
         cdas=cdas,
-        chunk_duration=timedelta(days=1),
+        chunk_unit=TimeBucket.DAY,
     )
     return pipeline.run([DATASET_ID], start, end)
 
@@ -325,14 +328,23 @@ def test_cdaweb_answer_without_data_stores_nothing(db: Database, status_code: in
     assert (len(report.gaps), db[DATASET_ID].count_documents({}), MongoMetadataRepository(db).get(DATASET_ID)) == (expected_gaps, 0, None)
 
 
+# Start of the day before yesterday, whose chunks are not yet settled and are fetched again by every run.
+RECENT_DAY = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=2)
+
+
 @pytest.mark.integration
-def test_repeated_cdaweb_ingestion_skips_chunks_with_documents(db: Database) -> None:
-    """A second run requests nothing for chunks that already hold documents and stores nothing twice."""
+@pytest.mark.parametrize(
+    ("start", "expected_new_calls"),
+    [pytest.param(DAY_ONE, 0, id="settled-chunks-skipped"), pytest.param(RECENT_DAY, 2, id="recent-chunks-refetched")],
+)
+def test_repeated_cdaweb_ingestion_stores_nothing_twice(db: Database, start: datetime, expected_new_calls: int) -> None:
+    """A second run skips settled chunks and fetches recent ones again, replacing their documents without duplicates."""
     cdas = FakeCdasWs()
-    _ingest(db, cdas, end=DAY_THREE)
+    end = start + timedelta(days=2)
+    _ingest(db, cdas, start=start, end=end)
     calls_after_first_run = len(cdas.data_calls)
     documents_after_first_run = db[DATASET_ID].count_documents({})
 
-    _ingest(db, cdas, end=DAY_THREE)
+    _ingest(db, cdas, start=start, end=end)
 
-    assert (len(cdas.data_calls), db[DATASET_ID].count_documents({})) == (calls_after_first_run, documents_after_first_run)
+    assert (len(cdas.data_calls) - calls_after_first_run, db[DATASET_ID].count_documents({})) == (expected_new_calls, documents_after_first_run)

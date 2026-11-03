@@ -6,6 +6,7 @@ from space_weather_analysis.util.time_utils import (
     calculate_time_intersection,
     ensure_aware,
     format_iso_duration,
+    parse_iso_duration,
     parse_iso_time,
 )
 
@@ -91,6 +92,22 @@ class TestFormatIsoDuration:
         """A zero duration raises ValueError."""
         with pytest.raises(ValueError):
             format_iso_duration(timedelta(0))
+
+
+class TestParseIsoDuration:
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            pytest.param("PT3H", timedelta(hours=3), id="time-part"),
+            pytest.param("P1DT0.5S", timedelta(days=1, milliseconds=500), id="date-and-fractional-time"),
+            pytest.param("P1M", timedelta(days=365.2425 / 12), id="month-as-average"),
+            pytest.param("PT0S", None, id="zero"),
+            pytest.param("3 hours", None, id="no-iso-duration"),
+        ],
+    )
+    def test_duration_parsed_with_average_calendar_parts(self, text: str, expected: timedelta | None) -> None:
+        """An ISO 8601 duration becomes a timedelta, months as their Gregorian average; zero or other text gives None."""
+        assert parse_iso_duration(text) == expected
 
 
 class TestCalculateTimeIntersection:
