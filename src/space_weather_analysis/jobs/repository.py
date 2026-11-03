@@ -223,6 +223,8 @@ class MongoJobRepository(JobRepository):
             bson.errors.InvalidId: If the job ID is malformed.
         """
         update: dict[str, Any] = {"status": status, "completed_at": datetime.now(UTC)}
+        if status == JobStatus.COMPLETED:
+            update["progress"] = 1.0
         if error:
             update["error"] = error
         if missing_chunks:

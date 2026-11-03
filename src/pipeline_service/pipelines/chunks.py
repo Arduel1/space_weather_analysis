@@ -122,15 +122,15 @@ def run_chunked(
 
         delivered_any_chunk = False
         for chunk_index, (chunk_start, chunk_stop) in enumerate(time_chunks):
-            _report_chunk_progress(
-                progress_callback, dataset_id, dataset_position=(dataset_index, len(time_ranges)), chunk_position=(chunk_index, len(time_chunks))
-            )
             if source.should_skip(dataset_id, collection, chunk_start, chunk_stop):
                 logger.info("Skipping chunk %s to %s of %s: the stored documents need no update", chunk_start, chunk_stop, dataset_id)
-                continue
-            ingest = partial(source.ingest_chunk, dataset_id, collection, chunk_start, chunk_stop)
-            if ingest_or_record_gap(report, dataset_id, chunk_start, chunk_stop, ingest):
-                delivered_any_chunk = True
+            else:
+                ingest = partial(source.ingest_chunk, dataset_id, collection, chunk_start, chunk_stop)
+                if ingest_or_record_gap(report, dataset_id, chunk_start, chunk_stop, ingest):
+                    delivered_any_chunk = True
+            _report_chunk_progress(
+                progress_callback, dataset_id, dataset_position=(dataset_index, len(time_ranges)), chunks_done=(chunk_index + 1, len(time_chunks))
+            )
 
         source.save_metadata(dataset_id, collection)
         if delivered_any_chunk:
@@ -205,9 +205,9 @@ def _report_chunk_progress(
     dataset_id: str,
     *,
     dataset_position: tuple[int, int],
-    chunk_position: tuple[int, int],
+    chunks_done: tuple[int, int],
 ) -> None:
-    """Reports the progress at the start of a chunk, if a callback is given.
+    """Reports the progress at the end of a chunk, if a callback is given.
 
     Each dataset takes an equal share of the total progress, which its chunks divide equally.
 
@@ -215,11 +215,11 @@ def _report_chunk_progress(
         progress_callback: The function receiving the progress, or None to report nothing.
         dataset_id: The ID of the current dataset, named in the status message.
         dataset_position: The zero-based index of the current dataset and the number of datasets in the run.
-        chunk_position: The zero-based index of the current chunk and the number of chunks of the dataset.
+        chunks_done: The number of finished chunks of the dataset and the number of its chunks.
     """
     if progress_callback is None:
         return
     dataset_index, dataset_count = dataset_position
-    chunk_index, chunk_count = chunk_position
-    progress = (dataset_index + chunk_index / chunk_count) / dataset_count
-    progress_callback(progress, f"Dataset {dataset_id}: chunk {chunk_index + 1}/{chunk_count}")
+    finished_chunks, chunk_count = chunks_done
+    progress = (dataset_index + finished_chunks / chunk_count) / dataset_count
+    progress_callback(progress, f"Dataset {dataset_id}: chunk {finished_chunks}/{chunk_count} done")

@@ -105,12 +105,12 @@ class LocalPipeline:
 
         report = IngestionReport()
         for dataset_index, dataset_id in enumerate(datasets):
-            if progress_callback:
-                progress_callback(dataset_index / len(datasets), f"Processing local file for: {dataset_id}")
             collection = sanitize_collection_name(dataset_id)
             ingest = partial(self._replace_with_file, LOCAL_DATASETS[dataset_id], collection)
             if ingest_or_record_gap(report, dataset_id, WHOLE_FILE_START, WHOLE_FILE_STOP, ingest) is not None:
                 refresh_coverage(self.coverage_repository, dataset_id, collection)
+            if progress_callback:
+                progress_callback((dataset_index + 1) / len(datasets), f"Processed local file of {dataset_id}")
         return report
 
     def _replace_with_file(self, dataset: LocalDataset, collection: str) -> int:

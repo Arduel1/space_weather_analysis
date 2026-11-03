@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Sequence
+from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from pymongo.database import Database
 
@@ -36,7 +37,7 @@ class CoverageRepository(ABC):
         """
 
     @abstractmethod
-    def get(self, dataset_id: str) -> Optional[StoredCoverage]:
+    def get(self, dataset_id: str) -> StoredCoverage | None:
         """Reads the coverage of one dataset.
 
         Args:
@@ -44,6 +45,14 @@ class CoverageRepository(ABC):
 
         Returns:
             The coverage, or None if none is stored.
+        """
+
+    @abstractmethod
+    def list_all(self) -> list[StoredCoverage]:
+        """Reads the coverage of every dataset.
+
+        Returns:
+            The coverages, sorted by dataset ID.
         """
 
     def refresh(self, dataset_id: str, collection: str, time_field: str = "timestamp") -> StoredCoverage:
@@ -106,15 +115,15 @@ class MongoCoverageRepository(CoverageRepository):
         """
         time_path = f"${time_field}"
         # Documents without a date in the time field belong to no bucket
-        dated_documents: Dict[str, Any] = {"$match": {time_field: {"$type": "date"}}}
-        totals_pipeline: List[Dict[str, Any]] = [
+        dated_documents: dict[str, Any] = {"$match": {time_field: {"$type": "date"}}}
+        totals_pipeline: list[dict[str, Any]] = [
             dated_documents,
             {"$group": {"_id": None, "document_count": {"$sum": 1}, "first_timestamp": {"$min": time_path}, "last_timestamp": {"$max": time_path}}},
         ]
         totals = next(self.db[collection].aggregate(totals_pipeline), None)
         bucket_hours = select_bucket_hours(typical_spacing(totals), self.BUCKET_HOURS)
 
-        bucket_pipeline: List[Dict[str, Any]] = [
+        bucket_pipeline: list[dict[str, Any]] = [
             dated_documents,
             {"$group": {"_id": {"$dateTrunc": {"date": time_path, "unit": "hour", "binSize": bucket_hours, "timezone": "UTC"}}}},
             {"$sort": {"_id": 1}},
@@ -129,7 +138,7 @@ class MongoCoverageRepository(CoverageRepository):
             document_count=totals["document_count"] if totals else 0,
             intervals=merge_consecutive_buckets(bucket_starts, timedelta(hours=bucket_hours)),
             bucket=f"PT{bucket_hours}H",
-            updated_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(UTC),
         )
 
     def save(self, coverage: StoredCoverage) -> None:
@@ -141,7 +150,7 @@ class MongoCoverageRepository(CoverageRepository):
         self._ensure_indexes()
         self.coverages.replace_one({"_id": coverage.dataset_id}, coverage.to_document(), upsert=True)
 
-    def get(self, dataset_id: str) -> Optional[StoredCoverage]:
+    def get(self, dataset_id: str) -> StoredCoverage | None:
         """Reads the coverage of one dataset.
 
         Args:
@@ -153,8 +162,16 @@ class MongoCoverageRepository(CoverageRepository):
         document = self.coverages.find_one({"_id": dataset_id})
         return StoredCoverage.from_document(document) if document else None
 
+    def list_all(self) -> list[StoredCoverage]:
+        """Reads the coverage of every dataset.
 
-def typical_spacing(totals: Optional[Dict[str, Any]]) -> Optional[timedelta]:
+        Returns:
+            The coverages, sorted by dataset ID.
+        """
+        return [StoredCoverage.from_document(document) for document in self.coverages.find({}, sort=[("_id", 1)])]
+
+
+def typical_spacing(totals: dict[str, Any] | None) -> timedelta | None:
     """Estimates the typical time between documents as their mean spacing.
 
     Args:
@@ -168,7 +185,7 @@ def typical_spacing(totals: Optional[Dict[str, Any]]) -> Optional[timedelta]:
     return (totals["last_timestamp"] - totals["first_timestamp"]) / (totals["document_count"] - 1)
 
 
-def select_bucket_hours(spacing: Optional[timedelta], bucket_hours: Sequence[int]) -> int:
+def select_bucket_hours(spacing: timedelta | None, bucket_hours: Sequence[int]) -> int:
     """Selects the smallest bucket size not below the spacing of the documents.
 
     Args:
@@ -186,7 +203,7 @@ def select_bucket_hours(spacing: Optional[timedelta], bucket_hours: Sequence[int
     return bucket_hours[-1]
 
 
-def merge_consecutive_buckets(bucket_starts: List[datetime], bucket_duration: timedelta) -> List[CoverageInterval]:
+def merge_consecutive_buckets(bucket_starts: list[datetime], bucket_duration: timedelta) -> list[CoverageInterval]:
     """Merges time buckets that follow each other without gap into intervals.
 
     Args:
@@ -196,7 +213,7 @@ def merge_consecutive_buckets(bucket_starts: List[datetime], bucket_duration: ti
     Returns:
         The half-open intervals from the start of the first to the end of the last bucket of each run.
     """
-    intervals: List[CoverageInterval] = []
+    intervals: list[CoverageInterval] = []
     for bucket_start in bucket_starts:
         bucket_end = bucket_start + bucket_duration
         if intervals and intervals[-1].end == bucket_start:

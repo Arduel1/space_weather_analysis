@@ -66,7 +66,7 @@ def test_progress_and_failure_are_recorded(db: Database) -> None:
 
 @pytest.mark.integration
 def test_completed_job_keeps_its_missing_chunks(db: Database) -> None:
-    """The time ranges a completed job could not ingest read back with the job."""
+    """A completed job reads back with the progress 1.0 and the time ranges it could not ingest."""
     repository = MongoJobRepository(db)
     job_id = repository.create(["synthetic/one"], START, END)
     gap = ChunkGap(dataset_id="synthetic/one", start=START, stop=END, reason="DataRetrievalError: Server unreachable")
@@ -75,7 +75,7 @@ def test_completed_job_keeps_its_missing_chunks(db: Database) -> None:
 
     job = repository.get(job_id)
     assert job is not None
-    assert (job.status, job.error, job.missing_chunks) == (JobStatus.COMPLETED, None, [gap])
+    assert (job.status, job.progress, job.error, job.missing_chunks) == (JobStatus.COMPLETED, 1.0, None, [gap])
 
 
 @pytest.mark.parametrize("job_id", ["not-an-object-id", "0123456789abcdef01234567"], ids=["malformed", "unknown"])
