@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -148,13 +149,59 @@ def read_dataset_range(dataset_id: str, start: datetime | None, stop: datetime |
     return _read_range(coverage.collection, range_start, range_stop)
 
 
-def _read_range(collection: str, start: datetime, stop: datetime) -> pd.DataFrame:
+@st.cache_data(ttl=READ_TTL, show_spinner=False)
+def read_latest(collection: str, fields: tuple[str, ...]) -> tuple[datetime, dict[str, Any]] | None:
+    """Reads the newest document of a collection.
+
+    Args:
+        collection: The collection holding the data documents.
+        fields: The data fields to read.
+
+    Returns:
+        The aware UTC time stamp and the data fields of the newest document, without the fields it lacks; None on error
+        or without documents.
+    """
+    repositories = get_repositories()
+    if repositories is None:
+        return None
+    try:
+        return repositories.timeseries.read_latest(collection, fields)
+    except PyMongoError:
+        logger.exception("Error reading the newest document of %s", collection)
+        return None
+
+
+@st.cache_data(ttl=READ_TTL, show_spinner=False)
+def read_recent(collection: str, span: timedelta, fields: tuple[str, ...]) -> pd.DataFrame:
+    """Reads the documents of a collection in a time span that ends with its newest document.
+
+    The span ends at the newest stored document instead of the current time, so a collection that is not updated
+    continuously still shows its last span of data.
+
+    Args:
+        collection: The collection holding the data documents.
+        span: The length of the time span.
+        fields: The data fields to read.
+
+    Returns:
+        One row per document with an aware UTC DatetimeIndex and one column per field; empty on error or without documents.
+    """
+    latest = read_latest(collection, fields)
+    if latest is None:
+        return pd.DataFrame()
+    latest_time, _ = latest
+    # The stop is exclusive, so the newest document needs a stop just after it
+    return _read_range(collection, latest_time - span, latest_time + timedelta(microseconds=1), fields)
+
+
+def _read_range(collection: str, start: datetime, stop: datetime, fields: Sequence[str] | None = None) -> pd.DataFrame:
     """Reads a time range of a collection through the time series repository.
 
     Args:
         collection: The collection holding the data documents.
         start: The start of the time range (inclusive).
         stop: The end of the time range (exclusive).
+        fields: The data fields to read; None reads every data field.
 
     Returns:
         The read frame; empty on error or without documents.
@@ -163,7 +210,7 @@ def _read_range(collection: str, start: datetime, stop: datetime) -> pd.DataFram
     if repositories is None:
         return pd.DataFrame()
     try:
-        return repositories.timeseries.read_range(collection, start, stop)
+        return repositories.timeseries.read_range(collection, start, stop, fields)
     except PyMongoError:
         logger.exception("Error reading %s between %s and %s", collection, start, stop)
         return pd.DataFrame()
