@@ -28,6 +28,7 @@ class SourceType(StrEnum):
     CDAWEB = "CDAWEB"
     GFZ_POTSDAM = "GFZ_POTSDAM"
     LOCAL = "LOCAL"
+    SWPC = "SWPC"
 
 
 class CatalogEntryDict(TypedDict):

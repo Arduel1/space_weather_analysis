@@ -4,13 +4,28 @@
 # (UTC times, `end` defaults to now); a feed without range lets its pipeline choose.
 # `source_type` names the pipeline; without it the job runner looks the datasets up in the master catalog.
 
-# GOES X-ray and proton flux, the dashboard shows the latest days
+# GOES X-ray and proton flux of the last 90 days from the iSWA HAPI server, the history behind the live feed
 [[feed]]
 name = "goes"
 datasets = ["goesp_xray_flux_P1M", "goesp_part_flux_P5M"]
 lookback = "P90D"
-# 1-minute data, fetched again every quarter hour
-interval = "PT15M"
+interval = "PT1H"
+
+# Live GOES X-ray and proton flux of NOAA SWPC, whose rolling files are a few minutes behind the measurement
+[[feed]]
+name = "swpc_goes"
+datasets = ["swpc_goes_xray", "swpc_goes_protons"]
+source_type = "SWPC"
+lookback = "PT6H"
+interval = "PT1M"
+
+# Kp estimated by SWPC every minute, a nowcast until GFZ publishes the official Kp
+[[feed]]
+name = "swpc_kp"
+datasets = ["swpc_kp_estimated"]
+source_type = "SWPC"
+lookback = "PT6H"
+interval = "PT1M"
 
 # Kp index of GFZ Potsdam
 [[feed]]

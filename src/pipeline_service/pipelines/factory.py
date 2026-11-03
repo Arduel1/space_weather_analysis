@@ -10,9 +10,11 @@ from pipeline_service.pipelines.cdaweb import CdawebPipeline
 from pipeline_service.pipelines.gfz import GfzPipeline
 from pipeline_service.pipelines.hapi import HapiPipeline
 from pipeline_service.pipelines.local import LocalPipeline
+from pipeline_service.pipelines.swpc import SwpcPipeline
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
 from space_weather_analysis.clients.gfz import GfzClient
+from space_weather_analysis.clients.swpc import SwpcClient
 from space_weather_analysis.coverage.repository import CoverageRepository, MongoCoverageRepository
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
 from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository, TimeSeriesRepository
@@ -37,6 +39,7 @@ class PipelineFactory:
         # Without response cache, so every run reads the current data
         self.cdas = CdasWs(disable_cache=True)
         self.gfz_client = GfzClient()
+        self.swpc_client = SwpcClient()
 
     def get_pipeline(self, source_type: SourceType) -> Pipeline:
         """Creates the pipeline of a source type.
@@ -75,5 +78,7 @@ class PipelineFactory:
                 )
             case SourceType.LOCAL:
                 return LocalPipeline(timeseries=self.timeseries, coverage_repository=self.coverage_repository, data_dir=self.data_dir)
+            case SourceType.SWPC:
+                return SwpcPipeline(timeseries=self.timeseries, coverage_repository=self.coverage_repository, client=self.swpc_client)
             case _:
                 assert_never(source_type)

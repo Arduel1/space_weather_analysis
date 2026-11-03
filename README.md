@@ -17,13 +17,13 @@ A self-hostable data platform that ingests, stores, and visualizes space-weather
 
 ## Overview
 
-Space-weather data is distributed across several providers, formats, and APIs: NASA's CDAWeb, GFZ Potsdam, HAPI servers, and plain CSV/text catalogs. This project collects these heterogeneous time-series sources into a single MongoDB store and serves them through an interactive Streamlit dashboard.
+Space-weather data is distributed across several providers, formats, and APIs: NASA's CDAWeb, GFZ Potsdam, NOAA SWPC, HAPI servers, and plain CSV/text catalogs. This project collects these heterogeneous time-series sources into a single MongoDB store and serves them through an interactive Streamlit dashboard.
 
 The data model follows the physical chain of space weather: phenomena originate at the Sun, propagate through the heliosphere, and drive activity in Earth's magnetosphere. The system is designed to run as a containerized, always-on service.
 
 ## Features
 
-- Ingestion of time-series data from NASA CDAWeb, GFZ, HAPI servers, and local catalogs through a common pipeline.
+- Ingestion of time-series data from NASA CDAWeb, GFZ, NOAA SWPC, HAPI servers, and local catalogs through a common pipeline.
 - A catalog layer that builds and maintains a master catalog of the available datasets, which the dashboard queries.
 - Descriptive metadata stored for every dataset and shown in the dashboard alongside the data.
 - Storage of all ingested data in MongoDB, using GridFS for large binary files.
@@ -71,6 +71,7 @@ Details on each file: [docs/local-data.md](docs/local-data.md).
 | NASA SPDF (CDAWeb, SSCWeb) | Heliophysics mission data and spacecraft orbits | CDAS web services (cdasws), HAPI | Public domain (CC0), citation requested ([data use policy](https://spdf.gsfc.nasa.gov/data_use_policy.html)) |
 | NASA CCMC (iSWA) | Space weather products | HAPI | NASA open data policy, acknowledgement requested ([publication policy](https://ccmc.gsfc.nasa.gov/publication-policy)) |
 | GFZ Helmholtz Centre for Geosciences | Kp index | GFZ web service | [CC BY 4.0](https://kp.gfz.de/en/) |
+| NOAA Space Weather Prediction Center (SWPC) | Real-time GOES X-ray and proton flux, estimated Kp | [SWPC JSON services](https://services.swpc.noaa.gov/json/) | Public domain (U.S. government work) |
 | WDC for Geomagnetism, Edinburgh (BGS) | Ground magnetometer data | HAPI | Free for scientific use; commercial use requires contacting the data supplier ([usage](https://wdc.bgs.ac.uk/usage)) |
 | INTERMAGNET (via BGS GIN) | Observatory magnetometer data | HAPI | CC BY-NC 4.0 unless otherwise noted; commercial use and bulk redistribution require written permission ([conditions](https://intermagnet.org/data_conditions.html)) |
 | SuperMAG (JHU/APL) | Ground magnetometer data and indices | HAPI | Fair use under the SuperMAG rules of the road; data, plots, and derived data products must not be redistributed; acknowledgement required ([rules of the road](https://supermag.jhuapl.edu/info/?page=rulesoftheroad)) |
@@ -227,6 +228,7 @@ Tools started outside Docker, such as the notebooks, can load the variables from
 ├── pyproject.toml              # Project metadata, dependencies, tool config
 ├── uv.lock                     # Locked dependency versions
 ├── example.env                 # Template for required environment variables
+├── config/                     # Feed file: datasets the pipeline service keeps loaded and their intervals
 ├── data/                       # Local data files (not in the repository) and HAPI server list
 ├── docs/                       # Architecture diagram (editable draw.io SVG) and local data notes
 ├── notebooks/                  # Jupyter notebooks for exploratory analysis
@@ -242,6 +244,8 @@ Tools started outside Docker, such as the notebooks, can load the variables from
 │   │   ├── scheduling/         # Task queue and worker for recurring metadata requests
 │   │   └── worker_tasks/       # Task kinds the metadata worker runs, with their intervals
 │   ├── pipeline_service/       # Ingestion service (main.py) and job runner (jobs/runner.py)
+│   │   ├── feeds/              # Feed file model and the scheduler queuing feed jobs
+│   │   ├── chunk_status/       # Status of each fetched chunk, which decides when it is fetched again
 │   │   ├── pipelines/          # One pipeline per source type, the shared chunk loop and the pipeline factory
 │   │   └── parsing/            # Conversion of delivered data and local files into frames
 │   └── streamlit_app/          # Streamlit dashboard and plots

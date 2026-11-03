@@ -5,7 +5,7 @@ from typing import Any
 
 import requests
 
-from space_weather_analysis.util.error_handling import DataProcessingError, DataRetrievalError, ResourceNotFoundError
+from space_weather_analysis.util.error_handling import DataProcessingError, DataRetrievalError, ResourceNotFoundError, SourceUnreachableError
 from space_weather_analysis.util.resilience import RETRY_AFTER_STATUSES, retry_after_seconds
 
 # Bytes written to the temporary file per step of a streamed download.
@@ -26,11 +26,14 @@ def download_json(session: requests.Session, url: str, timeout: tuple[float, flo
 
     Raises:
         ResourceNotFoundError: If the provider answers that the document does not exist (HTTP 404).
+        SourceUnreachableError: If the provider sent no answer.
         DataRetrievalError: If the download fails or the status is no other 2xx; carries the Retry-After wait of HTTP 429 and 503.
         DataProcessingError: If the content is no JSON.
     """
     try:
         response = session.get(url, headers={"Accept": "application/json"}, timeout=timeout)
+    except (requests.ConnectionError, requests.Timeout) as e:
+        raise SourceUnreachableError(f"{what} {url} is unreachable: {e}") from e
     except requests.RequestException as e:
         raise DataRetrievalError(f"{what} {url} could not be downloaded: {e}") from e
     _raise_for_status(response, url, what)
@@ -56,6 +59,7 @@ def download_json_streamed(session: requests.Session, url: str, timeout: tuple[f
 
     Raises:
         ResourceNotFoundError: If the provider answers that the document does not exist (HTTP 404).
+        SourceUnreachableError: If the provider sent no answer.
         DataRetrievalError: If the download fails or the status is no other 2xx; carries the Retry-After wait of HTTP 429 and 503.
         DataProcessingError: If the content is no JSON.
     """
@@ -65,6 +69,8 @@ def download_json_streamed(session: requests.Session, url: str, timeout: tuple[f
                 _raise_for_status(response, url, what)
                 for chunk in response.iter_content(DOWNLOAD_CHUNK_BYTES):
                     download.write(chunk)
+        except (requests.ConnectionError, requests.Timeout) as e:
+            raise SourceUnreachableError(f"{what} {url} is unreachable: {e}") from e
         except requests.RequestException as e:
             raise DataRetrievalError(f"{what} {url} could not be downloaded: {e}") from e
         download.seek(0)
