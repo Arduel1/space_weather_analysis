@@ -1,0 +1,22 @@
+# Feeds the pipeline service keeps loaded: on every start it queues one job per feed that has no open job.
+# Each feed takes a time range of either `lookback` (ISO 8601 duration up to now) or `start` and optional `end`
+# (UTC times, `end` defaults to now); a feed without range lets its pipeline choose.
+# `source_type` names the pipeline; without it the job runner looks the datasets up in the master catalog.
+
+# GOES X-ray and proton flux, the dashboard shows the latest days
+[[feed]]
+name = "goes"
+datasets = ["goesp_xray_flux_P1M", "goesp_part_flux_P5M"]
+lookback = "P90D"
+
+# Kp index of GFZ Potsdam
+[[feed]]
+name = "kp"
+datasets = ["Kp"]
+start = 2020-01-01T00:00:00Z
+
+# Local files, which hold their whole dataset and are not in the master catalog
+[[feed]]
+name = "local"
+datasets = ["silso_sunspot_daily", "silso_sunspot_monthly", "silso_sunspot_smoothed", "cme_catalog"]
+source_type = "LOCAL"

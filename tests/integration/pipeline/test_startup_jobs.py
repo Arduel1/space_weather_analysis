@@ -1,41 +1,47 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pymongo.database import Database
 
-from pipeline_service.main import PipelineSettings, enqueue_startup_jobs
+from pipeline_service.feeds.models import Feed
+from pipeline_service.feeds.scheduler import queue_feed_jobs
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.jobs.models import JobStatus
 from space_weather_analysis.jobs.repository import MongoJobRepository
 
-STARTUP_JOBS_JSON = (
-    '[{"datasets": ["Kp"], "start_time": "2024-01-01T00:00:00Z", "end_time": "2024-01-02T00:00:00Z", "source_type": "GFZ_POTSDAM"},'
-    ' {"datasets": ["silso_sunspot_daily"]}]'
-)
+NOW = datetime(2024, 3, 1, tzinfo=UTC)
+FEEDS = [
+    Feed(name="kp", datasets=["Kp"], lookback=timedelta(days=2)),
+    Feed(name="local", datasets=["silso_sunspot_daily"], source_type=SourceType.LOCAL),
+]
 
 
 @pytest.mark.integration
-def test_startup_jobs_from_the_environment_are_queued_as_pending_jobs(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Each startup job of PIPELINE_STARTUP_JOBS becomes a pending job with its parameters, in the given order."""
-    monkeypatch.setenv("PIPELINE_STARTUP_JOBS", STARTUP_JOBS_JSON)
+def test_feed_jobs_are_queued_with_their_range_and_once_while_open(db: Database) -> None:
+    """Each feed gets a pending job with its resolved range; a second start queues nothing for feeds whose job is still open."""
     repository = MongoJobRepository(db)
 
-    enqueue_startup_jobs(repository, PipelineSettings().startup_jobs)
+    queue_feed_jobs(repository, FEEDS, NOW)
+    queue_feed_jobs(repository, FEEDS, NOW + timedelta(hours=1))
 
-    first, second, rest = repository.claim_next_pending(), repository.claim_next_pending(), repository.claim_next_pending()
-    assert first is not None and second is not None and rest is None
-    assert (first.status, first.source_type, first.parameters.datasets, first.parameters.start_time, first.parameters.end_time) == (
-        JobStatus.RUNNING,
-        SourceType.GFZ_POTSDAM,
-        ["Kp"],
-        datetime(2024, 1, 1, tzinfo=UTC),
-        datetime(2024, 1, 2, tzinfo=UTC),
-    )
-    assert (second.source_type, second.parameters.datasets, second.parameters.start_time) == (None, ["silso_sunspot_daily"], None)
+    jobs = [repository.claim_next_pending(), repository.claim_next_pending(), repository.claim_next_pending()]
+    assert jobs[2] is None
+    assert [(job.feed, job.source_type, job.parameters.start_time, job.parameters.end_time) for job in jobs[:2] if job] == [
+        ("kp", None, NOW - timedelta(days=2), NOW),
+        ("local", SourceType.LOCAL, None, None),
+    ]
 
 
-def test_startup_jobs_are_empty_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Without PIPELINE_STARTUP_JOBS the service queues no job."""
-    monkeypatch.delenv("PIPELINE_STARTUP_JOBS", raising=False)
+@pytest.mark.integration
+def test_feed_whose_job_ended_gets_a_new_job(db: Database) -> None:
+    """Once the job of a feed has ended, the next start queues a new one."""
+    repository = MongoJobRepository(db)
+    queue_feed_jobs(repository, FEEDS[:1], NOW)
+    first_job = repository.claim_next_pending()
+    assert first_job is not None
+    repository.finish(first_job.id, JobStatus.COMPLETED)
 
-    assert PipelineSettings().startup_jobs == []
+    queue_feed_jobs(repository, FEEDS[:1], NOW + timedelta(days=1))
+
+    second_job = repository.claim_next_pending()
+    assert second_job is not None and second_job.parameters.end_time == NOW + timedelta(days=1)

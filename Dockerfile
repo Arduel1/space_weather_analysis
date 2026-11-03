@@ -20,6 +20,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY src ./src
 COPY data ./data
+COPY config ./config
 
 ENV PATH="/app/.venv/bin:$PATH"
 

@@ -1,0 +1,108 @@
+import pathlib
+import tomllib
+from datetime import datetime, timedelta
+from typing import Annotated, Self
+
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+
+from space_weather_analysis.catalog.models import SourceType
+from space_weather_analysis.util.time_utils import UtcDatetime, parse_iso_duration
+
+
+def _duration(value: object) -> object:
+    """Reads an ISO 8601 duration text as timedelta and passes every other value on to the timedelta validation."""
+    if not isinstance(value, str):
+        return value
+    duration = parse_iso_duration(value)
+    if duration is None:
+        raise ValueError(f"'{value}' is no positive ISO 8601 duration")
+    return duration
+
+
+# A positive duration, written in the file as ISO 8601 duration
+IsoDuration = Annotated[timedelta, BeforeValidator(_duration)]
+
+
+class Feed(BaseModel):
+    """A group of datasets the pipeline service keeps loaded, queued as one job.
+
+    The time range is either a lookback up to now or fixed bounds; without both, the pipelines choose the range.
+
+    Attributes:
+        name: The unique name of the feed, stored with its jobs.
+        datasets: The IDs of the datasets to load.
+        source_type: The source type of the pipeline; None lets the job runner resolve it from the master catalog.
+        lookback: The length of the time range that ends now.
+        start: The fixed start of the time range.
+        end: The fixed end of the time range; None ends a range with lookback or start now.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1)
+    datasets: list[str] = Field(min_length=1)
+    source_type: SourceType | None = None
+    lookback: IsoDuration | None = None
+    start: UtcDatetime | None = None
+    end: UtcDatetime | None = None
+
+    @model_validator(mode="after")
+    def _one_kind_of_range(self) -> Self:
+        """Rejects a feed that gives both a lookback and fixed bounds."""
+        if self.lookback is not None and (self.start is not None or self.end is not None):
+            raise ValueError(f"Feed '{self.name}' gives a lookback and fixed bounds; give only one of them.")
+        return self
+
+    def time_range(self, now: datetime) -> tuple[datetime | None, datetime | None]:
+        """Resolves the time range of the feed for a job queued now.
+
+        Args:
+            now: The current time.
+
+        Returns:
+            The start and end; both None if the feed gives no range.
+        """
+        if self.lookback is not None:
+            return now - self.lookback, now
+        if self.start is not None:
+            return self.start, self.end or now
+        return None, self.end
+
+
+class FeedFile(BaseModel):
+    """The content of the feed configuration file, a TOML array of tables named `feed`.
+
+    Attributes:
+        feed: The feeds in the order of the file.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    feed: list[Feed] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _unique_names(self) -> Self:
+        """Rejects a file in which two feeds share a name, as the name identifies the jobs of a feed."""
+        names = [feed.name for feed in self.feed]
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        if duplicates:
+            raise ValueError(f"Feed names must be unique, repeated: {duplicates}")
+        return self
+
+
+def load_feeds(path: pathlib.Path) -> list[Feed]:
+    """Reads the feeds of a TOML configuration file.
+
+    Args:
+        path: The path of the file.
+
+    Returns:
+        The feeds in the order of the file.
+
+    Raises:
+        OSError: If the file cannot be read.
+        tomllib.TOMLDecodeError: If the file is no valid TOML.
+        pydantic.ValidationError: If the content does not describe valid feeds.
+    """
+    with path.open("rb") as file:
+        return FeedFile.model_validate(tomllib.load(file)).feed

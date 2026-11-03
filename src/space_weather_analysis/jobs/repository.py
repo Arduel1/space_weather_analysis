@@ -18,7 +18,14 @@ class JobRepository(ABC):
     """
 
     @abstractmethod
-    def create(self, datasets: list[str], start_time: datetime | None, end_time: datetime | None, source_type: SourceType | None = None) -> str:
+    def create(
+        self,
+        datasets: list[str],
+        start_time: datetime | None,
+        end_time: datetime | None,
+        source_type: SourceType | None = None,
+        feed: str | None = None,
+    ) -> str:
         """Creates a pending job.
 
         Args:
@@ -26,9 +33,21 @@ class JobRepository(ABC):
             start_time: The start of the requested time range; None lets the pipeline choose.
             end_time: The end of the requested time range; None lets the pipeline choose.
             source_type: The source type of the pipeline to run; None lets the job runner resolve it.
+            feed: The name of the configured feed that queues the job; None for a job requested in the frontend.
 
         Returns:
             The ID of the new job.
+        """
+
+    @abstractmethod
+    def has_open_job(self, feed: str) -> bool:
+        """Tells whether a job of a feed is still pending or running.
+
+        Args:
+            feed: The name of the configured feed.
+
+        Returns:
+            True if a job of the feed has not ended yet.
         """
 
     @abstractmethod
@@ -125,7 +144,14 @@ class MongoJobRepository(JobRepository):
         self.collection.create_index([("status", ASCENDING), ("_id", ASCENDING)])
         self._index_ensured = True
 
-    def create(self, datasets: list[str], start_time: datetime | None, end_time: datetime | None, source_type: SourceType | None = None) -> str:
+    def create(
+        self,
+        datasets: list[str],
+        start_time: datetime | None,
+        end_time: datetime | None,
+        source_type: SourceType | None = None,
+        feed: str | None = None,
+    ) -> str:
         """Creates a pending job.
 
         Args:
@@ -133,6 +159,7 @@ class MongoJobRepository(JobRepository):
             start_time: The start of the requested time range; None lets the pipeline choose.
             end_time: The end of the requested time range; None lets the pipeline choose.
             source_type: The source type of the pipeline to run; None lets the job runner resolve it.
+            feed: The name of the configured feed that queues the job; None for a job requested in the frontend.
 
         Returns:
             The ID of the new job.
@@ -142,12 +169,24 @@ class MongoJobRepository(JobRepository):
             status=JobStatus.PENDING,
             parameters=JobParameters(datasets=datasets, start_time=start_time, end_time=end_time),
             source_type=source_type,
+            feed=feed,
             created_at=datetime.now(UTC),
             progress=0.0,
             message="Job created",
         )
         self.collection.insert_one(job.to_document())
         return job.id
+
+    def has_open_job(self, feed: str) -> bool:
+        """Tells whether a job of a feed is still pending or running.
+
+        Args:
+            feed: The name of the configured feed.
+
+        Returns:
+            True if a job of the feed has not ended yet.
+        """
+        return self.collection.find_one({"feed": feed, "status": {"$in": [JobStatus.PENDING, JobStatus.RUNNING]}}, {"_id": 1}) is not None
 
     def get(self, job_id: str) -> Job | None:
         """Reads one job.

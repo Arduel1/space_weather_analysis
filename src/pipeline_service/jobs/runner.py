@@ -134,7 +134,7 @@ class JobRunner:
 
         (first_type, first_datasets), *further_groups = groups.items()
         for source_type, datasets in further_groups:
-            new_job_id = self.job_repository.create(datasets, job.parameters.start_time, job.parameters.end_time, source_type)
+            new_job_id = self.job_repository.create(datasets, job.parameters.start_time, job.parameters.end_time, source_type, job.feed)
             logger.info("Job %s: datasets %s of source type %s moved to job %s", job.id, datasets, source_type, new_job_id)
         self.job_repository.assign_source_type(job.id, first_type, first_datasets)
         logger.info("Job %s assigned to source type %s: %s", job.id, first_type, first_datasets)

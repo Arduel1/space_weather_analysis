@@ -63,6 +63,7 @@ class Job(BaseModel):
         status: The current status.
         parameters: What the job ingests.
         source_type: The source type of the pipeline to run; None lets the job runner resolve it from the master catalog.
+        feed: The name of the configured feed that queued the job; None for a job requested in the frontend.
         created_at: When the job was created.
         started_at: When the job runner claimed the job.
         updated_at: When the progress was last reported.
@@ -78,6 +79,7 @@ class Job(BaseModel):
     status: JobStatus
     parameters: JobParameters = Field(default_factory=JobParameters)
     source_type: SourceType | None = None
+    feed: str | None = None
     created_at: UtcDatetime
     started_at: UtcDatetime | None = None
     updated_at: UtcDatetime | None = None

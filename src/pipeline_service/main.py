@@ -1,29 +1,21 @@
 import logging
 import pathlib
 import sys
+import tomllib
+from datetime import UTC, datetime
 
 from pydantic import ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from pipeline_service.feeds.models import load_feeds
+from pipeline_service.feeds.scheduler import queue_feed_jobs
 from pipeline_service.jobs.runner import JobRunner
-from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.config.errors import format_settings_error
 from space_weather_analysis.database.connection import connect_from_environment
-from space_weather_analysis.jobs.models import JobParameters
-from space_weather_analysis.jobs.repository import JobRepository, MongoJobRepository
+from space_weather_analysis.jobs.repository import MongoJobRepository
 from space_weather_analysis.logging.config import setup_logging
 
 logger = logging.getLogger(__name__)
-
-
-class StartupJob(JobParameters):
-    """A download job queued when the service starts.
-
-    Attributes:
-        source_type: The source type of the pipeline to run; None lets the job runner resolve it from the master catalog.
-    """
-
-    source_type: SourceType | None = None
 
 
 class PipelineSettings(BaseSettings):
@@ -31,35 +23,31 @@ class PipelineSettings(BaseSettings):
 
     Attributes:
         data_dir: The directory holding the local dataset files.
-        startup_jobs: The jobs queued on every start, given as JSON list of objects with datasets, start_time, end_time and source_type.
+        feeds_file: The TOML file listing the feeds whose jobs are queued on every start.
     """
 
     model_config = SettingsConfigDict(env_prefix="PIPELINE_", frozen=True)
 
     data_dir: pathlib.Path = pathlib.Path("data")
-    startup_jobs: list[StartupJob] = []
-
-
-def enqueue_startup_jobs(job_repository: JobRepository, startup_jobs: list[StartupJob]) -> None:
-    """Queues the startup jobs, so the job daemon runs them like the jobs the frontend requests.
-
-    Args:
-        job_repository: The job queue.
-        startup_jobs: The jobs to queue.
-    """
-    for startup_job in startup_jobs:
-        job_id = job_repository.create(startup_job.datasets, startup_job.start_time, startup_job.end_time, startup_job.source_type)
-        logger.info("Queued startup job %s for %s", job_id, startup_job.datasets)
+    feeds_file: pathlib.Path = pathlib.Path("config/feeds.toml")
 
 
 def main() -> None:
-    """Queues the configured startup jobs and runs the job daemon until the process ends."""
+    """Queues the jobs of the configured feeds and runs the job daemon until the process ends."""
     setup_logging(service_name="PipelineService")
 
     try:
         settings = PipelineSettings()
     except ValidationError as error:
         logger.critical("Invalid pipeline settings, check the PIPELINE_* environment variables: %s. Exiting.", format_settings_error(error))
+        sys.exit(1)
+    try:
+        feeds = load_feeds(settings.feeds_file)
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        logger.critical("Cannot read the feed file %s: %s. Exiting.", settings.feeds_file, error)
+        sys.exit(1)
+    except ValidationError as error:
+        logger.critical("Invalid feed file %s: %s. Exiting.", settings.feeds_file, format_settings_error(error))
         sys.exit(1)
 
     connection, db = connect_from_environment()
@@ -69,7 +57,7 @@ def main() -> None:
         requeued = job_repository.requeue_running()
         if requeued:
             logger.info("Requeued %d jobs interrupted by the previous run", requeued)
-        enqueue_startup_jobs(job_repository, settings.startup_jobs)
+        queue_feed_jobs(job_repository, feeds, datetime.now(UTC))
         JobRunner(db, settings.data_dir).run_daemon()
     except KeyboardInterrupt:
         logger.info("Pipeline service stopped.")
