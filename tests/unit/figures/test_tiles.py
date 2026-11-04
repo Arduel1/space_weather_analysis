@@ -21,6 +21,11 @@ TIME = datetime(2024, 5, 10, 18, tzinfo=UTC)
         ),
         pytest.param(sunspot_tile((TIME, {"sunspot_number": 24})), Tile("Sunspot number", "24", TIME), id="sunspots-no-scale"),
         pytest.param(kp_tile((TIME, {"status": "def"})), Tile("Kp index", "n/a", TIME), id="field-missing"),
+        pytest.param(
+            kp_tile((TIME, {"Kp": 3.0}), estimate=(TIME, {"estimated_kp": 5.33})),
+            Tile("Kp index (estimated)", "5.33", TIME, "G1 Minor", LEVEL_COLORS[1], f"Official: 3.00 at {TIME:%Y-%m-%d %H:%M} UTC"),
+            id="kp-estimate-with-official-note",
+        ),
         pytest.param(proton_tile(None), Tile("Protons >=10 MeV", "n/a", None, None, MISSING_LEVEL_COLOR), id="no-document"),
     ],
 )

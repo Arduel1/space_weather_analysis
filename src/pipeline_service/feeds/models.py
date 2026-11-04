@@ -1,26 +1,12 @@
 import pathlib
 import tomllib
-from datetime import datetime, timedelta
-from typing import Annotated, Self
+from datetime import datetime
+from typing import Any, Self
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from space_weather_analysis.catalog.models import SourceType
-from space_weather_analysis.util.time_utils import UtcDatetime, parse_iso_duration
-
-
-def _duration(value: object) -> object:
-    """Reads an ISO 8601 duration text as timedelta and passes every other value on to the timedelta validation."""
-    if not isinstance(value, str):
-        return value
-    duration = parse_iso_duration(value)
-    if duration is None:
-        raise ValueError(f"'{value}' is no positive ISO 8601 duration")
-    return duration
-
-
-# A positive duration, written in the file as ISO 8601 duration
-IsoDuration = Annotated[timedelta, BeforeValidator(_duration)]
+from space_weather_analysis.util.time_utils import IsoDuration, UtcDatetime
 
 
 class Feed(BaseModel):
@@ -72,15 +58,17 @@ class Feed(BaseModel):
 
 
 class FeedFile(BaseModel):
-    """The content of the feed configuration file, a TOML array of tables named `feed`.
+    """The content of the feed configuration file, a TOML array of tables named `feed` and the table `dashboard`.
 
     Attributes:
         feed: The feeds in the order of the file.
+        dashboard: What the dashboard shows of the feeds; read and validated by the frontend.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     feed: list[Feed] = Field(default_factory=list)
+    dashboard: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _unique_names(self) -> Self:

@@ -22,6 +22,7 @@ class Tile:
         time: The UTC time stamp of the newest value; None without a value.
         level: The NOAA scale level with its name; None for figures without a scale or without a value.
         color: The color of the level.
+        note: A further line below the value; None shows none.
     """
 
     title: str
@@ -29,6 +30,7 @@ class Tile:
     time: datetime | None
     level: str | None = None
     color: str = MISSING_LEVEL_COLOR
+    note: str | None = None
 
 
 def _number(latest: LatestDocument | None, field: str) -> tuple[datetime | None, float | None]:
@@ -49,21 +51,34 @@ def _level_text(scale_letter: str, levels: pd.Series) -> tuple[str, str]:
     return f"{scale_letter}{level} {LEVEL_NAMES[level]}", LEVEL_COLORS[level]
 
 
-def kp_tile(latest: LatestDocument | None, *, kp_column: str = "Kp") -> Tile:
-    """Shows the newest Kp index with its NOAA geomagnetic storm level.
+def kp_tile(
+    latest: LatestDocument | None, *, kp_column: str = "Kp", estimate: LatestDocument | None = None, estimate_column: str = "estimated_kp"
+) -> Tile:
+    """Shows the newest Kp index with its NOAA geomagnetic storm level, from the estimate if one is given.
 
     Args:
-        latest: The newest Kp document; None if there is none.
-        kp_column: Field holding the Kp value.
+        latest: The newest official Kp document; None if there is none.
+        kp_column: Field holding the official Kp value.
+        estimate: The newest estimated Kp document, shown as current value with the official one as note; None shows the official Kp.
+        estimate_column: Field holding the estimated Kp value.
 
     Returns:
         The tile, Kp with two decimals.
     """
-    time, kp = _number(latest, kp_column)
+    official_time, official_kp = _number(latest, kp_column)
+    if estimate is None:
+        return _kp_value_tile("Kp index", official_time, official_kp)
+    estimate_time, estimated_kp = _number(estimate, estimate_column)
+    official = "n/a" if official_kp is None or official_time is None else f"{official_kp:.2f} at {official_time:%Y-%m-%d %H:%M} UTC"
+    return _kp_value_tile("Kp index (estimated)", estimate_time, estimated_kp, note=f"Official: {official}")
+
+
+def _kp_value_tile(title: str, time: datetime | None, kp: float | None, note: str | None = None) -> Tile:
+    """Builds a Kp tile with the G level of the value, or n/a without a value."""
     if kp is None:
-        return Tile("Kp index", "n/a", time)
+        return Tile(title, "n/a", time, note=note)
     level, color = _level_text("G", g_level(pd.Series([kp])))
-    return Tile("Kp index", f"{kp:.2f}", time, level, color)
+    return Tile(title, f"{kp:.2f}", time, level, color, note)
 
 
 def xray_tile(latest: LatestDocument | None, *, long_column: str = "Long_Wave") -> Tile:

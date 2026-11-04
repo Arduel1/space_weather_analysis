@@ -28,6 +28,16 @@ def test_kp_figure_colors_bars_by_g_level_and_draws_five_thresholds() -> None:
     assert _line_count(fig) == 5
 
 
+def test_kp_figure_draws_an_estimate_as_line_above_the_bars() -> None:
+    """An estimate adds a line trace after the Kp bars and shows the legend."""
+    frame = pd.DataFrame({"Kp": [2.0, 3.0]}, index=_utc_index(2, "3h"))
+    estimate = pd.Series([2.3, 2.7, 3.1], index=_utc_index(3, "min"))
+
+    fig = kp_figure(frame, estimate=estimate)
+
+    assert ([trace.type for trace in fig.data], fig.layout.showlegend) == (["bar", "scattergl"], True)
+
+
 def test_xray_figure_has_both_channels_flare_bands_and_r_thresholds() -> None:
     """Both channels are drawn on a log axis with four flare class bands, five R lines and class hover text."""
     frame = pd.DataFrame({"Long_Wave": [1e-6, 5.27e-5, -1.0], "Short_Wave": [1e-7, 2e-6, 3e-7]}, index=_utc_index(3, "min"))

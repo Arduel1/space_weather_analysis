@@ -12,11 +12,12 @@ lookback = "P90D"
 interval = "PT1H"
 
 # Live GOES X-ray and proton flux of NOAA SWPC, whose rolling files are a few minutes behind the measurement
+# The 7-day lookback is the longest file SWPC offers; after the first run each run fetches from the newest stored value on
 [[feed]]
 name = "swpc_goes"
 datasets = ["swpc_goes_xray", "swpc_goes_protons"]
 source_type = "SWPC"
-lookback = "PT6H"
+lookback = "P7D"
 interval = "PT1M"
 
 # Kp estimated by SWPC every minute, a nowcast until GFZ publishes the official Kp
@@ -24,7 +25,7 @@ interval = "PT1M"
 name = "swpc_kp"
 datasets = ["swpc_kp_estimated"]
 source_type = "SWPC"
-lookback = "PT6H"
+lookback = "P7D"
 interval = "PT1M"
 
 # Kp index of GFZ Potsdam
@@ -40,3 +41,55 @@ interval = "PT1H"
 name = "local"
 datasets = ["silso_sunspot_daily", "silso_sunspot_monthly", "silso_sunspot_smoothed", "cme_catalog"]
 source_type = "LOCAL"
+
+# What the dashboard shows of the feeds. Every `dataset` must belong to a feed above, so the shown data stays current.
+# Switching a tile or chart to another source means naming another dataset and its field here.
+# A chart shows its `view` up to now and moves with the time; it loads its `history`, reachable by panning while live updates are paused.
+[dashboard.tiles.kp]
+dataset = "Kp"
+field = "Kp"
+estimate = { dataset = "swpc_kp_estimated", field = "estimated_kp" }
+
+[dashboard.tiles.xray]
+dataset = "swpc_goes_xray"
+field = "long_flux"
+
+[dashboard.tiles.protons]
+dataset = "swpc_goes_protons"
+field = "p_ge10mev_flux"
+
+[dashboard.tiles.sunspots]
+dataset = "silso_sunspot_daily"
+field = "sunspot_number"
+
+[dashboard.charts.kp]
+dataset = "Kp"
+field = "Kp"
+view = "PT24H"
+history = "P1Y"
+estimate = { dataset = "swpc_kp_estimated", field = "estimated_kp" }
+
+[dashboard.charts.xray]
+dataset = "swpc_goes_xray"
+long_field = "long_flux"
+short_field = "short_flux"
+view = "PT24H"
+history = "P7D"
+
+[dashboard.charts.protons]
+dataset = "swpc_goes_protons"
+field = "p_ge10mev_flux"
+view = "PT24H"
+history = "P7D"
+
+# About three 11-year solar cycles
+[dashboard.charts.sunspots]
+monthly = { dataset = "silso_sunspot_monthly", field = "sunspot_number" }
+smoothed = { dataset = "silso_sunspot_smoothed", field = "sunspot_number" }
+view = "P35Y"
+history = "P35Y"
+
+[dashboard.charts.cmes]
+dataset = "cme_catalog"
+span = "P90D"
+count = 20

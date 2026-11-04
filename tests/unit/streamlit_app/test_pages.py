@@ -34,7 +34,7 @@ def _values_frame(*_: Any) -> pd.DataFrame:
 
 def _feed_frame() -> pd.DataFrame:
     """Returns two rows holding every field the dashboard charts read, so any chart can be drawn from it."""
-    return _values_frame().assign(Kp=3.0, Long_Wave=2e-6, Short_Wave=1e-7, P10=0.5).drop(columns="value")
+    return _values_frame().assign(Kp=3.0, estimated_kp=4.0, long_flux=2e-6, short_flux=1e-7, p_ge10mev_flux=0.5).drop(columns="value")
 
 
 def _run(page: str) -> AppTest:
@@ -49,6 +49,7 @@ def test_main_shows_the_dashboard_by_default(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(data, "get_repositories", object)
     monkeypatch.setattr(data, "read_latest", lambda *_: None)
     monkeypatch.setattr(data, "read_recent", lambda *_: pd.DataFrame())
+    monkeypatch.setattr(data, "read_newest_time", lambda _: None)
 
     app = _run("main.py")
 
@@ -66,15 +67,22 @@ def test_main_without_database_shows_an_error(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_dashboard_shows_tiles_charts_and_notes_for_missing_feeds(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every feed with documents gets its tile value and chart; a feed without documents gets a note."""
+    """The configured datasets with documents get their tile value and chart; one without documents gets a note."""
     latest_time = datetime(2024, 1, 1, 1, tzinfo=UTC)
-    newest = {"Kp": {"Kp": 3.0}, "goesp_xray_flux_P1M": {"Long_Wave": 2e-6}, "goesp_part_flux_P5M": {"P10": 0.5}}
+    newest = {
+        "Kp": {"Kp": 3.0},
+        "swpc_kp_estimated": {"estimated_kp": 4.0},
+        "swpc_goes_xray": {"long_flux": 2e-6},
+        "swpc_goes_protons": {"p_ge10mev_flux": 0.5},
+    }
     monkeypatch.setattr(data, "read_latest", lambda collection, _: (latest_time, newest[collection]) if collection in newest else None)
     monkeypatch.setattr(data, "read_recent", lambda collection, *_: _feed_frame() if collection in newest else pd.DataFrame())
+    monkeypatch.setattr(data, "read_newest_time", lambda _: latest_time)
 
     app = _run("pages/dashboard.py")
 
-    assert [metric.value for metric in app.metric] == ["3.00", "C2.0", "5.00e-01 pfu", "n/a"]
+    assert [metric.value for metric in app.metric] == ["4.00", "C2.0", "5.00e-01 pfu", "n/a"]
+    assert [toggle.label for toggle in app.toggle] == ["Live updates"]
     assert len(app.get("plotly_chart")) == 3
     assert len(app.info) == 2
 

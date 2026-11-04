@@ -3,7 +3,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from pydantic import AfterValidator
+from pydantic import AfterValidator, BeforeValidator
 
 from space_weather_analysis.util.types import TimeRange
 
@@ -118,6 +118,20 @@ def parse_iso_duration(text: str) -> timedelta | None:
         seconds=parts.get("seconds", 0),
     )
     return duration if duration > timedelta(0) else None
+
+
+def _duration(value: object) -> object:
+    """Reads an ISO 8601 duration text as timedelta and passes every other value on to the timedelta validation."""
+    if not isinstance(value, str):
+        return value
+    duration = parse_iso_duration(value)
+    if duration is None:
+        raise ValueError(f"'{value}' is no positive ISO 8601 duration")
+    return duration
+
+
+# A pydantic field type for a positive duration, written in configuration files as ISO 8601 duration
+IsoDuration = Annotated[timedelta, BeforeValidator(_duration)]
 
 
 def calculate_time_intersection(

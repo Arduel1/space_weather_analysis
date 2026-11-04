@@ -20,13 +20,20 @@ logger = logging.getLogger(__name__)
 SWPC_GRANULARITY = Granularity.MINUTES
 # Range of a run without start time: the length of the shortest SWPC file
 DEFAULT_LOOKBACK = timedelta(hours=6)
+# Time before the newest stored document from which a run fetches again, so that late corrections of SWPC are taken up
+REFETCH_OVERLAP = timedelta(hours=1)
+# Time the oldest stored document may lie after the start for the stored data to count as reaching back to it; the
+# oldest row of a rolling file lies a moment after the start of a lookback as long as the file
+STORED_START_TOLERANCE = timedelta(hours=1)
 
 
 class SwpcPipeline:
     """Ingests the rolling JSON files of NOAA SWPC, one request per dataset and run.
 
     SWPC replaces its files every minute, so each run reads the file covering the requested range and writes only the
-    documents that differ from the stored ones in the time span the file delivered.
+    documents that differ from the stored ones in the time span the file delivered. Once the stored documents reach back
+    to the start, a run starts REFETCH_OVERLAP before the newest stored document, so after a long first range the runs
+    fetch only the short files.
     """
 
     def __init__(self, *, timeseries: TimeSeriesRepository, coverage_repository: CoverageRepository, client: SwpcClient) -> None:
@@ -95,9 +102,11 @@ class SwpcPipeline:
         return report
 
     def _ingest(self, dataset_id: str, collection: str, start: datetime, stop: datetime) -> bool:
-        """Fetches the file of a dataset and writes the differences in the span from its first delivered time to the stop.
+        """Fetches the file of a dataset from the start or shortly before its newest stored document, and writes the differences.
 
-        The span starts at the first delivered time, not at the start, so stored documents older than the file stay.
+        See _fetch_start for where the fetch starts.
+
+        The written span starts at the first delivered time, not at the start, so stored documents older than the file stay.
 
         Args:
             dataset_id: The dataset ID.
@@ -114,12 +123,34 @@ class SwpcPipeline:
             DataProcessingError: If the file cannot be read.
             pymongo.errors.PyMongoError: If the documents cannot be stored.
         """
-        result = self.client.fetch(dataset_id, start, stop)
+        fetch_start = self._fetch_start(dataset_id, collection, start)
+        result = self.client.fetch(dataset_id, fetch_start, stop)
         if result.data is None:
-            logger.info("SWPC file of %s holds no value between %s and %s", dataset_id, start, stop)
+            logger.info("SWPC file of %s holds no value between %s and %s", dataset_id, fetch_start, stop)
             return False
         frame = result.data
         documents = frame_to_documents(frame, source_identifier(SourceType.SWPC, SWPC_PRODUCTS[dataset_id].provider_id))
         self.timeseries.ensure_collection(collection, SWPC_GRANULARITY)
         self.timeseries.replace_range(collection, frame.index.min().to_pydatetime(), stop, documents)
         return True
+
+    def _fetch_start(self, dataset_id: str, collection: str, start: datetime) -> datetime:
+        """Determines where a run fetches from: shortly before the newest stored document if the stored ones reach back to the start.
+
+        Args:
+            dataset_id: The dataset ID.
+            collection: The collection holding the data documents.
+            start: The start of the requested range.
+
+        Returns:
+            REFETCH_OVERLAP before the newest stored document, or the start if nothing is stored or the oldest stored
+            document lies more than STORED_START_TOLERANCE after the start.
+
+        Raises:
+            pymongo.errors.PyMongoError: If the coverage or the newest document cannot be read.
+        """
+        coverage = self.coverage_repository.get(dataset_id)
+        if coverage is None or coverage.first_timestamp is None or coverage.first_timestamp > start + STORED_START_TOLERANCE:
+            return start
+        newest = self.timeseries.read_latest(collection, ())
+        return max(start, newest[0] - REFETCH_OVERLAP) if newest is not None else start

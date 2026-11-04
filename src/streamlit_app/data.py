@@ -194,6 +194,33 @@ def read_recent(collection: str, span: timedelta, fields: tuple[str, ...]) -> pd
     return _read_range(collection, latest_time - span, latest_time + timedelta(microseconds=1), fields)
 
 
+def read_newest_time(collection: str) -> datetime | None:
+    """Reads the time stamp of the newest document of a collection, without the cache, so that new data is noticed at once.
+
+    Args:
+        collection: The collection holding the data documents.
+
+    Returns:
+        The aware UTC time stamp; None on error or without documents.
+    """
+    repositories = get_repositories()
+    if repositories is None:
+        return None
+    try:
+        latest = repositories.timeseries.read_latest(collection, ())
+    except PyMongoError:
+        logger.exception("Error reading the newest time stamp of %s", collection)
+        return None
+    return latest[0] if latest else None
+
+
+def clear_read_cache() -> None:
+    """Drops the cached reads of documents, so that the next reads include newly stored data."""
+    read_latest.clear()
+    read_recent.clear()
+    read_collection_range.clear()
+
+
 def _read_range(collection: str, start: datetime, stop: datetime, fields: Sequence[str] | None = None) -> pd.DataFrame:
     """Reads a time range of a collection through the time series repository.
 

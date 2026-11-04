@@ -182,6 +182,30 @@ def test_swpc_rerun_with_shifted_file_inserts_only_the_new_minute(db: Database, 
     assert (len(ids_after), ids_before <= ids_after) == (len(LONG_FLUXES) + 1, True)
 
 
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("first_rows_start", "expected_second_path"),
+    [
+        pytest.param(NOW - timedelta(days=7) + MINUTE, XRAY_6_HOUR_PATH, id="stored-reach-back-short-file"),
+        pytest.param(FIRST_MINUTE - MINUTE, "/json/goes/primary/xrays-7-day.json", id="stored-too-short-long-file-again"),
+    ],
+)
+def test_swpc_second_run_fetches_from_the_newest_value_once_the_stored_data_reach_back(
+    db: Database, httpserver: HTTPServer, first_rows_start: datetime, expected_second_path: str
+) -> None:
+    """A second run with a 7-day start requests the short file only if the stored documents already reach back to the start."""
+    # The oldest row at the parametrized start, the newer ones in the last minutes
+    rows = [*_xray_rows(first_rows_start, LONG_FLUXES[:1], SHORT_FLUXES[:1]), *_xray_rows(FIRST_MINUTE, LONG_FLUXES[1:], SHORT_FLUXES[1:])]
+    httpserver.expect_request("/json/goes/primary/xrays-7-day.json").respond_with_json(rows)
+    httpserver.expect_request(XRAY_6_HOUR_PATH).respond_with_json(rows)
+    week_ago = NOW - timedelta(days=7)
+
+    _ingest(db, httpserver, [XRAY_DATASET], start=week_ago)
+    _ingest(db, httpserver, [XRAY_DATASET], start=week_ago)
+
+    assert [request.path for request, _ in httpserver.log] == ["/json/goes/primary/xrays-7-day.json", expected_second_path]
+
+
 # Address on which no server listens, so every connection is refused at once
 UNREACHABLE_URL = "http://127.0.0.1:1/json/"
 

@@ -48,6 +48,8 @@ services:
       - .env
     ports:
       - "${FRONTEND_HOST_PORT:-8501}:8501"
+    volumes:
+      - ./config:/app/config:ro # Feed file with the dashboard table, read on every page load
     command:
       [
         "streamlit",
