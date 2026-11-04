@@ -1,10 +1,9 @@
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
 from types import MappingProxyType
 from typing import Any
 
-from streamlit_app.dashboard.panels.base import PanelConfig
+from streamlit_app.dashboard.panels.base import PanelConfig, PanelContext
 from streamlit_app.dashboard.panels.table import TablePanel, render_table
 from streamlit_app.dashboard.panels.timeseries import TimeseriesPanel, render_timeseries
 from streamlit_app.dashboard.panels.value import ValuePanel, render_value
@@ -16,11 +15,11 @@ class PanelType[P: PanelConfig]:
 
     Attributes:
         model: Validates the settings of one panel of this type.
-        render: Draws a panel from its settings, the time of the drawing and a key unique on the page.
+        render: Draws a panel from its settings, the context of the drawing and a key unique on the page.
     """
 
     model: type[P]
-    render: Callable[[P, datetime, str], None]
+    render: Callable[[P, PanelContext, str], None]
 
 
 # Panel types by the name a panel gives as `type`; a new kind of visualisation is one module in panels/ and one entry here

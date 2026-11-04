@@ -1,11 +1,13 @@
 import pathlib
 import tomllib
 from collections.abc import Mapping
+from datetime import timedelta
 from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from space_weather_analysis.util.time_utils import IsoDuration
 from streamlit_app.dashboard.panel_types import PANEL_TYPES, PanelType
 from streamlit_app.dashboard.panels.base import PanelConfig, collection_of
 
@@ -112,5 +114,41 @@ def load_dashboard_config(path: pathlib.Path) -> DashboardConfig:
         return _FeedFileView.model_validate(tomllib.load(file)).dashboard
 
 
-# The failures of load_dashboard_config, for callers that show them instead of raising
+class _FeedInterval(BaseModel):
+    """The parts of one feed table that the dashboard needs to rate how current its data are."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    datasets: list[str] = Field(default_factory=list)
+    interval: IsoDuration | None = None
+
+
+def load_feed_intervals(path: pathlib.Path) -> dict[str, timedelta | None]:
+    """Reads the interval of the feed loading each dataset from the feed file.
+
+    Args:
+        path: The path of the feed file.
+
+    Returns:
+        The interval by dataset ID, the shortest one for a dataset of several feeds; None for feeds loaded only on start.
+
+    Raises:
+        OSError: If the file cannot be read.
+        tomllib.TOMLDecodeError: If the file is no valid TOML.
+        pydantic.ValidationError: If a feed gives an interval that is no ISO 8601 duration.
+    """
+    with path.open("rb") as file:
+        feeds = [_FeedInterval.model_validate(table) for table in tomllib.load(file).get("feed", [])]
+    intervals: dict[str, timedelta | None] = {}
+    for feed in feeds:
+        for dataset in feed.datasets:
+            current = intervals.get(dataset)
+            if feed.interval is not None and (current is None or feed.interval < current):
+                intervals[dataset] = feed.interval
+            else:
+                intervals.setdefault(dataset, current)
+    return intervals
+
+
+# The failures of load_dashboard_config and load_feed_intervals, for callers that show them instead of raising
 CONFIG_ERRORS = (OSError, tomllib.TOMLDecodeError, ValidationError)

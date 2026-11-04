@@ -1,3 +1,6 @@
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -145,6 +148,19 @@ class TimeWindow(BaseModel):
         if self.history < self.view:
             raise ValueError("The history of a panel must be at least as long as its view.")
         return self
+
+
+@dataclass(frozen=True)
+class PanelContext:
+    """What every panel gets for one drawing besides its settings.
+
+    Attributes:
+        now: The time of the drawing.
+        feed_intervals: The interval of the feed loading each dataset, by dataset ID; None for a feed loaded only on start.
+    """
+
+    now: datetime
+    feed_intervals: Mapping[str, timedelta | None]
 
 
 # Height of chart and table panels in pixels, so that the whole grid fits on one screen

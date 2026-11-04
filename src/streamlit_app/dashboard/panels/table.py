@@ -1,13 +1,12 @@
-from datetime import datetime
-
 import pandas as pd
 import streamlit as st
 from pydantic import BaseModel, Field
 
 from space_weather_analysis.util.time_utils import IsoDuration
 from streamlit_app import data
+from streamlit_app.dashboard.freshness import panel_freshness
 from streamlit_app.dashboard.labels import Metadata, dataset_title, field_label, sources_line
-from streamlit_app.dashboard.panels.base import CLOSED, PANEL_HEIGHT, PanelConfig, collection_of
+from streamlit_app.dashboard.panels.base import CLOSED, PANEL_HEIGHT, PanelConfig, PanelContext, collection_of
 
 TIME_LABEL = "Time (UTC)"
 
@@ -60,23 +59,24 @@ def table_frame(panel: TablePanel, frame: pd.DataFrame, metadata: Metadata) -> p
     return newest.reset_index(drop=True)
 
 
-def render_table(panel: TablePanel, now: datetime, key: str) -> None:
-    """Shows the table at the panel height, or a note if the dataset holds no documents.
+def render_table(panel: TablePanel, context: PanelContext, key: str) -> None:
+    """Shows the table at the panel height with freshness and source, or a note if the dataset holds no documents.
 
     Args:
         panel: The panel settings.
-        now: The time of the drawing.
+        context: The context of the drawing.
         key: The key of the table element, unique on the page.
     """
-    del now
     frame = data.read_recent(collection_of(panel.dataset), panel.history, tuple(column.field for column in panel.columns))
     metadata = data.get_metadata(panel.dataset)
     with st.container(border=True, height=PANEL_HEIGHT):
         title = dataset_title(metadata, panel.title)
         if title:
             st.markdown(f"**{title}**")
-        st.caption(sources_line([metadata]))
         if frame.empty:
+            st.caption(sources_line([metadata]))
             st.info(f"No data stored for {panel.dataset}.")
             return
+        state = panel_freshness({panel.dataset: frame.index.max().to_pydatetime()}, {panel.dataset: metadata}, context.feed_intervals, context.now)
+        st.caption(f"{state} -- {sources_line([metadata])}")
         st.dataframe(table_frame(panel, frame, metadata), hide_index=True, key=key)

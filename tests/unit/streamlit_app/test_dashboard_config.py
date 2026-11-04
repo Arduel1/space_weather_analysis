@@ -1,12 +1,12 @@
 import pathlib
-from datetime import datetime
+from datetime import timedelta
 
 import pytest
 from pydantic import ValidationError
 
-from streamlit_app.dashboard.config import load_dashboard_config, panel_from_table
+from streamlit_app.dashboard.config import load_dashboard_config, load_feed_intervals, panel_from_table
 from streamlit_app.dashboard.panel_types import PANEL_TYPES, PanelType
-from streamlit_app.dashboard.panels.base import PanelConfig
+from streamlit_app.dashboard.panels.base import PanelConfig, PanelContext
 from streamlit_app.dashboard.panels.timeseries import TimeseriesPanel
 from streamlit_app.dashboard.panels.value import ValuePanel
 
@@ -35,9 +35,9 @@ class GaugePanel(PanelConfig):
     needle: float
 
 
-def _draw_nothing(panel: GaugePanel, now: datetime, key: str) -> None:
+def _draw_nothing(panel: GaugePanel, context: PanelContext, key: str) -> None:
     """Draws nothing, as the tests only validate gauge panels."""
-    del panel, now, key
+    del panel, context, key
 
 
 def test_project_dashboard_table_is_valid() -> None:
@@ -94,3 +94,18 @@ def test_a_registered_panel_type_validates_its_own_settings() -> None:
     panel = panel_from_table({"type": "gauge", "row": 1, "needle": 0.5}, panel_types)
 
     assert panel == GaugePanel(type="gauge", row=1, needle=0.5)
+
+
+def test_feed_intervals_take_the_shortest_interval_of_each_dataset(tmp_path: pathlib.Path) -> None:
+    """Each dataset gets the shortest interval of its feeds, None only if all its feeds load on start."""
+    content = (
+        '[[feed]]\nname = "hourly"\ndatasets = ["shared_set"]\ninterval = "PT1H"\n\n'
+        '[[feed]]\nname = "start_only"\ndatasets = ["start_set", "mixed_set"]\n\n'
+        '[[feed]]\nname = "minutely"\ndatasets = ["shared_set", "mixed_set"]\ninterval = "PT1M"\n'
+    )
+
+    assert load_feed_intervals(_write(tmp_path, content)) == {
+        "shared_set": timedelta(minutes=1),
+        "start_set": None,
+        "mixed_set": timedelta(minutes=1),
+    }

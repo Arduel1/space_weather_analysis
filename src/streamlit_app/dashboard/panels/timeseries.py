@@ -10,8 +10,9 @@ import streamlit as st
 from pydantic import BaseModel, Field, model_validator
 
 from streamlit_app import data
+from streamlit_app.dashboard.freshness import panel_freshness
 from streamlit_app.dashboard.labels import Metadata, dataset_title, field_label, field_unit, sources_line
-from streamlit_app.dashboard.panels.base import CLOSED, PANEL_HEIGHT, PanelConfig, ScaleChoice, TimeWindow, collection_of
+from streamlit_app.dashboard.panels.base import CLOSED, PANEL_HEIGHT, PanelConfig, PanelContext, ScaleChoice, TimeWindow, collection_of
 
 # Share of the spacing of two values a bar fills, so that neighbouring bars stay apart
 _BAR_FILL = 0.9
@@ -148,7 +149,7 @@ def _load_frames(panel: TimeseriesPanel) -> dict[str, pd.DataFrame]:
     return {dataset: data.read_recent(collection_of(dataset), panel.history, tuple(fields)) for dataset, fields in fields_by_dataset.items()}
 
 
-def render_timeseries(panel: TimeseriesPanel, now: datetime, key: str) -> None:
+def render_timeseries(panel: TimeseriesPanel, context: PanelContext, key: str) -> None:
     """Shows the chart, or a note if none of its datasets holds documents.
 
     Every drawing replaces the figure and with it a zoom of the viewer, so zooming and panning into the loaded history
@@ -156,7 +157,7 @@ def render_timeseries(panel: TimeseriesPanel, now: datetime, key: str) -> None:
 
     Args:
         panel: The panel settings.
-        now: The end of the view.
+        context: The context of the drawing, whose time ends the view.
         key: The key of the chart element, unique on the page.
     """
     frames = _load_frames(panel)
@@ -165,5 +166,7 @@ def render_timeseries(panel: TimeseriesPanel, now: datetime, key: str) -> None:
         with st.container(border=True, height=PANEL_HEIGHT):
             st.info(f"{panel.title or 'Chart'}: no data stored for {sorted(frames)}.")
         return
-    st.plotly_chart(timeseries_figure(panel, frames, metadata, now), width="stretch", key=key)
-    st.caption(sources_line(metadata[series.dataset] for series in panel.series))
+    st.plotly_chart(timeseries_figure(panel, frames, metadata, context.now), width="stretch", key=key)
+    newest = {dataset: frame.index.max().to_pydatetime() for dataset, frame in frames.items() if not frame.empty}
+    state = panel_freshness(newest, metadata, context.feed_intervals, context.now)
+    st.caption(f"{state} -- {sources_line(metadata[series.dataset] for series in panel.series)}")

@@ -92,7 +92,10 @@ def test_dashboard_shows_tiles_charts_and_notes_for_missing_feeds(monkeypatch: p
     assert [metric.value for metric in app.metric] == ["4.00", "C2.0", "5.00e-01 pfu", "120"]
     assert [toggle.label for toggle in app.toggle] == ["Live updates"]
     assert (len(app.get("plotly_chart")), len(app.dataframe), len(app.info)) == (3, 1, 1)
-    assert [caption.value for caption in app.caption if caption.value.startswith("Source:")] == ["Source: Synthetic provider"] * 8
+    assert [caption.value.split(" -- ")[-1] for caption in app.caption if "Source:" in caption.value] == ["Source: Synthetic provider"] * 8
+    assert [caption.value.split(" newest value")[0] for caption in app.caption if " UTC, " in caption.value] == [
+        "2024-01-01 01:00 UTC, :red[stale],"
+    ] * 3 + ["2024-01-01 01:00 UTC, :gray[static],"]
 
 
 def test_explorer_shows_the_selected_collection(monkeypatch: pytest.MonkeyPatch) -> None:
