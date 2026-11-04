@@ -79,6 +79,11 @@ class PipelineFactory:
             case SourceType.LOCAL:
                 return LocalPipeline(timeseries=self.timeseries, coverage_repository=self.coverage_repository, data_dir=self.data_dir)
             case SourceType.SWPC:
-                return SwpcPipeline(timeseries=self.timeseries, coverage_repository=self.coverage_repository, client=self.swpc_client)
+                return SwpcPipeline(
+                    timeseries=self.timeseries,
+                    coverage_repository=self.coverage_repository,
+                    metadata_repository=self.metadata_repository,
+                    client=self.swpc_client,
+                )
             case _:
                 assert_never(source_type)

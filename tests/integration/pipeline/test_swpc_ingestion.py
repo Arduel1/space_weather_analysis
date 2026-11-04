@@ -8,8 +8,10 @@ from pytest_httpserver import HTTPServer
 
 from pipeline_service.pipelines.report import IngestionReport
 from pipeline_service.pipelines.swpc import SwpcPipeline
-from space_weather_analysis.clients.swpc import SwpcClient
+from space_weather_analysis.clients.swpc import SWPC_PRODUCTS, SwpcClient
 from space_weather_analysis.coverage.repository import MongoCoverageRepository
+from space_weather_analysis.metadata.repository import MongoMetadataRepository
+from space_weather_analysis.metadata.swpc import SWPC_LICENSE, SWPC_PROVIDER
 from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository
 
 StoredData = Callable[[str, datetime], dict[str, Any]]
@@ -82,7 +84,12 @@ def _client(base_url: str) -> SwpcClient:
 
 def _pipeline(db: Database, client: SwpcClient) -> SwpcPipeline:
     """Provides the SWPC pipeline of a client on the test database."""
-    return SwpcPipeline(timeseries=MongoTimeSeriesRepository(db), coverage_repository=MongoCoverageRepository(db), client=client)
+    return SwpcPipeline(
+        timeseries=MongoTimeSeriesRepository(db),
+        coverage_repository=MongoCoverageRepository(db),
+        metadata_repository=MongoMetadataRepository(db),
+        client=client,
+    )
 
 
 def _ingest(db: Database, httpserver: HTTPServer, datasets: list[str], start: datetime = NOW - timedelta(hours=2)) -> IngestionReport:
@@ -204,6 +211,40 @@ def test_swpc_second_run_fetches_from_the_newest_value_once_the_stored_data_reac
     _ingest(db, httpserver, [XRAY_DATASET], start=week_ago)
 
     assert [request.path for request, _ in httpserver.log] == ["/json/goes/primary/xrays-7-day.json", expected_second_path]
+
+
+@pytest.mark.integration
+def test_swpc_run_saves_the_metadata_record_once(db: Database, httpserver: HTTPServer) -> None:
+    """The first run saves a record with provider, license, title and units from the product table, and a second run leaves it unchanged."""
+    httpserver.expect_request(XRAY_6_HOUR_PATH).respond_with_json(_xray_rows(FIRST_MINUTE, LONG_FLUXES, SHORT_FLUXES))
+    metadata_repository = MongoMetadataRepository(db)
+
+    _ingest(db, httpserver, [XRAY_DATASET])
+    first_record = metadata_repository.get(XRAY_DATASET)
+    _ingest(db, httpserver, [XRAY_DATASET])
+    second_record = metadata_repository.get(XRAY_DATASET)
+
+    assert first_record is not None
+    assert second_record is not None
+    assert (
+        first_record.source.provider,
+        first_record.citation.license,
+        first_record.title,
+        {variable.name: variable.units for variable in first_record.variables},
+        second_record.updated_at == first_record.updated_at,
+    ) == (
+        SWPC_PROVIDER,
+        SWPC_LICENSE,
+        SWPC_PRODUCTS[XRAY_DATASET].title,
+        {
+            "long_flux": "W/m^2",
+            "short_flux": "W/m^2",
+            "long_electron_contamination": None,
+            "short_electron_contamination": None,
+            "satellite": None,
+        },
+        True,
+    )
 
 
 # Address on which no server listens, so every connection is refused at once

@@ -10,6 +10,7 @@ import streamlit as st
 from pydantic import BaseModel, Field, model_validator
 
 from streamlit_app import data
+from streamlit_app.dashboard.labels import Metadata, dataset_title, field_label, field_unit, sources_line
 from streamlit_app.dashboard.panels.base import CLOSED, PANEL_HEIGHT, PanelConfig, ScaleChoice, TimeWindow, collection_of
 
 # Share of the spacing of two values a bar fills, so that neighbouring bars stay apart
@@ -23,7 +24,7 @@ class SeriesConfig(BaseModel):
     Attributes:
         dataset: The dataset ID, which must belong to a feed.
         field: The data field.
-        label: The name in legend and hover; the field without one.
+        label: The name in legend and hover; empty takes the label of the field from the metadata, else the field name.
         style: How the values are drawn.
         color: The color, any CSS color; None lets Plotly choose.
     """
@@ -44,7 +45,7 @@ class TimeseriesPanel(PanelConfig, ScaleChoice, TimeWindow):
         series: The series, drawn in this order.
         y_axis: The type of the value axis; a log axis leaves out values that are not positive.
         y_range: The fixed range of the value axis, on a log axis in values, not exponents; None fits it to the data.
-        y_title: The title of the value axis.
+        y_title: The title of the value axis; empty takes the unit of the first series from the metadata.
     """
 
     series: list[SeriesConfig] = Field(min_length=1)
@@ -77,29 +78,34 @@ def _bar_width_ms(index: pd.Index) -> float | None:
     return float(np.median(np.diff(nanoseconds))) / 1e6 * _BAR_FILL
 
 
-def timeseries_figure(panel: TimeseriesPanel, frames: Mapping[str, pd.DataFrame], now: datetime) -> go.Figure:
+def timeseries_figure(panel: TimeseriesPanel, frames: Mapping[str, pd.DataFrame], metadata: Mapping[str, Metadata], now: datetime) -> go.Figure:
     """Builds the chart of a time series panel over its view ending now.
+
+    Configured title, labels and axis title take precedence over the metadata, which takes precedence over field names.
 
     Args:
         panel: The panel settings.
         frames: The loaded documents of each dataset of the panel, by dataset ID, with a UTC DatetimeIndex.
+        metadata: The metadata record of each dataset of the panel, by dataset ID; missing or empty if it has none.
         now: The end of the view.
 
     Returns:
-        One trace per series, a line at each level of the scale, and the time axis over the view.
+        One trace per series with its unit in the hover text, a line at each level of the scale, and the time axis over the view.
     """
     log_axis = panel.y_axis == "log"
     fig = go.Figure()
     for series in panel.series:
         frame = frames.get(series.dataset, pd.DataFrame())
+        record = metadata.get(series.dataset, {})
         values = _series_values(frame, series, log_axis)
-        name = series.label or series.field
+        name = field_label(record, series.field, series.label)
+        hover = f"%{{y:.3g}} {field_unit(record, series.field)}".rstrip()
         line = {"color": series.color} if series.color else {}
         if series.style == "bars":
-            fig.add_trace(go.Bar(x=values.index, y=values, width=_bar_width_ms(values.index), name=name, marker=line))
+            fig.add_trace(go.Bar(x=values.index, y=values, width=_bar_width_ms(values.index), name=name, marker=line, hovertemplate=hover))
         else:
             mode = "lines" if series.style == "line" else "markers"
-            fig.add_trace(go.Scattergl(x=values.index, y=values, mode=mode, name=name, line={**line, "width": 1.5}, marker=line))
+            fig.add_trace(go.Scattergl(x=values.index, y=values, mode=mode, name=name, line={**line, "width": 1.5}, marker=line, hovertemplate=hover))
 
     scale = panel.resolved_scale()
     for level in scale.levels if scale is not None else ():
@@ -113,13 +119,15 @@ def timeseries_figure(panel: TimeseriesPanel, frames: Mapping[str, pd.DataFrame]
             annotation_font_size=10,
         )
 
-    y_axis: dict[str, object] = {"type": panel.y_axis, "title": panel.y_title or None}
+    first_series = panel.series[0]
+    first_record = metadata.get(first_series.dataset, {})
+    y_axis: dict[str, object] = {"type": panel.y_axis, "title": panel.y_title or field_unit(first_record, first_series.field) or None}
     if panel.y_range is not None:
         low, high = panel.y_range
         # Plotly takes the range of a log axis as exponents of ten
         y_axis["range"] = [math.log10(low), math.log10(high)] if log_axis else [low, high]
     fig.update_layout(
-        title=panel.title,
+        title=dataset_title(first_record, panel.title),
         height=PANEL_HEIGHT,
         margin={"l": 10, "r": 10, "t": 40, "b": 10},
         title_font_size=14,
@@ -152,8 +160,10 @@ def render_timeseries(panel: TimeseriesPanel, now: datetime, key: str) -> None:
         key: The key of the chart element, unique on the page.
     """
     frames = _load_frames(panel)
+    metadata = {dataset: data.get_metadata(dataset) for dataset in frames}
     if all(frame.empty for frame in frames.values()):
         with st.container(border=True, height=PANEL_HEIGHT):
             st.info(f"{panel.title or 'Chart'}: no data stored for {sorted(frames)}.")
         return
-    st.plotly_chart(timeseries_figure(panel, frames, now), width="stretch", key=key)
+    st.plotly_chart(timeseries_figure(panel, frames, metadata, now), width="stretch", key=key)
+    st.caption(sources_line(metadata[series.dataset] for series in panel.series))

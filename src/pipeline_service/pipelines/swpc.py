@@ -2,11 +2,14 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 from pipeline_service.pipelines.base import ProgressCallback
-from pipeline_service.pipelines.chunks import CHUNK_ERRORS, record_gap, refresh_coverage
+from pipeline_service.pipelines.chunks import CHUNK_ERRORS, METADATA_SAVE_ERRORS, record_gap, refresh_coverage
 from pipeline_service.pipelines.report import IngestionReport
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.clients.swpc import SWPC_PRODUCTS, SwpcClient
 from space_weather_analysis.coverage.repository import CoverageRepository
+from space_weather_analysis.metadata.overlays.layering import save_with_overlays
+from space_weather_analysis.metadata.repository import MetadataRepository
+from space_weather_analysis.metadata.swpc import build_swpc_metadata
 from space_weather_analysis.timeseries.documents import frame_to_documents, source_identifier
 from space_weather_analysis.timeseries.models import Granularity
 from space_weather_analysis.timeseries.repository import TimeSeriesRepository
@@ -36,16 +39,25 @@ class SwpcPipeline:
     fetch only the short files.
     """
 
-    def __init__(self, *, timeseries: TimeSeriesRepository, coverage_repository: CoverageRepository, client: SwpcClient) -> None:
+    def __init__(
+        self,
+        *,
+        timeseries: TimeSeriesRepository,
+        coverage_repository: CoverageRepository,
+        metadata_repository: MetadataRepository,
+        client: SwpcClient,
+    ) -> None:
         """Initializes the SWPC pipeline.
 
         Args:
             timeseries: The repository storing the data documents.
             coverage_repository: The repository storing which time ranges are stored.
+            metadata_repository: The repository storing the metadata records.
             client: The client fetching the SWPC files.
         """
         self.timeseries = timeseries
         self.coverage_repository = coverage_repository
+        self.metadata_repository = metadata_repository
         self.client = client
 
     def run(
@@ -132,7 +144,30 @@ class SwpcPipeline:
         documents = frame_to_documents(frame, source_identifier(SourceType.SWPC, SWPC_PRODUCTS[dataset_id].provider_id))
         self.timeseries.ensure_collection(collection, SWPC_GRANULARITY)
         self.timeseries.replace_range(collection, frame.index.min().to_pydatetime(), stop, documents)
+        self._save_metadata(dataset_id, collection, [str(column) for column in frame.columns], result.source_url or self.client.base_url)
         return True
+
+    def _save_metadata(self, dataset_id: str, collection: str, fields: list[str], server_url: str) -> None:
+        """Saves the metadata record of a dataset unless the stored one already describes the same fields.
+
+        Runs come every minute, so the record is written only when it is missing or the delivered fields changed.
+        A failing save is logged, as the stored data documents stay valid without metadata.
+
+        Args:
+            dataset_id: The dataset ID.
+            collection: The collection holding the data documents.
+            fields: The fields of the delivered documents.
+            server_url: The URL of the fetched file.
+        """
+        try:
+            stored = self.metadata_repository.get(dataset_id)
+            if stored is not None and {variable.name for variable in stored.variables} == set(fields):
+                return
+            save_with_overlays(self.metadata_repository, [build_swpc_metadata(dataset_id, collection, fields, server_url, datetime.now(UTC))])
+        except METADATA_SAVE_ERRORS:
+            logger.exception("Failed to save metadata of %s", dataset_id)
+            return
+        logger.info("Saved metadata of %s", dataset_id)
 
     def _fetch_start(self, dataset_id: str, collection: str, start: datetime) -> datetime:
         """Determines where a run fetches from: shortly before the newest stored document if the stored ones reach back to the start.

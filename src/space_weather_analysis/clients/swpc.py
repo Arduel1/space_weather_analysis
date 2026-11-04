@@ -98,6 +98,19 @@ def parse_estimated_kp(rows: pd.DataFrame) -> pd.DataFrame:
 
 
 @dataclass(frozen=True)
+class SwpcVariable:
+    """The description of one stored field of an SWPC product, which SWPC publishes no metadata for.
+
+    Attributes:
+        description: What the field holds.
+        units: The unit of the values; None for values without unit.
+    """
+
+    description: str
+    units: str | None = None
+
+
+@dataclass(frozen=True)
 class SwpcProduct:
     """A data product SWPC publishes as rolling JSON files.
 
@@ -105,11 +118,17 @@ class SwpcProduct:
         files: The length of each file and its path below the base URL, by ascending length.
         parse: Converts the file rows into one row per time.
         provider_id: The product name in the source identifier of the documents.
+        title: The title of the dataset.
+        cadence: The time between two values.
+        variables: The description of each stored field, by field name.
     """
 
     files: tuple[tuple[timedelta, str], ...]
     parse: Callable[[pd.DataFrame], pd.DataFrame]
     provider_id: str
+    title: str
+    cadence: timedelta
+    variables: Mapping[str, SwpcVariable]
 
 
 def _goes_files(product: str) -> tuple[tuple[timedelta, str], ...]:
@@ -117,12 +136,47 @@ def _goes_files(product: str) -> tuple[tuple[timedelta, str], ...]:
     return tuple((length, f"goes/primary/{product}-{suffix}.json") for length, suffix in GOES_WINDOWS)
 
 
+# Energy thresholds in MeV of the GOES integral proton channels SWPC publishes
+PROTON_THRESHOLDS_MEV = (1, 5, 10, 30, 50, 60, 100, 500)
+_SATELLITE = SwpcVariable("Number of the GOES satellite that measured the values")
+_XRAY_VARIABLES = {
+    "long_flux": SwpcVariable("X-ray flux 0.1-0.8 nm, the band that defines the flare class", "W/m^2"),
+    "short_flux": SwpcVariable("X-ray flux 0.05-0.4 nm", "W/m^2"),
+    "long_electron_contamination": SwpcVariable("Whether electrons contaminate the 0.1-0.8 nm value"),
+    "short_electron_contamination": SwpcVariable("Whether electrons contaminate the 0.05-0.4 nm value"),
+    "satellite": _SATELLITE,
+}
+_PROTON_VARIABLES = {
+    **{f"p_ge{threshold}mev_flux": SwpcVariable(f"Integral proton flux >={threshold} MeV", "pfu") for threshold in PROTON_THRESHOLDS_MEV},
+    "satellite": _SATELLITE,
+}
+_KP_VARIABLES = {
+    "estimated_kp": SwpcVariable("Planetary K index estimated every minute by SWPC, not the official Kp"),
+    "kp_index": SwpcVariable("Integer part of the estimated planetary K index"),
+}
+
 # Datasets served from SWPC, by dataset ID
 SWPC_PRODUCTS: Mapping[str, SwpcProduct] = MappingProxyType(
     {
-        "swpc_goes_xray": SwpcProduct(_goes_files("xrays"), parse_xrays, "goes-primary-xrays"),
-        "swpc_goes_protons": SwpcProduct(_goes_files("integral-protons"), parse_integral_protons, "goes-primary-integral-protons"),
-        "swpc_kp_estimated": SwpcProduct(((timedelta(hours=6), "planetary_k_index_1m.json"),), parse_estimated_kp, "planetary-k-index-1m"),
+        "swpc_goes_xray": SwpcProduct(
+            _goes_files("xrays"), parse_xrays, "goes-primary-xrays", "GOES primary X-ray flux (1-minute)", timedelta(minutes=1), _XRAY_VARIABLES
+        ),
+        "swpc_goes_protons": SwpcProduct(
+            _goes_files("integral-protons"),
+            parse_integral_protons,
+            "goes-primary-integral-protons",
+            "GOES primary integral proton flux (5-minute)",
+            timedelta(minutes=5),
+            _PROTON_VARIABLES,
+        ),
+        "swpc_kp_estimated": SwpcProduct(
+            ((timedelta(hours=6), "planetary_k_index_1m.json"),),
+            parse_estimated_kp,
+            "planetary-k-index-1m",
+            "Estimated planetary K index (1-minute)",
+            timedelta(minutes=1),
+            _KP_VARIABLES,
+        ),
     }
 )
 
