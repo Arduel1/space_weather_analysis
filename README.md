@@ -229,6 +229,7 @@ Tools started outside Docker, such as the notebooks, can load the variables from
 ├── uv.lock                     # Locked dependency versions
 ├── example.env                 # Template for required environment variables
 ├── config/                     # Feed file: datasets the pipeline service keeps loaded and their intervals
+│   └── metadata/               # Curated metadata per provider, with the pages each value was taken from
 ├── data/                       # Local data files (not in the repository) and HAPI server list
 ├── docs/                       # Architecture diagram (editable draw.io SVG) and local data notes
 ├── notebooks/                  # Jupyter notebooks for exploratory analysis

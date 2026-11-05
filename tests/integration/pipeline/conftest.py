@@ -9,6 +9,7 @@ from pymongo.database import Database
 
 from pipeline_service.pipelines.local import LocalPipeline
 from space_weather_analysis.coverage.repository import MongoCoverageRepository
+from space_weather_analysis.metadata.repository import MongoMetadataRepository
 from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository
 
 # The files in data/ hold invented values in the file layout of their data provider.
@@ -86,7 +87,12 @@ def local_pipeline(db: Database) -> Callable[[pathlib.Path], LocalPipeline]:
     """Function building the local pipeline of a data directory on the test database."""
 
     def build(data_dir: pathlib.Path) -> LocalPipeline:
-        return LocalPipeline(timeseries=MongoTimeSeriesRepository(db), coverage_repository=MongoCoverageRepository(db), data_dir=data_dir)
+        return LocalPipeline(
+            timeseries=MongoTimeSeriesRepository(db),
+            coverage_repository=MongoCoverageRepository(db),
+            metadata_repository=MongoMetadataRepository(db),
+            data_dir=data_dir,
+        )
 
     return build
 

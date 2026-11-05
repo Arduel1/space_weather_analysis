@@ -92,8 +92,8 @@ def test_dashboard_shows_tiles_charts_and_notes_for_missing_feeds(monkeypatch: p
     app = _run("pages/dashboard.py")
 
     assert [metric.value for metric in app.metric] == ["4.00", "C2.0", "5.00e-01 pfu", "120"]
-    # Only the Kp chart has a valid range, configured in the project feed file
-    assert [toggle.label for toggle in app.toggle] == ["Live updates", "Hide invalid values"]
+    # The synthetic metadata gives no fill value or valid range, so no chart offers to hide invalid values
+    assert [toggle.label for toggle in app.toggle] == ["Live updates"]
     # Notes: the sunspot chart without data and the feed status without jobs
     assert (len(app.get("plotly_chart")), len(app.dataframe), len(app.info)) == (3, 1, 2)
     assert [caption.value.split(" -- ")[-1] for caption in app.caption if "Source:" in caption.value] == ["Source: Synthetic provider"] * 8

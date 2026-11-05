@@ -95,10 +95,9 @@ history = "P1Y"
 y_range = [0, 9.5]
 y_title = "Kp (0-9)"
 scale = "noaa_g"
-# Kp is defined from 0 to 9, which the metadata of neither source states
 series = [
-    { dataset = "Kp", field = "Kp", label = "Kp (GFZ)", style = "bars", valid_min = 0, valid_max = 9 },
-    { dataset = "swpc_kp_estimated", field = "estimated_kp", label = "Estimated Kp (SWPC)", color = "#0068C9", valid_min = 0, valid_max = 9 },
+    { dataset = "Kp", field = "Kp", label = "Kp (GFZ)", style = "bars" },
+    { dataset = "swpc_kp_estimated", field = "estimated_kp", label = "Estimated Kp (SWPC)", color = "#0068C9" },
 ]
 
 [[dashboard.panel]]

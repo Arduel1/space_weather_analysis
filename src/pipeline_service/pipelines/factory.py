@@ -77,7 +77,12 @@ class PipelineFactory:
                     client=self.gfz_client,
                 )
             case SourceType.LOCAL:
-                return LocalPipeline(timeseries=self.timeseries, coverage_repository=self.coverage_repository, data_dir=self.data_dir)
+                return LocalPipeline(
+                    timeseries=self.timeseries,
+                    coverage_repository=self.coverage_repository,
+                    metadata_repository=self.metadata_repository,
+                    data_dir=self.data_dir,
+                )
             case SourceType.SWPC:
                 return SwpcPipeline(
                     timeseries=self.timeseries,

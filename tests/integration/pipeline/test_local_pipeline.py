@@ -7,6 +7,7 @@ from pymongo.database import Database
 
 from pipeline_service.pipelines.local import LocalPipeline
 from space_weather_analysis.coverage.repository import MongoCoverageRepository
+from space_weather_analysis.metadata.repository import MongoMetadataRepository
 
 LocalPipelineFor = Callable[[pathlib.Path], LocalPipeline]
 WriteDatasetInput = Callable[[pathlib.Path, str], None]
@@ -111,3 +112,43 @@ def test_rerun_with_one_appended_row_inserts_only_that_row(db: Database, sunspot
 
     ids_after = {document["_id"] for document in db[SUNSPOT_COLLECTION].find()}
     assert (len(ids_after), ids_before <= ids_after) == (ROWS_PER_INPUT_FILE + 1, True)
+
+
+# Curated metadata of the daily sunspot numbers, written into the curated directory of a test
+SUNSPOT_CURATED_TOML = """
+[dataset.silso_sunspot_daily]
+title = "Invented sunspot title"
+
+[[dataset.silso_sunspot_daily.variable]]
+name = "sunspot_number"
+description = "Invented sunspot number description"
+
+[[dataset.silso_sunspot_daily.reference]]
+url = "https://provider.invalid/page"
+retrieved = 2026-10-01
+covers = "title, description of sunspot_number"
+"""
+
+
+@pytest.mark.integration
+def test_local_run_saves_metadata_record_with_curated_descriptions(
+    db: Database, sunspot_dir: pathlib.Path, local_pipeline: LocalPipelineFor, no_curated_metadata: pathlib.Path
+) -> None:
+    """A run saves a LOCAL record with one variable per stored column, its title and a variable description taken from the curated file."""
+    (no_curated_metadata / "silso.toml").write_text(SUNSPOT_CURATED_TOML, encoding="utf-8")
+
+    local_pipeline(sunspot_dir).run([SUNSPOT_COLLECTION])
+
+    record = MongoMetadataRepository(db).get(SUNSPOT_COLLECTION)
+    assert record is not None
+    assert (record.source.type, record.title, {variable.name: variable.description for variable in record.variables}) == (
+        "LOCAL",
+        "Invented sunspot title",
+        {
+            "sunspot_number": "Invented sunspot number description",
+            "std_dev": None,
+            "num_observations": None,
+            "is_provisional": None,
+            "decimal_year": None,
+        },
+    )

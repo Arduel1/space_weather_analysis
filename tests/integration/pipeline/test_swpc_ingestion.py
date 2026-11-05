@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -8,10 +9,9 @@ from pytest_httpserver import HTTPServer
 
 from pipeline_service.pipelines.report import IngestionReport
 from pipeline_service.pipelines.swpc import SwpcPipeline
-from space_weather_analysis.clients.swpc import SWPC_PRODUCTS, SwpcClient
+from space_weather_analysis.clients.swpc import SwpcClient
 from space_weather_analysis.coverage.repository import MongoCoverageRepository
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
-from space_weather_analysis.metadata.swpc import SWPC_LICENSE, SWPC_PROVIDER
 from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository
 
 StoredData = Callable[[str, datetime], dict[str, Any]]
@@ -213,9 +213,34 @@ def test_swpc_second_run_fetches_from_the_newest_value_once_the_stored_data_reac
     assert [request.path for request, _ in httpserver.log] == ["/json/goes/primary/xrays-7-day.json", expected_second_path]
 
 
+# Curated metadata of the X-ray dataset, written into the curated directory of a test
+XRAY_CURATED_TOML = """
+[dataset.swpc_goes_xray]
+title = "Invented X-ray title"
+provider = "Invented provider"
+
+[dataset.swpc_goes_xray.citation]
+license = "Invented license"
+
+[[dataset.swpc_goes_xray.variable]]
+name = "long_flux"
+units = "W/m^2"
+
+[[dataset.swpc_goes_xray.variable]]
+name = "short_flux"
+units = "W/m^2"
+
+[[dataset.swpc_goes_xray.reference]]
+url = "https://provider.invalid/page"
+retrieved = 2026-10-01
+covers = "title, provider, license, units"
+"""
+
+
 @pytest.mark.integration
-def test_swpc_run_saves_the_metadata_record_once(db: Database, httpserver: HTTPServer) -> None:
-    """The first run saves a record with provider, license, title and units from the product table, and a second run leaves it unchanged."""
+def test_swpc_run_saves_the_metadata_record_once(db: Database, httpserver: HTTPServer, no_curated_metadata: Path) -> None:
+    """The first run saves the delivered fields with curated title, provider, license and units; a second run leaves the record as it is."""
+    (no_curated_metadata / "swpc.toml").write_text(XRAY_CURATED_TOML, encoding="utf-8")
     httpserver.expect_request(XRAY_6_HOUR_PATH).respond_with_json(_xray_rows(FIRST_MINUTE, LONG_FLUXES, SHORT_FLUXES))
     metadata_repository = MongoMetadataRepository(db)
 
@@ -227,15 +252,15 @@ def test_swpc_run_saves_the_metadata_record_once(db: Database, httpserver: HTTPS
     assert first_record is not None
     assert second_record is not None
     assert (
-        first_record.source.provider,
-        first_record.citation.license,
+        first_record.source.model_dump(),
         first_record.title,
+        first_record.citation.license,
         {variable.name: variable.units for variable in first_record.variables},
         second_record.updated_at == first_record.updated_at,
     ) == (
-        SWPC_PROVIDER,
-        SWPC_LICENSE,
-        SWPC_PRODUCTS[XRAY_DATASET].title,
+        {"type": "SWPC", "provider": "Invented provider", "server_url": httpserver.url_for(XRAY_6_HOUR_PATH)},
+        "Invented X-ray title",
+        "Invented license",
         {
             "long_flux": "W/m^2",
             "short_flux": "W/m^2",

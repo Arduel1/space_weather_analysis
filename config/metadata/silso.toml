@@ -1,0 +1,157 @@
+# Curated metadata of the WDC-SILSO sunspot numbers (Royal Observatory of Belgium). Every value is taken from the
+# pages listed under `reference`; `covers` names the values each page gives. Check these pages when updating a value.
+# SILSO marks missing values with -1; the pipeline omits them, so the stored documents hold no fill value. The
+# monthly files date each value to the middle of the month; the pipeline stores it at the first day of the month.
+
+[dataset.silso_sunspot_daily]
+title = "Daily total sunspot number, version 2.0"
+description = "Daily total sunspot number of the international sunspot number series version 2.0. Values of the most recent months are provisional and revised over time."
+provider = "WDC-SILSO, Royal Observatory of Belgium, Brussels"
+resource_url = "https://www.sidc.be/SILSO/infosndtot"
+time = { cadence = "P1D" }
+
+[dataset.silso_sunspot_daily.citation]
+doi = "10.24414/qnza-ac80"
+text = "Clette, F. and Lefèvre, L. (2015). SILSO Sunspot Number V2.0. WDC-SILSO, Royal Observatory of Belgium. https://doi.org/10.24414/qnza-ac80"
+acknowledgement = "Source: WDC-SILSO, Royal Observatory of Belgium, Brussels, https://doi.org/10.24414/qnza-ac80"
+license = "CC BY-NC 4.0"
+
+[[dataset.silso_sunspot_daily.variable]]
+name = "sunspot_number"
+label = "Sunspot number"
+description = "Daily total sunspot number"
+valid_min = 0
+
+[[dataset.silso_sunspot_daily.variable]]
+name = "std_dev"
+label = "Standard deviation"
+description = "Standard deviation of the input sunspot numbers of the individual stations"
+valid_min = 0
+
+[[dataset.silso_sunspot_daily.variable]]
+name = "num_observations"
+label = "Observations"
+description = "Number of observations used to compute the daily value"
+valid_min = 0
+
+[[dataset.silso_sunspot_daily.variable]]
+name = "is_provisional"
+label = "Provisional"
+description = "Whether the value is still provisional (definitive values are final)"
+
+[[dataset.silso_sunspot_daily.variable]]
+name = "decimal_year"
+label = "Decimal year"
+description = "Date in fraction of year"
+
+[[dataset.silso_sunspot_daily.reference]]
+url = "https://www.sidc.be/SILSO/infosndtot"
+retrieved = 2026-10-25
+covers = "title, columns and their meaning, -1 as missing value, provisional marker, license CC BY-NC 4.0"
+
+[[dataset.silso_sunspot_daily.reference]]
+url = "https://doi.org/10.24414/qnza-ac80"
+retrieved = 2026-10-25
+covers = "DOI, citation text and attribution text"
+
+[dataset.silso_sunspot_monthly]
+title = "Monthly mean total sunspot number, version 2.0"
+description = "Monthly mean of the daily total sunspot number, stored with the first day of the month as time stamp. Values of the most recent months are provisional."
+provider = "WDC-SILSO, Royal Observatory of Belgium, Brussels"
+resource_url = "https://www.sidc.be/SILSO/infosnmtot"
+time = { cadence = "P1M", timestamp_location = "begin" }
+
+[dataset.silso_sunspot_monthly.citation]
+doi = "10.24414/qnza-ac80"
+text = "Clette, F. and Lefèvre, L. (2015). SILSO Sunspot Number V2.0. WDC-SILSO, Royal Observatory of Belgium. https://doi.org/10.24414/qnza-ac80"
+acknowledgement = "Source: WDC-SILSO, Royal Observatory of Belgium, Brussels, https://doi.org/10.24414/qnza-ac80"
+license = "CC BY-NC 4.0"
+
+[[dataset.silso_sunspot_monthly.variable]]
+name = "sunspot_number"
+label = "Sunspot number"
+description = "Monthly mean total sunspot number"
+valid_min = 0
+
+[[dataset.silso_sunspot_monthly.variable]]
+name = "std_dev"
+label = "Standard deviation"
+description = "Monthly mean standard deviation of the input sunspot numbers of the individual stations"
+valid_min = 0
+
+[[dataset.silso_sunspot_monthly.variable]]
+name = "num_observations"
+label = "Observations"
+description = "Number of observations used to compute the monthly value"
+valid_min = 0
+
+[[dataset.silso_sunspot_monthly.variable]]
+name = "is_provisional"
+label = "Provisional"
+description = "Whether the value is still provisional (definitive values are final)"
+
+[[dataset.silso_sunspot_monthly.variable]]
+name = "decimal_year"
+label = "Decimal year"
+description = "Date in fraction of year, the middle of the month"
+
+[[dataset.silso_sunspot_monthly.reference]]
+url = "https://www.sidc.be/SILSO/infosnmtot"
+retrieved = 2026-11-03
+covers = "title, columns and their meaning, -1 for no number available, provisional marker, license CC BY-NC 4.0"
+
+[[dataset.silso_sunspot_monthly.reference]]
+url = "https://doi.org/10.24414/qnza-ac80"
+retrieved = 2026-10-25
+covers = "DOI, citation text and attribution text"
+
+[dataset.silso_sunspot_smoothed]
+title = "13-month smoothed monthly total sunspot number, version 2.0"
+description = "Monthly total sunspot number smoothed by a 13-month tapered-boxcar running mean, which shows the solar cycle, stored with the first day of the month as time stamp. The first and last six months of the series have no smoothed value."
+provider = "WDC-SILSO, Royal Observatory of Belgium, Brussels"
+resource_url = "https://www.sidc.be/SILSO/infosnmstot"
+time = { cadence = "P1M", timestamp_location = "begin" }
+
+[dataset.silso_sunspot_smoothed.citation]
+doi = "10.24414/qnza-ac80"
+text = "Clette, F. and Lefèvre, L. (2015). SILSO Sunspot Number V2.0. WDC-SILSO, Royal Observatory of Belgium. https://doi.org/10.24414/qnza-ac80"
+acknowledgement = "Source: WDC-SILSO, Royal Observatory of Belgium, Brussels, https://doi.org/10.24414/qnza-ac80"
+license = "CC BY-NC 4.0"
+
+[[dataset.silso_sunspot_smoothed.variable]]
+name = "sunspot_number"
+label = "Smoothed sunspot number"
+description = "13-month smoothed monthly total sunspot number"
+valid_min = 0
+
+[[dataset.silso_sunspot_smoothed.variable]]
+name = "std_dev"
+label = "Standard deviation"
+description = "Smoothed standard deviation of the input sunspot numbers"
+valid_min = 0
+
+[[dataset.silso_sunspot_smoothed.variable]]
+name = "num_observations"
+label = "Observations"
+description = "Number of observations used to compute the smoothed value"
+valid_min = 0
+
+[[dataset.silso_sunspot_smoothed.variable]]
+name = "is_provisional"
+label = "Provisional"
+description = "Whether the value is still provisional (definitive values are final)"
+
+[[dataset.silso_sunspot_smoothed.variable]]
+name = "decimal_year"
+label = "Decimal year"
+description = "Date in fraction of year, the middle of the month"
+
+[[dataset.silso_sunspot_smoothed.reference]]
+url = "https://www.sidc.be/SILSO/infosnmstot"
+retrieved = 2026-11-05
+covers = "title, 13-month tapered-boxcar smoothing, no values for the first and last six months, columns, license CC BY-NC 4.0"
+
+[[dataset.silso_sunspot_smoothed.reference]]
+url = "https://doi.org/10.24414/qnza-ac80"
+retrieved = 2026-10-25
+covers = "DOI, citation text and attribution text"

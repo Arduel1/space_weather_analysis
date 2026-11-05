@@ -11,10 +11,13 @@ import pandas as pd
 from pipeline_service.parsing.cme_catalog import CME_PROVIDER_ID, parse_cme_catalog
 from pipeline_service.parsing.silso import SILSO_PROVIDER_ID, parse_silso_daily, parse_silso_monthly
 from pipeline_service.pipelines.base import ProgressCallback
-from pipeline_service.pipelines.chunks import ingest_or_record_gap, refresh_coverage
+from pipeline_service.pipelines.chunks import METADATA_SAVE_ERRORS, ingest_or_record_gap, refresh_coverage
 from pipeline_service.pipelines.report import IngestionReport
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.coverage.repository import CoverageRepository
+from space_weather_analysis.metadata.minimal import build_minimal_metadata
+from space_weather_analysis.metadata.overlays.layering import save_with_overlays
+from space_weather_analysis.metadata.repository import MetadataRepository
 from space_weather_analysis.timeseries.documents import frame_to_documents, source_identifier
 from space_weather_analysis.timeseries.models import Granularity
 from space_weather_analysis.timeseries.repository import TimeSeriesRepository
@@ -62,16 +65,25 @@ class LocalPipeline:
     The files hold the whole dataset, so the requested time range is not used and every run replaces the stored documents.
     """
 
-    def __init__(self, *, timeseries: TimeSeriesRepository, coverage_repository: CoverageRepository, data_dir: pathlib.Path) -> None:
+    def __init__(
+        self,
+        *,
+        timeseries: TimeSeriesRepository,
+        coverage_repository: CoverageRepository,
+        metadata_repository: MetadataRepository,
+        data_dir: pathlib.Path,
+    ) -> None:
         """Initializes the local pipeline.
 
         Args:
             timeseries: The repository storing the data documents.
             coverage_repository: The repository storing which time ranges are stored.
+            metadata_repository: The repository storing the metadata records.
             data_dir: The directory holding the dataset files.
         """
         self.timeseries = timeseries
         self.coverage_repository = coverage_repository
+        self.metadata_repository = metadata_repository
         self.data_dir = data_dir
 
     def run(
@@ -137,4 +149,20 @@ class LocalPipeline:
         logger.debug(
             "Synchronized %s with its file of %d documents: %d inserted, %d deleted", collection, len(documents), changes.inserted, changes.deleted
         )
+        self._save_metadata(collection, [str(column) for column in frame.columns])
         return len(documents)
+
+    def _save_metadata(self, collection: str, fields: list[str]) -> None:
+        """Saves the metadata record of a local dataset: its fields, described by the curated metadata laid over it.
+
+        A failing save is logged, as the stored data documents stay valid without metadata.
+
+        Args:
+            collection: The collection holding the data documents, named like the dataset.
+            fields: The fields of the stored documents.
+        """
+        try:
+            record = build_minimal_metadata(collection, collection, SourceType.LOCAL, fields, None, datetime.now(UTC))
+            save_with_overlays(self.metadata_repository, [record])
+        except METADATA_SAVE_ERRORS:
+            logger.exception("Failed to save metadata of %s", collection)

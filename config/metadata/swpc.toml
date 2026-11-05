@@ -1,0 +1,187 @@
+# Curated metadata of the NOAA Space Weather Prediction Center (SWPC) products. SWPC publishes no machine-readable
+# metadata for its JSON files. Every value is taken from the pages listed under `reference`; `covers` names the values
+# each page gives. Check these pages when updating a value.
+# License: the current spaceweather.gov pages state no terms of use. NOAA states for its open data that it may be used
+# as desired and asks for attribution (AWS Open Data registry); an archived SWPC page calls the data public domain.
+
+[dataset.swpc_goes_xray]
+title = "GOES primary X-ray flux (1-minute)"
+description = "Solar X-ray flux in two bands from the X-ray sensor of the SWPC primary GOES satellite, 1-minute averages. The 0.1-0.8 nm band defines the flare class and the NOAA radio blackout scale."
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://www.spaceweather.gov/products/goes-x-ray-flux"
+time = { cadence = "PT1M" }
+
+[dataset.swpc_goes_xray.citation]
+license = "Public domain (U.S. government work), attribution requested"
+rules_of_use = "https://registry.opendata.aws/noaa-space-weather"
+
+[[dataset.swpc_goes_xray.variable]]
+name = "long_flux"
+label = "0.1-0.8 nm"
+description = "X-ray flux 0.1-0.8 nm (1-8 Angstrom), the band that defines the flare class"
+units = "W/m^2"
+
+[[dataset.swpc_goes_xray.variable]]
+name = "short_flux"
+label = "0.05-0.4 nm"
+description = "X-ray flux 0.05-0.4 nm (0.5-4 Angstrom)"
+units = "W/m^2"
+
+[[dataset.swpc_goes_xray.variable]]
+name = "long_electron_contamination"
+label = "0.1-0.8 nm electron contamination"
+description = "Flag `electron_contaminaton` of the SWPC file for the 0.1-0.8 nm value; its meaning is not documented on the product page"
+
+[[dataset.swpc_goes_xray.variable]]
+name = "short_electron_contamination"
+label = "0.05-0.4 nm electron contamination"
+description = "Flag `electron_contaminaton` of the SWPC file for the 0.05-0.4 nm value; its meaning is not documented on the product page"
+
+[[dataset.swpc_goes_xray.variable]]
+name = "satellite"
+label = "Satellite"
+description = "Number of the GOES satellite that measured the value"
+
+[[dataset.swpc_goes_xray.reference]]
+url = "https://www.spaceweather.gov/products/goes-x-ray-flux"
+retrieved = 2026-11-05
+covers = "title, the two bands, 0.1-0.8 nm for the flare class, 1-minute averages, primary satellite"
+
+[[dataset.swpc_goes_xray.reference]]
+url = "https://services.swpc.noaa.gov/json/goes/primary/"
+retrieved = 2026-11-03
+covers = "fields of the JSON file: flux, energy band, satellite, electron_contaminaton"
+
+[[dataset.swpc_goes_xray.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-05
+covers = "NOAA open data terms: free use, attribution requested"
+
+[[dataset.swpc_goes_xray.reference]]
+url = "https://webarchive.library.unt.edu/web/20121014023244/http://www.swpc.noaa.gov/Data/about_data.html"
+retrieved = 2026-11-05
+covers = "archived SWPC statement that the data are public domain"
+
+[dataset.swpc_goes_protons]
+title = "GOES primary integral proton flux (5-minute)"
+description = "Integral proton flux above eight energy thresholds from the SWPC primary GOES satellite, 5-minute averages. The >=10 MeV flux defines the NOAA solar radiation storm scale."
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://www.spaceweather.gov/products/goes-proton-flux"
+time = { cadence = "PT5M" }
+
+[dataset.swpc_goes_protons.citation]
+license = "Public domain (U.S. government work), attribution requested"
+rules_of_use = "https://registry.opendata.aws/noaa-space-weather"
+
+[[dataset.swpc_goes_protons.variable]]
+name = "p_ge1mev_flux"
+label = ">=1 MeV"
+description = "Integral proton flux >=1 MeV"
+units = "pfu"
+
+[[dataset.swpc_goes_protons.variable]]
+name = "p_ge5mev_flux"
+label = ">=5 MeV"
+description = "Integral proton flux >=5 MeV"
+units = "pfu"
+
+[[dataset.swpc_goes_protons.variable]]
+name = "p_ge10mev_flux"
+label = ">=10 MeV"
+description = "Integral proton flux >=10 MeV, the flux of the NOAA solar radiation storm scale; 1 pfu = 1 proton / (cm^2 s sr)"
+units = "pfu"
+
+[[dataset.swpc_goes_protons.variable]]
+name = "p_ge30mev_flux"
+label = ">=30 MeV"
+description = "Integral proton flux >=30 MeV"
+units = "pfu"
+
+[[dataset.swpc_goes_protons.variable]]
+name = "p_ge50mev_flux"
+label = ">=50 MeV"
+description = "Integral proton flux >=50 MeV"
+units = "pfu"
+
+[[dataset.swpc_goes_protons.variable]]
+name = "p_ge60mev_flux"
+label = ">=60 MeV"
+description = "Integral proton flux >=60 MeV"
+units = "pfu"
+
+[[dataset.swpc_goes_protons.variable]]
+name = "p_ge100mev_flux"
+label = ">=100 MeV"
+description = "Integral proton flux >=100 MeV"
+units = "pfu"
+
+[[dataset.swpc_goes_protons.variable]]
+name = "p_ge500mev_flux"
+label = ">=500 MeV"
+description = "Integral proton flux >=500 MeV"
+units = "pfu"
+
+[[dataset.swpc_goes_protons.variable]]
+name = "satellite"
+label = "Satellite"
+description = "Number of the GOES satellite that measured the value"
+
+[[dataset.swpc_goes_protons.reference]]
+url = "https://www.spaceweather.gov/products/goes-proton-flux"
+retrieved = 2026-11-05
+covers = "title, integral channels >=1 to >=500 MeV, pfu as protons / (cm^2 s sr), 5-minute averages, >=10 MeV for the S scale"
+
+[[dataset.swpc_goes_protons.reference]]
+url = "https://services.swpc.noaa.gov/json/goes/primary/"
+retrieved = 2026-11-03
+covers = "fields of the JSON file: flux, energy threshold, satellite"
+
+[[dataset.swpc_goes_protons.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-05
+covers = "NOAA open data terms: free use, attribution requested"
+
+[[dataset.swpc_goes_protons.reference]]
+url = "https://webarchive.library.unt.edu/web/20121014023244/http://www.swpc.noaa.gov/Data/about_data.html"
+retrieved = 2026-11-05
+covers = "archived SWPC statement that the data are public domain"
+
+[dataset.swpc_kp_estimated]
+title = "Estimated planetary K index (1-minute)"
+description = "Planetary K index estimated by SWPC every minute from ground magnetometers at Sitka, Meanook, Ottawa, Fredericksburg, Hartland, Wingst, Niemegk and Canberra; a nowcast, not the official Kp of GFZ."
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://www.spaceweather.gov/products/planetary-k-index"
+time = { cadence = "PT1M" }
+
+[dataset.swpc_kp_estimated.citation]
+license = "Public domain (U.S. government work), attribution requested"
+rules_of_use = "https://registry.opendata.aws/noaa-space-weather"
+
+[[dataset.swpc_kp_estimated.variable]]
+name = "estimated_kp"
+label = "Estimated Kp"
+description = "Estimated planetary K index, 0 to 9"
+valid_min = 0
+valid_max = 9
+
+[[dataset.swpc_kp_estimated.variable]]
+name = "kp_index"
+label = "Kp index (integer)"
+description = "Integer part of the estimated planetary K index"
+valid_min = 0
+valid_max = 9
+
+[[dataset.swpc_kp_estimated.reference]]
+url = "https://www.spaceweather.gov/products/planetary-k-index"
+retrieved = 2026-11-05
+covers = "title, stations of the estimate, official Kp at GFZ, Kp from 0 to 9"
+
+[[dataset.swpc_kp_estimated.reference]]
+url = "https://services.swpc.noaa.gov/json/planetary_k_index_1m.json"
+retrieved = 2026-11-03
+covers = "fields of the JSON file: estimated_kp, kp_index, time stamps without zone"
+
+[[dataset.swpc_kp_estimated.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-05
+covers = "NOAA open data terms: free use, attribution requested"

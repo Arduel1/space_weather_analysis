@@ -7,9 +7,9 @@ from pipeline_service.pipelines.report import IngestionReport
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.clients.swpc import SWPC_PRODUCTS, SwpcClient
 from space_weather_analysis.coverage.repository import CoverageRepository
+from space_weather_analysis.metadata.minimal import build_minimal_metadata
 from space_weather_analysis.metadata.overlays.layering import save_with_overlays
 from space_weather_analysis.metadata.repository import MetadataRepository
-from space_weather_analysis.metadata.swpc import build_swpc_metadata
 from space_weather_analysis.timeseries.documents import frame_to_documents, source_identifier
 from space_weather_analysis.timeseries.models import Granularity
 from space_weather_analysis.timeseries.repository import TimeSeriesRepository
@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 SWPC_GRANULARITY = Granularity.MINUTES
 # Range of a run without start time: the length of the shortest SWPC file
 DEFAULT_LOOKBACK = timedelta(hours=6)
+# Age after which the metadata record of a dataset is saved again
+METADATA_REFRESH = timedelta(hours=1)
 # Time before the newest stored document from which a run fetches again, so that late corrections of SWPC are taken up
 REFETCH_OVERLAP = timedelta(hours=1)
 # Time the oldest stored document may lie after the start for the stored data to count as reaching back to it; the
@@ -148,9 +150,11 @@ class SwpcPipeline:
         return True
 
     def _save_metadata(self, dataset_id: str, collection: str, fields: list[str], server_url: str) -> None:
-        """Saves the metadata record of a dataset unless the stored one already describes the same fields.
+        """Saves the metadata record of a dataset unless the stored one describes the same fields and is younger than METADATA_REFRESH.
 
-        Runs come every minute, so the record is written only when it is missing or the delivered fields changed.
+        SWPC publishes no metadata, so the record holds the source and the fields, and the curated metadata laid over it
+        on saving adds the descriptions. Runs come every minute, so the record is written only when it is missing, the
+        delivered fields changed or METADATA_REFRESH has passed, which takes up changed curated metadata.
         A failing save is logged, as the stored data documents stay valid without metadata.
 
         Args:
@@ -159,11 +163,13 @@ class SwpcPipeline:
             fields: The fields of the delivered documents.
             server_url: The URL of the fetched file.
         """
+        now = datetime.now(UTC)
         try:
             stored = self.metadata_repository.get(dataset_id)
-            if stored is not None and {variable.name for variable in stored.variables} == set(fields):
+            if stored is not None and {variable.name for variable in stored.variables} == set(fields) and now - stored.updated_at < METADATA_REFRESH:
                 return
-            save_with_overlays(self.metadata_repository, [build_swpc_metadata(dataset_id, collection, fields, server_url, datetime.now(UTC))])
+            record = build_minimal_metadata(dataset_id, collection, SourceType.SWPC, fields, server_url, now)
+            save_with_overlays(self.metadata_repository, [record])
         except METADATA_SAVE_ERRORS:
             logger.exception("Failed to save metadata of %s", dataset_id)
             return

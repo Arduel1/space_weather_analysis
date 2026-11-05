@@ -1,0 +1,122 @@
+# Curated metadata of the SOHO/LASCO CME catalog of the CDAW Data Center. Every value is taken from the pages listed
+# under `reference`; `covers` names the values each page gives. Check these pages when updating a value.
+# The catalog marks missing values with dashes; the pipeline omits them, so the stored documents hold no fill value.
+
+[dataset.cme_catalog]
+title = "SOHO/LASCO CME Catalog"
+description = "Coronal mass ejections (CMEs) observed by the LASCO coronagraphs on SOHO, one record per CME at the time of its first appearance in the C2 field of view."
+provider = "CDAW Data Center, NASA and The Catholic University of America, in cooperation with the Naval Research Laboratory"
+resource_url = "https://cdaw.gsfc.nasa.gov/CME_list/"
+
+[dataset.cme_catalog.citation]
+text = "Yashiro, S., et al. (2004). A catalog of white light coronal mass ejections observed by the SOHO spacecraft. Journal of Geophysical Research, 109, A07105. https://doi.org/10.1029/2003JA010282; Gopalswamy, N., et al. (2009). The SOHO/LASCO CME Catalog. Earth, Moon, and Planets, 104, 295-313. https://doi.org/10.1007/s11038-008-9282-7"
+acknowledgement = "This CME catalog is generated and maintained at the CDAW Data Center by NASA and The Catholic University of America in cooperation with the Naval Research Laboratory. SOHO is a project of international cooperation between ESA and NASA."
+license = "No formal license; the acknowledgement is requested"
+
+[[dataset.cme_catalog.variable]]
+name = "central_pa"
+label = "Central position angle"
+description = "Central position angle of the CME; a halo CME has none"
+units = "deg"
+
+[[dataset.cme_catalog.variable]]
+name = "width"
+label = "Angular width"
+description = "Angular width of the CME in the sky plane; 360 for a halo CME"
+units = "deg"
+valid_min = 0
+valid_max = 360
+
+[[dataset.cme_catalog.variable]]
+name = "linear_speed"
+label = "Linear speed"
+description = "Speed from a linear fit to the height-time measurements"
+units = "km/s"
+valid_min = 0
+
+[[dataset.cme_catalog.variable]]
+name = "speed_initial"
+label = "Initial speed"
+description = "Initial speed of the second-order fit, a column of the text catalog that the catalog pages do not describe"
+units = "km/s"
+
+[[dataset.cme_catalog.variable]]
+name = "speed_final"
+label = "Final speed"
+description = "Speed from a second-order fit at the final height measurement"
+units = "km/s"
+
+[[dataset.cme_catalog.variable]]
+name = "speed_at_20r"
+label = "Speed at 20 solar radii"
+description = "Speed from a second-order fit at 20 solar radii"
+units = "km/s"
+
+[[dataset.cme_catalog.variable]]
+name = "accel"
+label = "Acceleration"
+description = "Acceleration of the CME"
+units = "m/s^2"
+
+[[dataset.cme_catalog.variable]]
+name = "mass"
+label = "Mass"
+description = "Mass of the CME"
+units = "g"
+
+[[dataset.cme_catalog.variable]]
+name = "kinetic_energy"
+label = "Kinetic energy"
+description = "Kinetic energy of the CME"
+units = "erg"
+
+[[dataset.cme_catalog.variable]]
+name = "mpa"
+label = "Measurement position angle"
+description = "Position angle at which the height-time measurements were made; for a halo CME the angle of its fastest leading-edge segment"
+units = "deg"
+
+[[dataset.cme_catalog.variable]]
+name = "is_halo"
+label = "Halo"
+description = "Whether the CME is a halo CME, which surrounds the occulting disk"
+
+[[dataset.cme_catalog.variable]]
+name = "accel_unreliable"
+label = "Acceleration unreliable"
+description = "Whether the catalog marks the acceleration as uncertain, due to a poor height measurement or few height-time measurements"
+
+[[dataset.cme_catalog.variable]]
+name = "mass_uncertain"
+label = "Mass uncertain"
+description = "Whether the catalog marks the mass as uncertain due to a poor mass estimate"
+
+[[dataset.cme_catalog.variable]]
+name = "kinetic_energy_uncertain"
+label = "Kinetic energy uncertain"
+description = "Whether the catalog marks the kinetic energy as uncertain due to a poor mass estimate"
+
+[[dataset.cme_catalog.variable]]
+name = "remarks"
+label = "Remarks"
+description = "Free-text remarks of the catalog on the CME"
+
+[[dataset.cme_catalog.reference]]
+url = "https://cdaw.gsfc.nasa.gov/CME_list/catalog_description.htm"
+retrieved = 2026-10-24
+covers = "meaning of the columns, first C2 appearance as time, halo CMEs with width 360 and Halo in the position angle column, linear and second-order speeds, measurement position angle"
+
+[[dataset.cme_catalog.reference]]
+url = "https://cdaw.gsfc.nasa.gov/CME_list/"
+retrieved = 2026-10-15
+covers = "title, provider, acknowledgement text, reference papers, no formal license"
+
+[[dataset.cme_catalog.reference]]
+url = "https://cdaw.gsfc.nasa.gov/CME_list/UNIVERSAL_ver2/2024_01/univ2024_01.html"
+retrieved = 2026-11-05
+covers = "units of the columns from the table headers, footnotes *1 (uncertain acceleration) and *2 (uncertain mass and kinetic energy)"
+
+[[dataset.cme_catalog.reference]]
+url = "https://cdaw.gsfc.nasa.gov/CME_list/UNIVERSAL_ver2/text_ver/univ_all.txt"
+retrieved = 2026-10-25
+covers = "columns of the text catalog, including the second-order initial speed"

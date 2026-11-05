@@ -8,6 +8,8 @@ services:
         condition: service_healthy
     env_file:
       - .env
+    volumes:
+      - ./config:/app/config:ro # Curated metadata, laid over every metadata record the worker saves
     command: ["python", "-m", "catalog_collector.metadata_worker"]
     networks:
       - space-weather-net
@@ -22,7 +24,7 @@ services:
       - .env
     volumes:
       - ./data:/app/data # Persist downloads
-      - ./config:/app/config:ro # Feed file, read on every start
+      - ./config:/app/config:ro # Feed file and curated metadata, read on every start
     command: ["python", "-m", "pipeline_service.main"]
     networks:
       - space-weather-net
