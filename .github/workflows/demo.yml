@@ -32,11 +32,15 @@ env:
 
 jobs:
   build:
+    # Pages of a private repository need a paid plan, so the demo is built only while the repository is public
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
       mongo:
-        image: mongo:8
+        # MongoDB 8 does not start on the Linux kernels of the runner images, 6.19 and newer
+        # (https://jira.mongodb.org/browse/SERVER-125742); 7.0 is the oldest version with deletes in time series collections
+        image: mongo:7.0
         env:
           MONGO_INITDB_ROOT_USERNAME: demo
           MONGO_INITDB_ROOT_PASSWORD: demo

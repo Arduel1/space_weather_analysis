@@ -6,9 +6,9 @@
   <title>Space Weather Dashboard</title>
   <meta name="description" content="Static demo of the Space Weather Analysis dashboard, rebuilt from the providers' data every hour.">
   <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@4.1.2/plotly.min.js"
-          integrity="sha384-hHv6D3tTUUBpp4tVv6t2Dc3oGuRhphmWOTKUR8jWyN0Pnon1g3iebKCNDNmKmxo8"
-          crossorigin="anonymous" defer></script>
+  <!-- Plotly.js 4.1.2 (MIT license, npm package plotly.js-dist-min), served from this site so that no request goes to a third party -->
+  <script src="vendor/plotly.min.js"
+          integrity="sha384-hHv6D3tTUUBpp4tVv6t2Dc3oGuRhphmWOTKUR8jWyN0Pnon1g3iebKCNDNmKmxo8" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -25,6 +25,12 @@
     <p>
       The values are shown as the providers publish them; missing values are left out and long series are thinned for
       drawing. Under each panel the freshness of its newest value is rated against your clock.
+    </p>
+    <p>
+      The page is hosted on GitHub Pages, so GitHub receives the connection data of every visit (see the
+      <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub
+      General Privacy Statement</a>). The page itself sets no cookies, stores nothing in the browser and loads nothing
+      from other services.
     </p>
     <h2>Data sources</h2>
     <ul id="credits"></ul>
