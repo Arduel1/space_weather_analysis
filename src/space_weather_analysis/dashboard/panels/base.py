@@ -23,6 +23,7 @@ class PanelConfig(BaseModel):
 
     Attributes:
         type: The panel type, a key of the panel type registry.
+        page: The title of the page showing the panel; empty where the dashboard configures no pages.
         title: The heading of the panel.
         row: The dashboard row of the panel, from 1 at the top; panels of a row share it in the order of the file.
         width: The width of the panel relative to the other panels of its row.
@@ -31,6 +32,7 @@ class PanelConfig(BaseModel):
     model_config = CLOSED
 
     type: str
+    page: str = ""
     title: str = ""
     row: int = Field(ge=1)
     width: float = Field(default=1.0, gt=0)

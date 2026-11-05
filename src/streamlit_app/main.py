@@ -14,8 +14,7 @@ if data.get_repositories() is None:
 # Page paths are relative to this script
 navigation = st.navigation(
     [
-        st.Page("pages/dashboard.py", title="Dashboard", default=True),
-        st.Page("pages/explorer.py", title="Dataset Explorer"),
+        st.Page("pages/explorer.py", title="Dataset Explorer", default=True),
         st.Page("pages/download.py", title="Data Downloader"),
     ]
 )

@@ -64,10 +64,25 @@ def test_panels_are_validated_by_their_type_and_grouped_into_rows(tmp_path: path
 
     config = load_dashboard_config(_write(tmp_path, content))
 
-    assert [[(type(panel), panel.title) for panel in row] for row in config.rows()] == [
-        [(TimeseriesPanel, "top")],
-        [(ValuePanel, "first"), (ValuePanel, "second")],
+    assert [(title, [[(type(panel), panel.title) for panel in row] for row in rows]) for title, rows in config.pages()] == [
+        ("Dashboard", [[(TimeseriesPanel, "top")], [(ValuePanel, "first"), (ValuePanel, "second")]])
     ]
+
+
+def test_panels_are_grouped_by_page_in_page_order(tmp_path: pathlib.Path) -> None:
+    """Configured pages keep the order of the file and each holds the rows of the panels naming it."""
+    content = (
+        FEED
+        + '[[dashboard.page]]\ntitle = "Sun"\n\n[[dashboard.page]]\ntitle = "Earth"\n\n'
+        + VALUE_PANEL
+        + 'page = "Earth"\ntitle = "kp"\n'
+        + TIMESERIES_PANEL
+        + 'page = "Sun"\ntitle = "flux"\n'
+    )
+
+    config = load_dashboard_config(_write(tmp_path, content))
+
+    assert [(title, [[panel.title for panel in row] for row in rows]) for title, rows in config.pages()] == [("Sun", [["flux"]]), ("Earth", [["kp"]])]
 
 
 @pytest.mark.parametrize(
@@ -81,6 +96,8 @@ def test_panels_are_validated_by_their_type_and_grouped_into_rows(tmp_path: path
         pytest.param(TIMESERIES_PANEL.replace("P7D", "PT1H"), id="history-shorter-than-view"),
         pytest.param(TIMESERIES_PANEL + 'y_axis = "log"\ny_range = [0, 10]\n', id="log-axis-with-non-positive-range"),
         pytest.param(VALUE_PANEL + 'format = "{value}"\n', id="no-format-string"),
+        pytest.param('[[dashboard.page]]\ntitle = "Sun"\n\n' + VALUE_PANEL + 'page = "Earth"\n', id="panel-on-unknown-page"),
+        pytest.param('[[dashboard.page]]\ntitle = "Sun"\n\n[[dashboard.page]]\ntitle = "Sun"\n', id="repeated-page-title"),
     ],
 )
 def test_invalid_dashboard_table_is_rejected(tmp_path: pathlib.Path, dashboard: str) -> None:

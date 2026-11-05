@@ -10,17 +10,46 @@ from space_weather_analysis.dashboard.panel_types import PANEL_TYPES, PanelType
 from space_weather_analysis.dashboard.panels.base import PanelConfig, collection_of
 from space_weather_analysis.util.time_utils import IsoDuration
 
+# Title of the only page of a dashboard that configures no pages
+DEFAULT_PAGE_TITLE = "Dashboard"
+
+
+class PageConfig(BaseModel):
+    """One page of the dashboard, shown as a tab.
+
+    Attributes:
+        title: The tab title, which the panels of the page name as their `page`.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    title: str = Field(min_length=1)
+
 
 class DashboardConfig(BaseModel):
     """What the dashboard shows, the `dashboard` table of the feed file.
 
     Attributes:
+        page: The pages in the order of the file; without pages every panel is on one page.
         panel: The panels in the order of the file, each validated by the model of its type.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    page: list[PageConfig] = Field(default_factory=list)
     panel: list[PanelConfig] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _panels_on_known_pages(self) -> Self:
+        """Rejects repeated page titles and, where pages are configured, a panel naming none of them."""
+        titles = [page.title for page in self.page]
+        if len(set(titles)) != len(titles):
+            raise ValueError(f"Page titles must be unique: {titles}")
+        if titles:
+            unknown = sorted({panel.page for panel in self.panel} - set(titles))
+            if unknown:
+                raise ValueError(f"Panels name pages that are not configured: {unknown}; configured are {titles}.")
+        return self
 
     @field_validator("panel", mode="before")
     @classmethod
@@ -30,12 +59,15 @@ class DashboardConfig(BaseModel):
             return panels
         return [panel_from_table(table, PANEL_TYPES) for table in panels]
 
-    def rows(self) -> list[list[PanelConfig]]:
-        """Groups the panels into rows, sorted by row number, each in the order of the file."""
-        by_row: dict[int, list[PanelConfig]] = {}
-        for panel in self.panel:
-            by_row.setdefault(panel.row, []).append(panel)
-        return [by_row[row] for row in sorted(by_row)]
+    def pages(self) -> list[tuple[str, list[list[PanelConfig]]]]:
+        """Groups the panels by page in the order of the pages, and within a page into rows sorted by row number.
+
+        Returns:
+            The title and rows of each page; one page titled DEFAULT_PAGE_TITLE if no pages are configured.
+        """
+        if not self.page:
+            return [(DEFAULT_PAGE_TITLE, _rows(self.panel))]
+        return [(page.title, _rows([panel for panel in self.panel if panel.page == page.title])) for page in self.page]
 
     def datasets(self) -> set[str]:
         """Lists every dataset the panels read."""
@@ -44,6 +76,14 @@ class DashboardConfig(BaseModel):
     def collections(self) -> set[str]:
         """Lists the collections of every dataset the panels read."""
         return {collection_of(dataset) for dataset in self.datasets()}
+
+
+def _rows(panels: list[PanelConfig]) -> list[list[PanelConfig]]:
+    """Groups panels into rows, sorted by row number, each in the given order."""
+    by_row: dict[int, list[PanelConfig]] = {}
+    for panel in panels:
+        by_row.setdefault(panel.row, []).append(panel)
+    return [by_row[row] for row in sorted(by_row)]
 
 
 def panel_from_table(table: Any, panel_types: Mapping[str, PanelType[Any]]) -> Any:

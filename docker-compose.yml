@@ -50,8 +50,6 @@ services:
       - .env
     ports:
       - "${FRONTEND_HOST_PORT:-8501}:8501"
-    volumes:
-      - ./config:/app/config:ro # Feed file with the dashboard table, read on every page load
     command:
       [
         "streamlit",
@@ -59,6 +57,23 @@ services:
         "src/streamlit_app/main.py",
         "--server.address=0.0.0.0",
       ]
+    networks:
+      - space-weather-net
+
+  # Web dashboard, the same site as the public demo: writes the dashboard documents every minute and serves them
+  dashboard:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    env_file:
+      - .env
+    ports:
+      - "${DASHBOARD_HOST_PORT:-8502}:8000"
+    volumes:
+      - ./config:/app/config:ro # Feed file with the dashboard table, read on every write
+    command: ["python", "-m", "site_export.main", "--web", "web", "--output", "/tmp/site", "--serve", "8000"]
     networks:
       - space-weather-net
 

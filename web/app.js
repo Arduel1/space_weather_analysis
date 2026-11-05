@@ -15,6 +15,8 @@ const SEVERITY = { static: 0, live: 1, delayed: 2, stale: 3 };
 // Freshness labels on the page with the datasets they rate, updated by a timer
 let freshnessLabels = [];
 let layout = null;
+// The loaded panel documents of every page, by panel ID
+let payloadsById = {};
 
 /**
  * Reads one dashboard document; the only place that knows where the documents come from.
@@ -307,20 +309,43 @@ function renderCredits(credits) {
   }
 }
 
-/** Reads the layout and every panel document and draws the dashboard row by row. */
-async function renderDashboard() {
-  layout = await loadJson("dashboard.json");
-  const payloads = await Promise.all(layout.rows.flat().map((entry) => loadJson(`panels/${entry.id}.json`).catch((error) => ({ error }))));
-  const byId = Object.fromEntries(layout.rows.flat().map((entry, index) => [entry.id, payloads[index]]));
+/** Turns a page title into the URL fragment that selects its tab. */
+function pageSlug(title) {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+/** Returns the page named by the URL fragment, else the first page. */
+function selectedPage() {
+  const slug = window.location.hash.slice(1);
+  return layout.pages.find((page) => pageSlug(page.title) === slug) ?? layout.pages[0];
+}
+
+/** Draws the tabs of the pages, marking the selected one; a dashboard of one page gets no tabs. */
+function renderTabs(selected) {
+  const tabs = document.getElementById("pages");
+  tabs.replaceChildren();
+  tabs.hidden = layout.pages.length < 2;
+  for (const page of layout.pages) {
+    const tab = element("a", "tab", page.title);
+    tab.href = `#${pageSlug(page.title)}`;
+    if (page === selected) tab.setAttribute("aria-current", "page");
+    tabs.append(tab);
+  }
+}
+
+/** Draws the selected page row by row from the loaded panel documents. */
+function renderPage() {
+  const selected = selectedPage();
+  renderTabs(selected);
   freshnessLabels = [];
   const dashboard = document.getElementById("dashboard");
   dashboard.replaceChildren();
-  for (const row of layout.rows) {
+  for (const row of selected.rows) {
     const line = element("div", "row");
     for (const entry of row) {
       const panel = element("section", `panel panel-${entry.type}`);
       panel.style.flexGrow = entry.width;
-      const payload = byId[entry.id];
+      const payload = payloadsById[entry.id];
       const render = RENDERERS[entry.type];
       if (payload.error !== undefined || render === undefined) {
         panel.append(element("p", "note", payload.error !== undefined ? `Panel not available: ${payload.error.message}` : `Unknown panel type ${entry.type}`));
@@ -331,8 +356,17 @@ async function renderDashboard() {
     }
     dashboard.append(line);
   }
+}
+
+/** Reads the layout and the documents of every panel of every page and draws the selected page. */
+async function renderDashboard() {
+  layout = await loadJson("dashboard.json");
+  const entries = layout.pages.flatMap((page) => page.rows.flat());
+  const payloads = await Promise.all(entries.map((entry) => loadJson(`panels/${entry.id}.json`).catch((error) => ({ error }))));
+  payloadsById = Object.fromEntries(entries.map((entry, index) => [entry.id, payloads[index]]));
+  renderPage();
   renderCredits(layout.credits);
-  document.getElementById("build-info").textContent = `Built ${utcText(layout.generated_at)} UTC from the stored data; rebuilt every hour.`;
+  document.getElementById("build-info").textContent = `Built ${utcText(layout.generated_at)} UTC from the stored data.`;
 }
 
 /** Draws the dashboard again when a newer build of the documents is published. */
@@ -361,6 +395,7 @@ async function start() {
   setInterval(() => freshnessLabels.forEach(({ label, items }) => updateFreshness(label, items)), FRESHNESS_UPDATE_MS);
   setInterval(reloadIfRebuilt, RELOAD_CHECK_MS);
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redrawCharts);
+  window.addEventListener("hashchange", renderPage);
 }
 
 start();

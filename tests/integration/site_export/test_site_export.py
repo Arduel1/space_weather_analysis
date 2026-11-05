@@ -40,7 +40,7 @@ row = 2
 def test_export_writes_the_layout_and_one_document_per_panel(
     db: Database, mongo_settings: MongoSettings, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The export reads the stored values and writes a layout naming each panel document it writes next to it."""
+    """The export copies the web frontend into the site and writes a layout naming each panel document it writes next to it."""
     repository = MongoTimeSeriesRepository(db)
     repository.ensure_collection("synthetic_flux", Granularity.MINUTES)
     frame = pd.DataFrame({"flux": [1.0, 2.0, 3.0]}, index=pd.date_range("2024-01-01", periods=3, freq="min", tz="UTC"))
@@ -54,13 +54,18 @@ def test_export_writes_the_layout_and_one_document_per_panel(
     feeds_file.write_text(FEEDS, encoding="utf-8")
     output = tmp_path / "site"
 
-    main(["--output", str(output), "--feeds-file", str(feeds_file)])
+    web = tmp_path / "web"
+    web.mkdir()
+    (web / "index.html").write_text("<!doctype html>", encoding="utf-8")
 
-    layout = json.loads((output / "dashboard.json").read_text(encoding="utf-8"))
-    panel_ids = [entry["id"] for row in layout["rows"] for entry in row]
-    value = json.loads((output / "panels" / f"{panel_ids[0]}.json").read_text(encoding="utf-8"))
-    assert (panel_ids, sorted(path.name for path in (output / "panels").iterdir()), value["view"]["text"]) == (
-        ["panel-0-0", "panel-0-1", "panel-1-0"],
-        ["panel-0-0.json", "panel-0-1.json", "panel-1-0.json"],
-        "3",
-    )
+    main(["--output", str(output), "--web", str(web), "--feeds-file", str(feeds_file)])
+
+    layout = json.loads((output / "data" / "dashboard.json").read_text(encoding="utf-8"))
+    panel_ids = [entry["id"] for page in layout["pages"] for row in page["rows"] for entry in row]
+    value = json.loads((output / "data" / "panels" / f"{panel_ids[0]}.json").read_text(encoding="utf-8"))
+    assert (
+        (output / "index.html").exists(),
+        panel_ids,
+        sorted(path.name for path in (output / "data" / "panels").iterdir()),
+        value["view"]["text"],
+    ) == (True, ["panel-0-0-0", "panel-0-0-1", "panel-0-1-0"], ["panel-0-0-0.json", "panel-0-0-1.json", "panel-0-1-0.json"], "3")

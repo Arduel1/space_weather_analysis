@@ -87,13 +87,10 @@ jobs:
           PIPELINE_DATA_DIR: ${{ env.STATE_DIR }}/data
         run: uv run --no-sync python -m pipeline_service.main
 
-      - name: Export the dashboard and add the web frontend
+      - name: Write the site of the web frontend and the dashboard documents
         env:
           PYTHONPATH: src
-        run: |
-          mkdir -p _site
-          cp -r web/. _site/
-          uv run --no-sync python -m site_export.main --output _site/data
+        run: uv run --no-sync python -m site_export.main --web web --output _site
 
       - name: Dump the database
         run: |

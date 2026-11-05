@@ -21,6 +21,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY src ./src
 COPY data ./data
 COPY config ./config
+COPY web ./web
 
 ENV PATH="/app/.venv/bin:$PATH"
 

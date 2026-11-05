@@ -15,7 +15,7 @@ from space_weather_analysis.config.errors import format_settings_error
 from space_weather_analysis.config.mongo import MongoSettings
 from space_weather_analysis.coverage.repository import CoverageRepository, MongoCoverageRepository
 from space_weather_analysis.database.connection import MongoConnection
-from space_weather_analysis.jobs.models import FeedJobSummary, Job
+from space_weather_analysis.jobs.models import Job
 from space_weather_analysis.jobs.repository import JobRepository, MongoJobRepository
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
 from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository, TimeSeriesRepository
@@ -149,78 +149,6 @@ def read_dataset_range(dataset_id: str, start: datetime | None, stop: datetime |
     return _read_range(coverage.collection, range_start, range_stop)
 
 
-@st.cache_data(ttl=READ_TTL, show_spinner=False)
-def read_latest(collection: str, fields: tuple[str, ...]) -> tuple[datetime, dict[str, Any]] | None:
-    """Reads the newest document of a collection.
-
-    Args:
-        collection: The collection holding the data documents.
-        fields: The data fields to read.
-
-    Returns:
-        The aware UTC time stamp and the data fields of the newest document, without the fields it lacks; None on error
-        or without documents.
-    """
-    repositories = get_repositories()
-    if repositories is None:
-        return None
-    try:
-        return repositories.timeseries.read_latest(collection, fields)
-    except PyMongoError:
-        logger.exception("Error reading the newest document of %s", collection)
-        return None
-
-
-@st.cache_data(ttl=READ_TTL, show_spinner=False)
-def read_recent(collection: str, span: timedelta, fields: tuple[str, ...]) -> pd.DataFrame:
-    """Reads the documents of a collection in a time span that ends with its newest document.
-
-    The span ends at the newest stored document instead of the current time, so a collection that is not updated
-    continuously still shows its last span of data.
-
-    Args:
-        collection: The collection holding the data documents.
-        span: The length of the time span.
-        fields: The data fields to read.
-
-    Returns:
-        One row per document with an aware UTC DatetimeIndex and one column per field; empty on error or without documents.
-    """
-    latest = read_latest(collection, fields)
-    if latest is None:
-        return pd.DataFrame()
-    latest_time, _ = latest
-    # The stop is exclusive, so the newest document needs a stop just after it
-    return _read_range(collection, latest_time - span, latest_time + timedelta(microseconds=1), fields)
-
-
-def read_newest_time(collection: str) -> datetime | None:
-    """Reads the time stamp of the newest document of a collection, without the cache, so that new data is noticed at once.
-
-    Args:
-        collection: The collection holding the data documents.
-
-    Returns:
-        The aware UTC time stamp; None on error or without documents.
-    """
-    repositories = get_repositories()
-    if repositories is None:
-        return None
-    try:
-        latest = repositories.timeseries.read_latest(collection, ())
-    except PyMongoError:
-        logger.exception("Error reading the newest time stamp of %s", collection)
-        return None
-    return latest[0] if latest else None
-
-
-def clear_read_cache() -> None:
-    """Drops the cached reads of documents, so that the next reads include newly stored data."""
-    read_latest.clear()
-    read_recent.clear()
-    read_collection_range.clear()
-
-
 def _read_range(collection: str, start: datetime, stop: datetime, fields: Sequence[str] | None = None) -> pd.DataFrame:
     """Reads a time range of a collection through the time series repository.
 
@@ -341,23 +269,3 @@ def get_job(job_id: str) -> Job | None:
     except DATABASE_ERRORS:
         logger.exception("Error reading job %s", job_id)
         return None
-
-
-@st.cache_data(ttl=READ_TTL, show_spinner=False)
-def get_feed_summaries(since: datetime) -> list[FeedJobSummary]:
-    """Reads how the jobs of every feed went: its newest job and the outcomes since a time.
-
-    Args:
-        since: The start of the span the outcomes are counted in.
-
-    Returns:
-        One summary per feed that has a job, sorted by feed name; empty on error.
-    """
-    repositories = get_repositories()
-    if repositories is None:
-        return []
-    try:
-        return repositories.jobs.feed_summaries(since)
-    except DATABASE_ERRORS:
-        logger.exception("Error reading the feed job summaries")
-        return []

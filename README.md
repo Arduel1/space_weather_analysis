@@ -1,6 +1,6 @@
 # Space Weather Analysis
 
-A self-hostable data platform that ingests, stores, and visualizes space-weather time-series data from multiple providers through a MongoDB-backed Streamlit dashboard.
+A self-hostable data platform that ingests, stores, and visualizes space-weather time-series data from multiple providers through a MongoDB-backed web dashboard.
 
 Static demo of the dashboard, rebuilt every hour from the providers' data: <https://arduel1.github.io/space_weather_analysis/>
 
@@ -19,7 +19,7 @@ Static demo of the dashboard, rebuilt every hour from the providers' data: <http
 
 ## Overview
 
-Space-weather data is distributed across several providers, formats, and APIs: NASA's CDAWeb, GFZ Potsdam, NOAA SWPC, HAPI servers, and plain CSV/text catalogs. This project collects these heterogeneous time-series sources into a single MongoDB store and serves them through an interactive Streamlit dashboard.
+Space-weather data is distributed across several providers, formats, and APIs: NASA's CDAWeb, GFZ Potsdam, NOAA SWPC, HAPI servers, and plain CSV/text catalogs. This project collects these heterogeneous time-series sources into a single MongoDB store and serves them through an interactive web dashboard.
 
 The data model follows the physical chain of space weather: phenomena originate at the Sun, propagate through the heliosphere, and drive activity in Earth's magnetosphere. The system is designed to run as a containerized, always-on service.
 
@@ -30,24 +30,25 @@ The data model follows the physical chain of space weather: phenomena originate 
 - Incremental loading: data is fetched in calendar chunks sized by the cadence of the dataset, chunks whose data is stable are skipped, recent and provisional data is fetched again, and only changed documents are written.
 - One processing lane per source type, so a slow or unreachable provider does not hold up the others; an unreachable provider is detected and its remaining requests are skipped.
 - A master catalog of the available datasets and descriptive metadata for each dataset, maintained in the background from the metadata services of the providers and complemented by curated metadata that names the page every value was taken from.
-- A live dashboard built from configurable panels (values with NOAA scale levels, time series, tables, feed status), which redraws when new data arrives and shows units, sources, licenses, data freshness, gaps, and the valid range of each field.
-- A dataset explorer and a downloader that queues a fetch job for a dataset not yet stored.
-- A Docker Compose stack that runs the metadata worker, pipeline service, frontend, database, and database admin UI together.
+- A web dashboard built from configurable pages and panels (values with NOAA scale levels, time series, tables, feed status), which shows units, sources, licenses, data freshness, gaps, and the valid range of each field. The same site runs locally on the live data and publicly as the hourly demo.
+- A dataset explorer and a downloader that queues a fetch job for a dataset not yet stored (Streamlit).
+- A Docker Compose stack that runs the metadata worker, pipeline service, web dashboard, Streamlit app, database, and database admin UI together.
 
 ## Architecture
 
-The system is a modular monolith: a shared core library (`space_weather_analysis`) plus three separately-runnable components. All components share one codebase and one Docker image and communicate through MongoDB rather than over the network.
+The system is a modular monolith: a shared core library (`space_weather_analysis`) plus four separately-runnable components. All components share one codebase and one Docker image and communicate through MongoDB rather than over the network.
 
 - Metadata Worker: a long-running background process that builds and maintains the master catalog and the dataset metadata. It repeats all metadata requests (HAPI metadata mirror, CDAWeb dataset list, per-dataset master files and SPASE records, dataset availability) on a schedule, one request at a time with a random pause per provider host, keeping the last good state when a provider is unreachable. It never deletes catalog entries, it only counts sources a provider no longer lists.
 - Pipeline Service: keeps the feeds of `config/feeds.toml` current and processes the fetch jobs of the frontend. A scheduler queues one job per feed on start and whenever its interval has passed; a job runner works off the jobs of each source type in its own lane. The pipelines fetch in calendar chunks, record which chunks are stable, write only changed documents, and save the dataset metadata with the curated metadata of `config/metadata/` laid over it.
-- Frontend: the Streamlit app with the live dashboard, whose panels are configured in `config/feeds.toml`, a dataset explorer, and a downloader that queues fetch jobs.
+- Web dashboard: `site_export` writes the pages and panels configured in `config/feeds.toml` as JSON documents and, next to the static web frontend in `web/`, serves them; locally it writes them again every minute, the demo workflow every hour.
+- Frontend: the Streamlit app with a dataset explorer and a downloader that queues fetch jobs.
 - MongoDB: the shared data store, holding the master catalog, the metadata of each dataset, one time series collection per dataset, the stored coverage and chunk status of each dataset, and the job queue. `mongo-express` provides a web admin UI.
 
 ![Architecture diagram: external data sources feed the ingestion components, which write to MongoDB collections read by the consumers](docs/architecture.drawio.svg)
 
-Solid arrows show data flow; dashed arrows show the job queue between the frontend and the pipeline service. The files in `config/` give the feeds and the curated metadata; the frontend also reads the dashboard panels from `config/feeds.toml`, which the diagram leaves out. The diagram is an editable draw.io file and can be opened directly in draw.io.
+Solid arrows show data flow; dashed arrows show the job queue between the frontend and the pipeline service. The files in `config/` give the feeds and the curated metadata; the web dashboard reads its pages and panels from `config/feeds.toml`; the diagram does not show the web dashboard yet. The diagram is an editable draw.io file and can be opened directly in draw.io.
 
-The shared `space_weather_analysis` library (clients, configuration, database connection, logging, utilities) is used in-process by all three components, keeping domain logic independent of MongoDB, HTTP, and Streamlit.
+The shared `space_weather_analysis` library (clients, configuration, database connection, logging, utilities) is used in-process by all components, keeping domain logic independent of MongoDB, HTTP, and Streamlit.
 
 ## Data Sources and Licenses
 
@@ -237,7 +238,7 @@ We acknowledge the WDC for Geomagnetism (Edinburgh) and the institutes that supp
 - Dependency management: uv (with lockfile)
 - Configuration: pydantic-settings (environment variables) and TOML files (feeds, dashboard panels, curated metadata)
 - Storage: MongoDB time series collections, browsed via mongo-express
-- Frontend: Streamlit and Plotly
+- Frontend: static web frontend (HTML, JavaScript, Plotly.js) for the dashboard; Streamlit and Plotly for the explorer
 - Data handling: pandas, NumPy, xarray; cdasws, cdflib and netCDF4 for CDAWeb; hapiclient for HAPI servers
 - Containerization: Docker and Docker Compose
 - Quality tooling: pytest with testcontainers, Ruff (lint and format), mypy
@@ -276,11 +277,12 @@ The full stack runs in Docker. uv is only required for local development, tests,
    docker compose up --build -d
    ```
 
-   This starts five services:
+   This starts six services:
 
    | Service | Purpose | Exposed at |
    | --- | --- | --- |
-   | `frontend` | Streamlit dashboard | <http://localhost:8501> |
+   | `dashboard` | Web dashboard | <http://localhost:8502> |
+   | `frontend` | Streamlit dataset explorer and downloader | <http://localhost:8501> |
    | `mongo-express` | MongoDB web admin UI | <http://localhost:8081> |
    | `mongo` | MongoDB database | `localhost:27017` |
    | `pipeline-service` | ETL / data pipeline | (no public port) |
@@ -288,7 +290,7 @@ The full stack runs in Docker. uv is only required for local development, tests,
 
    The ports shown are the defaults; the published ports can be changed in `.env` (see `example.env`).
 
-5. Open the dashboard at [http://localhost:8501](http://localhost:8501). On a fresh database the metadata worker needs a few minutes to build the catalog; feeds whose datasets are not catalogued yet wait for it.
+5. Open the dashboard at [http://localhost:8502](http://localhost:8502). On a fresh database the metadata worker needs a few minutes to build the catalog; feeds whose datasets are not catalogued yet wait for it.
 
 6. Stop the stack:
 
@@ -328,7 +330,7 @@ Tools started outside Docker, such as the notebooks, can load the variables from
 ```text
 .
 ├── .github/workflows/demo.yml  # Hourly build of the static dashboard demo on GitHub Pages
-├── docker-compose.yml          # Five-service stack definition
+├── docker-compose.yml          # Six-service stack definition
 ├── Dockerfile                  # Shared image for all Python services
 ├── pyproject.toml              # Project metadata, dependencies, tool config
 ├── uv.lock                     # Locked dependency versions
@@ -363,11 +365,9 @@ Tools started outside Docker, such as the notebooks, can load the variables from
 │   │   ├── chunk_status/       # Status of each fetched chunk, which decides when it is fetched again
 │   │   ├── pipelines/          # One pipeline per source type, the shared chunk loop and the pipeline factory
 │   │   └── parsing/            # Conversion of delivered data and local files into frames
-│   ├── site_export/            # Export of the dashboard as JSON documents for a static web frontend (main.py)
+│   ├── site_export/            # Web dashboard site: JSON documents next to the web frontend, written once or served (main.py)
 │   └── streamlit_app/          # Streamlit app (main.py)
-│       ├── pages/              # Dashboard, dataset explorer and downloader pages
-│       ├── dashboard/          # Drawing of the dashboard panels in Streamlit
-│       │   └── panels/         # One drawing function per panel type: value, time series, table, feed status
+│       ├── pages/              # Dataset explorer and downloader pages
 │       └── figures/, plots/    # Plot builders of the explorer
 └── tests/                      # Unit tests (tests/unit) and integration tests (tests/integration)
 ```
