@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Space Weather Dashboard</title>
+  <meta name="description" content="Static demo of the Space Weather Analysis dashboard, rebuilt from the providers' data every hour.">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@4.1.2/plotly.min.js"
+          integrity="sha384-hHv6D3tTUUBpp4tVv6t2Dc3oGuRhphmWOTKUR8jWyN0Pnon1g3iebKCNDNmKmxo8"
+          crossorigin="anonymous" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="page-header">
+    <h1>Space Weather Dashboard</h1>
+    <p id="build-info" class="caption">Loading...</p>
+  </header>
+  <main id="dashboard" aria-live="polite"></main>
+  <footer class="page-footer">
+    <p>
+      Static demo of <a href="https://github.com/Arduel1/space_weather_analysis">Space Weather Analysis</a>, a private,
+      non-commercial project. It is not affiliated with or endorsed by any of the data providers named below.
+    </p>
+    <p>
+      The values are shown as the providers publish them; missing values are left out and long series are thinned for
+      drawing. Under each panel the freshness of its newest value is rated against your clock.
+    </p>
+    <h2>Data sources</h2>
+    <ul id="credits"></ul>
+  </footer>
+</body>
+</html>

@@ -335,6 +335,7 @@ Tools started outside Docker, such as the notebooks, can load the variables from
 ├── data/                       # Local data files (not in the repository) and HAPI server list
 ├── docs/                       # Architecture diagram (editable draw.io SVG) and local data notes
 ├── notebooks/                  # Jupyter notebooks for exploratory analysis
+├── web/                        # Static web frontend of the dashboard (HTML, JavaScript, Plotly.js), drawing the exported JSON documents
 ├── src/
 │   ├── space_weather_analysis/ # Shared core library used by all components
 │   │   ├── catalog/            # Master catalog of the datasets and their sources
