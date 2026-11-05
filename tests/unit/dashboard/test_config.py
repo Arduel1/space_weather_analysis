@@ -4,11 +4,12 @@ from datetime import timedelta
 import pytest
 from pydantic import ValidationError
 
-from streamlit_app.dashboard.config import load_dashboard_config, load_feed_intervals, panel_from_table
-from streamlit_app.dashboard.panel_types import PANEL_TYPES, PanelType
-from streamlit_app.dashboard.panels.base import PanelConfig, PanelContext
-from streamlit_app.dashboard.panels.timeseries import TimeseriesPanel
-from streamlit_app.dashboard.panels.value import ValuePanel
+from space_weather_analysis.dashboard.config import load_dashboard_config, load_feed_intervals, panel_from_table
+from space_weather_analysis.dashboard.panel_types import PANEL_TYPES, PanelType
+from space_weather_analysis.dashboard.panels.base import PanelConfig, PanelContext, PanelPayload
+from space_weather_analysis.dashboard.panels.timeseries import TimeseriesPanel
+from space_weather_analysis.dashboard.panels.value import ValuePanel
+from space_weather_analysis.dashboard.reading import DashboardReader
 
 PROJECT_FEED_FILE = pathlib.Path(__file__).parents[3] / "config" / "feeds.toml"
 FEED = '[[feed]]\nname = "live"\ndatasets = ["a_set", "b_set"]\n\n'
@@ -35,9 +36,10 @@ class GaugePanel(PanelConfig):
     needle: float
 
 
-def _draw_nothing(panel: GaugePanel, context: PanelContext, key: str) -> None:
-    """Draws nothing, as the tests only validate gauge panels."""
-    del panel, context, key
+def _build_nothing(panel: GaugePanel, reader: DashboardReader, context: PanelContext) -> PanelPayload:
+    """Builds an empty payload, as the tests only validate gauge panels."""
+    del reader, context
+    return PanelPayload(type=panel.type)
 
 
 def test_project_dashboard_table_is_valid() -> None:
@@ -89,7 +91,7 @@ def test_invalid_dashboard_table_is_rejected(tmp_path: pathlib.Path, dashboard: 
 
 def test_a_registered_panel_type_validates_its_own_settings() -> None:
     """A new panel type needs only its model and a registry entry to validate tables of its type."""
-    panel_types = {"gauge": PanelType(GaugePanel, _draw_nothing)}
+    panel_types = {"gauge": PanelType(GaugePanel, _build_nothing)}
 
     panel = panel_from_table({"type": "gauge", "row": 1, "needle": 0.5}, panel_types)
 

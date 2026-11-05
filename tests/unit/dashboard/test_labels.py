@@ -2,7 +2,7 @@ from typing import Any
 
 import pytest
 
-from streamlit_app.dashboard.labels import attribution, dataset_title, field_label, field_unit, sources_line
+from space_weather_analysis.dashboard.labels import attribution, dataset_title, field_label, field_unit, sources_line
 
 FULL_RECORD: dict[str, Any] = {
     "title": "GOES X-ray flux",

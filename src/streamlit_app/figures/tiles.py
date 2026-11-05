@@ -5,8 +5,9 @@ from typing import Any
 
 import pandas as pd
 
+from space_weather_analysis.dashboard.scales import LEVEL_COLORS
 from space_weather_analysis.scales.noaa import LEVEL_NAMES, flare_class, g_level, r_level, s_level
-from streamlit_app.figures.scale_style import LEVEL_COLORS, MISSING_LEVEL_COLOR
+from streamlit_app.figures.scale_style import MISSING_LEVEL_COLOR
 
 # A newest document as read from the time series repository: its UTC time stamp and its data fields.
 LatestDocument = tuple[datetime, dict[str, Any]]

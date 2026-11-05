@@ -15,7 +15,18 @@ from space_weather_analysis.scales.noaa import (
     r_level,
     s_level,
 )
-from streamlit_app.figures.scale_style import LEVEL_COLORS
+
+# Color of each NOAA scale level number, from quiet green to extreme purple
+LEVEL_COLORS: Mapping[int, str] = MappingProxyType(
+    {
+        0: "#2ECC71",
+        1: "#F1C40F",
+        2: "#E67E22",
+        3: "#E74C3C",
+        4: "#C0392B",
+        5: "#8E44AD",
+    }
+)
 
 
 @dataclass(frozen=True)

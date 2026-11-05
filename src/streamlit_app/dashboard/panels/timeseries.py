@@ -1,107 +1,23 @@
 import math
 from collections.abc import Mapping
-from datetime import datetime, timedelta
-from typing import Literal, Self
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-from pydantic import BaseModel, Field, model_validator
 
+from space_weather_analysis.dashboard.labels import Metadata, dataset_title, field_label, field_unit, sources_line
+from space_weather_analysis.dashboard.panels.base import PanelContext, collection_of
+from space_weather_analysis.dashboard.panels.timeseries import TimeseriesPanel, break_gaps, series_values
+from space_weather_analysis.dashboard.validity import describe_validity, valid_mask, valid_range
 from space_weather_analysis.util.time_utils import parse_iso_duration
 from streamlit_app import data
-from streamlit_app.dashboard.freshness import panel_freshness
-from streamlit_app.dashboard.labels import HELP_LINE_BREAK, Metadata, dataset_title, field_label, field_unit, sources_line
-from streamlit_app.dashboard.panels.base import CLOSED, PANEL_HEIGHT, PanelConfig, PanelContext, ScaleChoice, TimeWindow, collection_of
-from streamlit_app.dashboard.validity import describe_validity, valid_mask, valid_range
+from streamlit_app.dashboard.drawing import HELP_LINE_BREAK, PANEL_HEIGHT, panel_freshness
 
 # Share of the spacing of two values a bar fills, so that neighbouring bars stay apart
 _BAR_FILL = 0.9
-# Multiple of the typical spacing of the values from which a missing stretch counts as gap and breaks the line
-GAP_FACTOR = 3
 _LEGEND_ON_TOP = {"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1}
-
-
-class SeriesConfig(BaseModel):
-    """One series of a time series panel.
-
-    Attributes:
-        dataset: The dataset ID, which must belong to a feed.
-        field: The data field.
-        label: The name in legend and hover; empty takes the label of the field from the metadata, else the field name.
-        style: How the values are drawn.
-        color: The color, any CSS color; None lets Plotly choose.
-        valid_min: The smallest valid value, taking precedence over the metadata; None takes the metadata.
-        valid_max: The largest valid value, taking precedence over the metadata; None takes the metadata.
-    """
-
-    model_config = CLOSED
-
-    dataset: str = Field(min_length=1)
-    field: str = Field(min_length=1)
-    label: str = ""
-    style: Literal["line", "bars", "markers"] = "line"
-    color: str | None = None
-    valid_min: float | None = None
-    valid_max: float | None = None
-
-
-class TimeseriesPanel(PanelConfig, ScaleChoice, TimeWindow):
-    """A chart of one or more fields over time, with the threshold lines of its scale.
-
-    Attributes:
-        series: The series, drawn in this order.
-        y_axis: The type of the value axis; a log axis leaves out values that are not positive.
-        y_range: The fixed range of the value axis, on a log axis in values, not exponents; None fits it to the data.
-        y_title: The title of the value axis; empty takes the unit of the first series from the metadata.
-        hide_invalid: Whether fill values and values outside the valid range of each series are hidden at first.
-    """
-
-    series: list[SeriesConfig] = Field(min_length=1)
-    y_axis: Literal["linear", "log"] = "linear"
-    y_range: tuple[float, float] | None = None
-    y_title: str = ""
-    hide_invalid: bool = True
-
-    @model_validator(mode="after")
-    def _usable_range(self) -> Self:
-        """Rejects a value range that is not ascending, or not positive on a log axis."""
-        if self.y_range is not None:
-            low, high = self.y_range
-            if low >= high or (self.y_axis == "log" and low <= 0):
-                raise ValueError("The value range must be ascending, and positive on a log axis.")
-        return self
-
-
-def _series_values(frame: pd.DataFrame, series: SeriesConfig, log_axis: bool) -> pd.Series:
-    """Selects the numeric values of a series from its frame, without the non-positive ones on a log axis."""
-    values = pd.to_numeric(frame[series.field], errors="coerce") if series.field in frame.columns else pd.Series(dtype=float, index=frame.index)
-    return values.mask(values <= 0) if log_axis else values
-
-
-def break_gaps(values: pd.Series, cadence: timedelta | None) -> pd.Series:
-    """Inserts a missing value into every gap, so that a line drawn through the values breaks there instead of bridging it.
-
-    Args:
-        values: The values with a sorted UTC DatetimeIndex.
-        cadence: The time between two values from the metadata; None takes the median spacing of the values.
-
-    Returns:
-        The values with one NaN halfway into every spacing longer than GAP_FACTOR times the cadence.
-    """
-    if len(values) < 2:
-        return values
-    # Datetime64 values in nanoseconds, so their differences are integer nanoseconds
-    nanoseconds = pd.DatetimeIndex(values.index).to_numpy(dtype="datetime64[ns]").astype(np.int64)
-    spacing = np.diff(nanoseconds)
-    typical = pd.Timedelta(cadence).value if cadence is not None else float(np.median(spacing))
-    is_gap = spacing > typical * GAP_FACTOR
-    if not is_gap.any():
-        return values
-    # Halfway between the last value before each gap and the first value after it
-    gap_middles = pd.DatetimeIndex(nanoseconds[:-1][is_gap] + spacing[is_gap] // 2, tz="UTC")
-    return pd.concat([values, pd.Series(float("nan"), index=gap_middles)]).sort_index()
 
 
 def _bar_width_ms(index: pd.Index) -> float | None:
@@ -135,7 +51,7 @@ def timeseries_figure(
     for series in panel.series:
         frame = frames.get(series.dataset, pd.DataFrame())
         record = metadata.get(series.dataset, {})
-        values = _series_values(frame, series, log_axis)
+        values = series_values(frame, series, log_axis)
         if hide_invalid:
             values = values.where(valid_mask(values, valid_range(record, series.field, series.valid_min, series.valid_max)))
         if series.style == "line":

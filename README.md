@@ -344,6 +344,7 @@ Tools started outside Docker, such as the notebooks, can load the variables from
 │   │   ├── coverage/           # Stored time ranges of each dataset
 │   │   ├── jobs/               # Job queue shared by frontend and pipeline service
 │   │   ├── scales/             # NOAA space weather scales and flare classes
+│   │   ├── dashboard/          # Dashboard configuration, panel types, labels, freshness, valid ranges and panel JSON documents
 │   │   └── config/, database/, logging/, util/
 │   ├── catalog_collector/      # Metadata worker (metadata_worker.py)
 │   │   ├── data_catalog/       # Master catalog: GFZ entries and availability refresh
@@ -358,10 +359,11 @@ Tools started outside Docker, such as the notebooks, can load the variables from
 │   │   ├── chunk_status/       # Status of each fetched chunk, which decides when it is fetched again
 │   │   ├── pipelines/          # One pipeline per source type, the shared chunk loop and the pipeline factory
 │   │   └── parsing/            # Conversion of delivered data and local files into frames
+│   ├── site_export/            # Export of the dashboard as JSON documents for a static web frontend (main.py)
 │   └── streamlit_app/          # Streamlit app (main.py)
 │       ├── pages/              # Dashboard, dataset explorer and downloader pages
-│       ├── dashboard/          # Dashboard configuration, panel type registry, labels, freshness and valid ranges
-│       │   └── panels/         # Panel types: value, time series, table, feed status
+│       ├── dashboard/          # Drawing of the dashboard panels in Streamlit
+│       │   └── panels/         # One drawing function per panel type: value, time series, table, feed status
 │       └── figures/, plots/    # Plot builders of the explorer
 └── tests/                      # Unit tests (tests/unit) and integration tests (tests/integration)
 ```

@@ -1,10 +1,11 @@
-from collections.abc import Mapping
 from datetime import datetime, timedelta
 from enum import StrEnum
 
+from pydantic import BaseModel, ConfigDict
+
+from space_weather_analysis.dashboard.labels import Metadata
 from space_weather_analysis.metadata.models import TimestampLocation
-from space_weather_analysis.util.time_utils import parse_iso_duration
-from streamlit_app.dashboard.labels import Metadata
+from space_weather_analysis.util.time_utils import SecondsDuration, parse_iso_duration
 
 # Delay of a provider between a measurement and its publication, allowed on top of the expected age
 PUBLICATION_DELAY = timedelta(minutes=15)
@@ -83,44 +84,32 @@ def age_text(age: timedelta) -> str:
     return f"{seconds // 86400} d"
 
 
-# Streamlit markdown color of each state
-_COLORS = {Freshness.LIVE: "green", Freshness.DELAYED: "orange", Freshness.STALE: "red", Freshness.STATIC: "gray"}
+class DatasetFreshness(BaseModel):
+    """How current the newest stored value of one dataset is, for a reader that rates it against its own clock.
 
-
-def freshness_markdown(state: Freshness, newest: datetime, now: datetime) -> str:
-    """Writes a state with the age of the newest value as colored Streamlit markdown.
-
-    Args:
-        state: The state.
+    Attributes:
+        dataset: The dataset ID.
         newest: The time stamp of the newest stored value.
-        now: The current time.
-
-    Returns:
-        The markdown text.
+        expected_age: The expected age from expected_age; None for a feed loaded only on start.
     """
-    return f":{_COLORS[state]}[{state}], newest value {age_text(now - newest)} ago"
+
+    model_config = ConfigDict(frozen=True)
+
+    dataset: str
+    newest: datetime
+    expected_age: SecondsDuration | None
 
 
-def panel_freshness(
-    newest_by_dataset: Mapping[str, datetime], metadata_by_dataset: Mapping[str, Metadata], intervals: Mapping[str, timedelta | None], now: datetime
-) -> str:
-    """Rates the datasets of a panel and writes the worst state with the age of its newest value.
+def dataset_freshness(dataset: str, newest: datetime, metadata: Metadata, interval: timedelta | None) -> DatasetFreshness:
+    """Describes how current a dataset is by its newest value and the age expected from its feed and metadata.
 
     Args:
-        newest_by_dataset: The time stamp of the newest stored value of each dataset with data, by dataset ID.
-        metadata_by_dataset: The metadata record of each dataset, by dataset ID; missing or empty if it has none.
-        intervals: The feed interval of each dataset, by dataset ID; missing or None for a feed loaded only on start.
-        now: The current time.
+        dataset: The dataset ID.
+        newest: The time stamp of the newest stored value.
+        metadata: The metadata record of the dataset, with cadence and time stamp location if known.
+        interval: The interval of the feed loading the dataset; None for a feed loaded only on start.
 
     Returns:
-        The colored markdown of the worst state; empty without any data.
+        The description.
     """
-    rated = {
-        dataset: freshness(newest, now, expected_age(intervals.get(dataset), metadata_by_dataset.get(dataset, {})))
-        for dataset, newest in newest_by_dataset.items()
-    }
-    worst_state = worst(list(rated.values()))
-    if worst_state is None:
-        return ""
-    worst_dataset = next(dataset for dataset, state in rated.items() if state == worst_state)
-    return freshness_markdown(worst_state, newest_by_dataset[worst_dataset], now)
+    return DatasetFreshness(dataset=dataset, newest=newest, expected_age=expected_age(interval, metadata))

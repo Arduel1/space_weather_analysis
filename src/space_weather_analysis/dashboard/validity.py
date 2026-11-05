@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from streamlit_app.dashboard.labels import Metadata, variable_metadata
+from space_weather_analysis.dashboard.labels import Metadata, variable_metadata
 
 
 @dataclass(frozen=True)

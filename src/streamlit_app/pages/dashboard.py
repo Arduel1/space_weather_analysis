@@ -1,18 +1,13 @@
+import pathlib
 from datetime import UTC, datetime, timedelta
 
 import streamlit as st
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from space_weather_analysis.dashboard.config import CONFIG_ERRORS, DashboardConfig, load_dashboard_config, load_feed_intervals, load_feed_schedule
+from space_weather_analysis.dashboard.panels.base import PanelContext
 from streamlit_app import data
-from streamlit_app.dashboard.config import (
-    CONFIG_ERRORS,
-    DashboardConfig,
-    DashboardSettings,
-    load_dashboard_config,
-    load_feed_intervals,
-    load_feed_schedule,
-)
-from streamlit_app.dashboard.panel_types import PANEL_TYPES
-from streamlit_app.dashboard.panels.base import PanelContext
+from streamlit_app.dashboard.panel_types import PANEL_RENDERERS
 
 # Time between two checks for newly stored documents; the page is drawn again only when one arrived
 NEW_DATA_CHECK_INTERVAL = timedelta(seconds=5)
@@ -22,12 +17,24 @@ NEWEST_TIMES_KEY = "dashboard_newest_times"
 LIVE_KEY = "dashboard_live"
 
 
+class DashboardSettings(BaseSettings):
+    """Settings of the dashboard, read from environment variables `FRONTEND_{field name}` in upper case.
+
+    Attributes:
+        feeds_file: The feed file, whose `dashboard` table configures what the dashboard shows.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="FRONTEND_", frozen=True)
+
+    feeds_file: pathlib.Path = pathlib.Path("config/feeds.toml")
+
+
 def _show_panels(config: DashboardConfig, context: PanelContext) -> None:
     """Draws the panels row by row, each row split by the relative widths of its panels."""
     for row_number, row in enumerate(config.rows()):
         for column_number, (column, panel) in enumerate(zip(st.columns([panel.width for panel in row]), row, strict=True)):
             with column:
-                PANEL_TYPES[panel.type].render(panel, context, f"panel-{row_number}-{column_number}")
+                PANEL_RENDERERS[panel.type](panel, context, f"panel-{row_number}-{column_number}")
 
 
 @st.fragment(run_every=NEW_DATA_CHECK_INTERVAL)

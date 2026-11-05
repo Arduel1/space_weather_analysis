@@ -5,9 +5,9 @@ from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from space_weather_analysis.dashboard.scales import FORMATTERS, SCALES, Level, Scale, threshold_scale
 from space_weather_analysis.util.naming import sanitize_collection_name
 from space_weather_analysis.util.time_utils import IsoDuration
-from streamlit_app.dashboard.scales import FORMATTERS, SCALES, Level, Scale, threshold_scale
 
 # The model of every table is closed, so a mistyped key fails the validation instead of being ignored
 CLOSED = ConfigDict(extra="forbid", frozen=True)
@@ -181,5 +181,17 @@ class PanelContext:
     feed_schedule: Mapping[str, timedelta | None] = field(default_factory=dict)
 
 
-# Height of chart and table panels in pixels, so that the whole grid fits on one screen
-PANEL_HEIGHT = 300
+# Payloads are frozen, as they are only built and then serialized
+PAYLOAD = ConfigDict(frozen=True)
+
+
+class PanelPayload(BaseModel):
+    """The JSON document of one panel, as a web frontend draws it; each panel type adds what it shows.
+
+    Attributes:
+        type: The panel type, a key of the panel type registry.
+    """
+
+    model_config = PAYLOAD
+
+    type: str

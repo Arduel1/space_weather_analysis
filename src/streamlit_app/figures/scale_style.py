@@ -3,17 +3,9 @@ from collections.abc import Iterable
 import pandas as pd
 import plotly.graph_objects as go
 
+from space_weather_analysis.dashboard.scales import LEVEL_COLORS
 from space_weather_analysis.scales.noaa import LEVEL_NAMES
 
-# Bar and marker color of each NOAA scale level number, from quiet green to extreme purple.
-LEVEL_COLORS: dict[int, str] = {
-    0: "#2ECC71",
-    1: "#F1C40F",
-    2: "#E67E22",
-    3: "#E74C3C",
-    4: "#C0392B",
-    5: "#8E44AD",
-}
 # Color of values without a level.
 MISSING_LEVEL_COLOR = "#95A5A6"
 

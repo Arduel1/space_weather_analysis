@@ -1,8 +1,8 @@
 import pandas as pd
 import pytest
 
-from streamlit_app.dashboard.labels import Metadata
-from streamlit_app.dashboard.validity import ValidRange, valid_mask, valid_range
+from space_weather_analysis.dashboard.labels import Metadata
+from space_weather_analysis.dashboard.validity import ValidRange, valid_mask, valid_range
 
 # A record whose field declares fill value and valid range as the providers write them, the fill value as text
 RANGED_RECORD: Metadata = {"variables": [{"name": "flux", "fill": "-1e31", "valid_min": 0.0, "valid_max": 100.0}]}

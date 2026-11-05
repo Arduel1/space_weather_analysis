@@ -2,16 +2,15 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from streamlit_app.dashboard.freshness import (
+from space_weather_analysis.dashboard.freshness import (
     DELAYED_FACTOR,
     PUBLICATION_DELAY,
     Freshness,
     age_text,
     expected_age,
     freshness,
-    panel_freshness,
 )
-from streamlit_app.dashboard.labels import Metadata
+from space_weather_analysis.dashboard.labels import Metadata
 
 NOW = datetime(2024, 1, 1, 12, tzinfo=UTC)
 EXPECTED = timedelta(minutes=20)
@@ -69,20 +68,3 @@ def test_freshness_rates_the_age_against_the_expected_age(age: timedelta, expect
 def test_age_text_uses_the_largest_whole_unit(age: timedelta, text: str) -> None:
     """An age is written in seconds, minutes, hours below two days, or days."""
     assert age_text(age) == text
-
-
-def test_panel_freshness_shows_the_worst_state_with_its_age() -> None:
-    """The panel shows the worst state of its datasets with the age of the newest value of that dataset."""
-    newest_by_dataset = {
-        "live_set": NOW - timedelta(minutes=5),
-        "stale_set": NOW - timedelta(hours=3),
-        "static_set": NOW - timedelta(days=30),
-    }
-    intervals = {"live_set": timedelta(minutes=1), "stale_set": timedelta(minutes=1), "static_set": None}
-
-    assert panel_freshness(newest_by_dataset, {}, intervals, NOW) == ":red[stale], newest value 3 h ago"
-
-
-def test_panel_freshness_without_data_is_empty() -> None:
-    """A panel without any stored value gets no freshness text."""
-    assert panel_freshness({}, {}, {"live_set": timedelta(minutes=1)}, NOW) == ""

@@ -3,7 +3,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from pydantic import AfterValidator, BeforeValidator
+from pydantic import AfterValidator, BeforeValidator, PlainSerializer
 
 from space_weather_analysis.util.types import TimeRange
 
@@ -132,6 +132,8 @@ def _duration(value: object) -> object:
 
 # A pydantic field type for a positive duration, written in configuration files as ISO 8601 duration
 IsoDuration = Annotated[timedelta, BeforeValidator(_duration)]
+# A pydantic field type for a duration that serializes as number of seconds, which a browser reads without parsing ISO 8601
+SecondsDuration = Annotated[timedelta, PlainSerializer(timedelta.total_seconds, return_type=float)]
 
 
 def calculate_time_intersection(

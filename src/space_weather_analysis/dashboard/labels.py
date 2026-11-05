@@ -6,8 +6,6 @@ from urllib.parse import urlsplit
 type Metadata = Mapping[str, Any]
 
 NO_METADATA = "no metadata"
-# Line break inside Streamlit help texts and captions, which render markdown
-HELP_LINE_BREAK = "  \n"
 
 
 def variable_metadata(metadata: Metadata, field: str) -> Mapping[str, Any]:

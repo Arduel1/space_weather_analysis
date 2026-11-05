@@ -5,23 +5,10 @@ from datetime import timedelta
 from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from space_weather_analysis.dashboard.panel_types import PANEL_TYPES, PanelType
+from space_weather_analysis.dashboard.panels.base import PanelConfig, collection_of
 from space_weather_analysis.util.time_utils import IsoDuration
-from streamlit_app.dashboard.panel_types import PANEL_TYPES, PanelType
-from streamlit_app.dashboard.panels.base import PanelConfig, collection_of
-
-
-class DashboardSettings(BaseSettings):
-    """Settings of the dashboard, read from environment variables `FRONTEND_{field name}` in upper case.
-
-    Attributes:
-        feeds_file: The feed file, whose `dashboard` table configures what the dashboard shows.
-    """
-
-    model_config = SettingsConfigDict(env_prefix="FRONTEND_", frozen=True)
-
-    feeds_file: pathlib.Path = pathlib.Path("config/feeds.toml")
 
 
 class DashboardConfig(BaseModel):
