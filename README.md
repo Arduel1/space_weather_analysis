@@ -2,6 +2,8 @@
 
 A self-hostable data platform that ingests, stores, and visualizes space-weather time-series data from multiple providers through a MongoDB-backed Streamlit dashboard.
 
+Static demo of the dashboard, rebuilt every hour from the providers' data: <https://arduel1.github.io/space_weather_analysis/>
+
 ## Table of Contents
 
 - [Overview](#overview)
