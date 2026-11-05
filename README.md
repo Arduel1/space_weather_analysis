@@ -23,27 +23,27 @@ The data model follows the physical chain of space weather: phenomena originate 
 
 ## Features
 
-- Ingestion of time-series data from NASA CDAWeb, GFZ, NOAA SWPC, HAPI servers, and local catalogs through a common pipeline.
-- A catalog layer that builds and maintains a master catalog of the available datasets, which the dashboard queries.
-- Descriptive metadata stored for every dataset and shown in the dashboard alongside the data.
-- Storage of all ingested data in MongoDB, using GridFS for large binary files.
-- A Streamlit dashboard for selecting a dataset and timeframe, loading it from storage, and rendering type-appropriate plots.
-- Domain-specific visualizations for sunspots and solar cycles, CME events, the Kp geomagnetic index, X-ray flux, and particle measurements.
-- On-demand fetching: when requested data is not yet stored, the frontend queues a job for the pipeline service to retrieve it.
-- A Docker Compose stack that runs the metadata worker, pipeline, frontend, database, and database admin UI together.
+- Ingestion of time-series data from NASA CDAWeb, GFZ, NOAA SWPC, HAPI servers, and local files through one pipeline with a separate adapter per source type.
+- Feeds, configured in `config/feeds.toml`, keep selected datasets current: each feed is loaded on start and fetched again at its interval, down to once a minute for live data.
+- Incremental loading: data is fetched in calendar chunks sized by the cadence of the dataset, chunks whose data is stable are skipped, recent and provisional data is fetched again, and only changed documents are written.
+- One processing lane per source type, so a slow or unreachable provider does not hold up the others; an unreachable provider is detected and its remaining requests are skipped.
+- A master catalog of the available datasets and descriptive metadata for each dataset, maintained in the background from the metadata services of the providers and complemented by curated metadata that names the page every value was taken from.
+- A live dashboard built from configurable panels (values with NOAA scale levels, time series, tables, feed status), which redraws when new data arrives and shows units, sources, licenses, data freshness, gaps, and the valid range of each field.
+- A dataset explorer and a downloader that queues a fetch job for a dataset not yet stored.
+- A Docker Compose stack that runs the metadata worker, pipeline service, frontend, database, and database admin UI together.
 
 ## Architecture
 
 The system is a modular monolith: a shared core library (`space_weather_analysis`) plus three separately-runnable components. All components share one codebase and one Docker image and communicate through MongoDB rather than over the network.
 
 - Metadata Worker: a long-running background process that builds and maintains the master catalog and the dataset metadata. It repeats all metadata requests (HAPI metadata mirror, CDAWeb dataset list, per-dataset master files and SPASE records, dataset availability) on a schedule, one request at a time with a random pause per provider host, keeping the last good state when a provider is unreachable. It never deletes catalog entries, it only counts sources a provider no longer lists.
-- Pipeline Service: fetches, parses, and normalizes data for a dataset and stores it in MongoDB, adding dataset metadata from the source where available. It also processes on-demand fetch jobs requested by the frontend.
-- Frontend: the Streamlit dashboard, which reads the catalog, the dataset metadata, and the time-series data from MongoDB and renders them.
-- MongoDB: the shared data store, holding the dataset catalog, descriptive metadata for each dataset, the per-dataset time-series data, and the fetch-job queue. `mongo-express` provides a web admin UI.
+- Pipeline Service: keeps the feeds of `config/feeds.toml` current and processes the fetch jobs of the frontend. A scheduler queues one job per feed on start and whenever its interval has passed; a job runner works off the jobs of each source type in its own lane. The pipelines fetch in calendar chunks, record which chunks are stable, write only changed documents, and save the dataset metadata with the curated metadata of `config/metadata/` laid over it.
+- Frontend: the Streamlit app with the live dashboard, whose panels are configured in `config/feeds.toml`, a dataset explorer, and a downloader that queues fetch jobs.
+- MongoDB: the shared data store, holding the master catalog, the metadata of each dataset, one time series collection per dataset, the stored coverage and chunk status of each dataset, and the job queue. `mongo-express` provides a web admin UI.
 
 ![Architecture diagram: external data sources feed the ingestion components, which write to MongoDB collections read by the consumers](docs/architecture.drawio.svg)
 
-Solid arrows show data flow; dashed arrows show the fetch-job queue between the frontend and the pipeline service. The diagram is an editable draw.io file and can be opened directly in draw.io.
+Solid arrows show data flow; dashed arrows show the job queue between the frontend and the pipeline service. The files in `config/` give the feeds and the curated metadata; the frontend also reads the dashboard panels from `config/feeds.toml`, which the diagram leaves out. The diagram is an editable draw.io file and can be opened directly in draw.io.
 
 The shared `space_weather_analysis` library (clients, configuration, database connection, logging, utilities) is used in-process by all three components, keeping domain logic independent of MongoDB, HTTP, and Streamlit.
 
@@ -86,17 +86,73 @@ Details on each file: [docs/local-data.md](docs/local-data.md).
 
 ### Acknowledgements
 
-The providers request the following acknowledgements and citations.
+The providers request the following acknowledgements and citations. Providers and the entries of each list are in alphabetical order.
 
-- SILSO: Source: WDC-SILSO, Royal Observatory of Belgium, Brussels, <https://doi.org/10.24414/qnza-ac80>
-- SOHO/LASCO CME catalog: "This CME catalog is generated and maintained at the CDAW Data Center by NASA and The Catholic University of America in cooperation with the Naval Research Laboratory. SOHO is a project of international cooperation between ESA and NASA." References: Yashiro et al. (2004), <https://doi.org/10.1029/2003JA010282>; Gopalswamy et al. (2009), <https://doi.org/10.1007/s11038-008-9282-7>
-- GFZ Kp index: Matzka, J., Stolle, C., Yamazaki, Y., Bronkalla, O. and Morschhauser, A. (2021). The geomagnetic Kp index and derived indices of geomagnetic activity. Space Weather, <https://doi.org/10.1029/2020SW002641>. Data: Matzka, J., Bronkalla, O., Tornow, K., Elger, K. and Stolle, C. (2021). Geomagnetic Kp index. V. 1.0. GFZ Data Services, <https://doi.org/10.5880/Kp.0001>
-- NASA SPDF: NASA Space Physics Data Facility (SPDF), <https://doi.org/10.17616/R3P301>. Individual CDAWeb datasets name their instrument teams and specific requirements in their `Acknowledgement` and `Rules_of_use` metadata attributes.
-- NASA CCMC: We acknowledge the Community Coordinated Modeling Center (CCMC) at Goddard Space Flight Center for the use of iSWA, <https://ccmc.gsfc.nasa.gov/tools/iSWA/>
-- WDC for Geomagnetism, Edinburgh: We acknowledge the WDC for Geomagnetism (Edinburgh) and the institutes that supply its data.
-- INTERMAGNET: This project relies on data collected at magnetic observatories. We thank the national institutes that support them and INTERMAGNET for promoting high standards of magnetic observatory practice (<www.intermagnet.org>).
-- AMDA: Data analysis was performed with the AMDA science analysis system provided by the Centre de Données de la Physique des Plasmas (CDPP) supported by CNRS, CNES, Observatoire de Paris and Université Paul Sabatier, Toulouse.
-- ESA: Data provided by the European Space Agency (ESA). For Cluster data, we acknowledge the instrument teams and the Cluster Science Archive.
+<details>
+<summary>AMDA</summary>
+
+Data analysis was performed with the AMDA science analysis system provided by the Centre de Données de la Physique des Plasmas (CDPP) supported by CNRS, CNES, Observatoire de Paris and Université Paul Sabatier, Toulouse.
+
+</details>
+
+<details>
+<summary>ESA</summary>
+
+Data provided by the European Space Agency (ESA). For Cluster data, we acknowledge the instrument teams and the Cluster Science Archive.
+
+</details>
+
+<details>
+<summary>GFZ Kp index</summary>
+
+Matzka, J., Stolle, C., Yamazaki, Y., Bronkalla, O. and Morschhauser, A. (2021). The geomagnetic Kp index and derived indices of geomagnetic activity. Space Weather, <https://doi.org/10.1029/2020SW002641>. Data: Matzka, J., Bronkalla, O., Tornow, K., Elger, K. and Stolle, C. (2021). Geomagnetic Kp index. V. 1.0. GFZ Data Services, <https://doi.org/10.5880/Kp.0001>
+
+</details>
+
+<details>
+<summary>INTERMAGNET</summary>
+
+This project relies on data collected at magnetic observatories. We thank the national institutes that support them and INTERMAGNET for promoting high standards of magnetic observatory practice (<www.intermagnet.org>).
+
+</details>
+
+<details>
+<summary>NASA CCMC</summary>
+
+We acknowledge the Community Coordinated Modeling Center (CCMC) at Goddard Space Flight Center for the use of iSWA, <https://ccmc.gsfc.nasa.gov/tools/iSWA/>
+
+</details>
+
+<details>
+<summary>NASA SPDF</summary>
+
+NASA Space Physics Data Facility (SPDF), <https://doi.org/10.17616/R3P301>. Individual CDAWeb datasets name their instrument teams and specific requirements in their `Acknowledgement` and `Rules_of_use` metadata attributes.
+
+</details>
+
+<details>
+<summary>NOAA SWPC</summary>
+
+Data provided by the NOAA Space Weather Prediction Center, <https://www.spaceweather.gov/>.
+
+</details>
+
+<details>
+<summary>SILSO</summary>
+
+Source: WDC-SILSO, Royal Observatory of Belgium, Brussels, <https://doi.org/10.24414/qnza-ac80>
+
+</details>
+
+<details>
+<summary>SOHO/LASCO CME catalog</summary>
+
+"This CME catalog is generated and maintained at the CDAW Data Center by NASA and The Catholic University of America in cooperation with the Naval Research Laboratory. SOHO is a project of international cooperation between ESA and NASA." References: Yashiro et al. (2004), <https://doi.org/10.1029/2003JA010282>; Gopalswamy et al. (2009), <https://doi.org/10.1007/s11038-008-9282-7>
+
+</details>
+
+<details>
+<summary>SuperMAG (JHU/APL)</summary>
 
 SuperMAG data and indices, including those retrieved through AMDA or KNMI, are acknowledged as required by the [SuperMAG rules of the road](https://supermag.jhuapl.edu/info/?page=rulesoftheroad):
 
@@ -108,24 +164,68 @@ SuperMAG data and indices, including those retrieved through AMDA or KNMI, are a
   - SMR, SMR-LT: Newell, P. T. and J. W. Gjerloev (2012), SuperMAG-Based Partial Ring Current Indices, J. Geophys. Res., 117, <https://doi.org/10.1029/2012JA017586>
 - Ground magnetometer data: the acknowledgement and the station network references below.
 
-<details>
-<summary>SuperMAG ground magnetometer acknowledgement</summary>
+For the ground magnetometer data we gratefully acknowledge:
 
-For the ground magnetometer data we gratefully acknowledge: INTERMAGNET; USGS Geomagnetism Program; CARISMA, PI Ian Mann; CANMOS, Geomagnetism Unit of the Geological Survey of Canada; The S-RAMP Database, PI K. Yumoto and Dr. K. Shiokawa; The SPIDR database; AARI, PI Oleg Troshichev; The MACCS program, PI M. Engebretson; GIMA; MEASURE, UCLA IGPP and Florida Institute of Technology; SAMBA, PI Eftyhia Zesta; 210 Chain, PI K. Yumoto; SAMNET, PI Farideh Honary; IMAGE, PI Liisa Juusola; Finnish Meteorological Institute, PI Liisa Juusola; Sodankylä Geophysical Observatory, PI Tero Raita; UiT the Arctic University of Norway, Tromsø Geophysical Observatory, PI Magnar G. Johnsen; GFZ German Research Centre For Geosciences, PI Jürgen Matzka; Institute of Geophysics, Polish Academy of Sciences, PI Anne Neska and Jan Reda; Polar Geophysical Institute, PI Alexander Yahnin and Yarolav Sakharov; Geological Survey of Sweden, PI Gerhard Schwarz; Swedish Institute of Space Physics, PI Masatoshi Yamauchi; AUTUMN, PI Martin Connors; DTU Space, Thom Edwards and PI Anna Willer; South Pole and McMurdo Magnetometer, PI's Louis J. Lanzarotti and Alan T. Weatherwax; ICESTAR; RAPIDMAG; British Artarctic Survey; McMac, PI Dr. Peter Chi; BGS, PI Dr. Susan Macmillan; Pushkov Institute of Terrestrial Magnetism, Ionosphere and Radio Wave Propagation (IZMIRAN); MFGI, PI B. Heilig; University of L'Aquila, PI M. Vellante; BCMT, V. Lesur and A. Chambodut; Data obtained in cooperation with Geoscience Australia, PI Andrew Lewis; PENGUIn, co-PIs Bob Clauer, Michael Hartinger, and Zhonghua Xu; MagStar, PI Jennifer Gannon; LISN PI Cesar Valladares; Geophysical and Astronomical Observatory of the University of Coimbra, PI Paulo Ribeiro; Leibniz Institute of Atmospheric Physics, PI Jorge Chau; SuperMAG, PI Rafael Mesquita; Data obtained in cooperation with the Australian Bureau of Meteorology, PI Richard Marshall.
+- 210 Chain, PI K. Yumoto
+- AARI, PI Oleg Troshichev
+- AUTUMN, PI Martin Connors
+- BCMT, V. Lesur and A. Chambodut
+- BGS, PI Dr. Susan Macmillan
+- British Artarctic Survey
+- CANMOS, Geomagnetism Unit of the Geological Survey of Canada
+- CARISMA, PI Ian Mann
+- Data obtained in cooperation with Geoscience Australia, PI Andrew Lewis
+- Data obtained in cooperation with the Australian Bureau of Meteorology, PI Richard Marshall
+- DTU Space, Thom Edwards and PI Anna Willer
+- Finnish Meteorological Institute, PI Liisa Juusola
+- Geological Survey of Sweden, PI Gerhard Schwarz
+- Geophysical and Astronomical Observatory of the University of Coimbra, PI Paulo Ribeiro
+- GFZ German Research Centre For Geosciences, PI Jürgen Matzka
+- GIMA
+- ICESTAR
+- IMAGE, PI Liisa Juusola
+- Institute of Geophysics, Polish Academy of Sciences, PI Anne Neska and Jan Reda
+- INTERMAGNET
+- Leibniz Institute of Atmospheric Physics, PI Jorge Chau
+- LISN PI Cesar Valladares
+- MagStar, PI Jennifer Gannon
+- McMac, PI Dr. Peter Chi
+- MEASURE, UCLA IGPP and Florida Institute of Technology
+- MFGI, PI B. Heilig
+- PENGUIn, co-PIs Bob Clauer, Michael Hartinger, and Zhonghua Xu
+- Polar Geophysical Institute, PI Alexander Yahnin and Yarolav Sakharov
+- Pushkov Institute of Terrestrial Magnetism, Ionosphere and Radio Wave Propagation (IZMIRAN)
+- RAPIDMAG
+- SAMBA, PI Eftyhia Zesta
+- SAMNET, PI Farideh Honary
+- Sodankylä Geophysical Observatory, PI Tero Raita
+- South Pole and McMurdo Magnetometer, PI's Louis J. Lanzarotti and Alan T. Weatherwax
+- SuperMAG, PI Rafael Mesquita
+- Swedish Institute of Space Physics, PI Masatoshi Yamauchi
+- The MACCS program, PI M. Engebretson
+- The S-RAMP Database, PI K. Yumoto and Dr. K. Shiokawa
+- The SPIDR database
+- UiT the Arctic University of Norway, Tromsø Geophysical Observatory, PI Magnar G. Johnsen
+- University of L'Aquila, PI M. Vellante
+- USGS Geomagnetism Program
+
+Station network references:
+
+- AALPIP: Clauer, C. R., et al. (2014), An autonomous adaptive low-power instrument platform (AAL-PIP) for remote high-latitude geospace data collection, Geosci. Instrum. Methods Data Syst., 3, 211-227, <https://doi.org/10.5194/gi-3-211-2014>
+- CARISMA: Mann, I. R., et al. (2008), The upgraded CARISMA magnetometer array in the THEMIS era, Space Sci. Rev., 141, 413-451, <https://doi.org/10.1007/s11214-008-9457-6>
+- EMMA: Lichtenberger J., M. Clilverd, B. Heilig, M. Vellante, J. Manninen, C. Rodger, A. Collier, A. Jørgensen, J. Reda, R. Holzworth, and R. Friedel (2013), The plasmasphere during a space weather event: first results from the PLASMON project, J. Space Weather Space Clim., 3, A23, <https://www.swsc-journal.org/articles/swsc/pdf/2013/01/swsc120062.pdf>
+- IMAGE: Tanskanen, E.I. (2009), A comprehensive high-throughput analysis of substorms observed by IMAGE magnetometer network: Years 1993-2003 examined, 114, A05204, <https://doi.org/10.1029/2008JA013682>
+- INTERMAGNET: Love, J. J., Chulliat, A. (2013), An international network of magnetic observatories, Eos, 94(42), 373-374, <https://doi.org/10.1002/2013EO420001>
+- MACCS: Engebretson, M. J., W. J. Hughes, J. L. Alford, E. Zesta, L. J. Cahill, Jr., R. L. Arnoldy, and G. D. Reeves (1995), Magnetometer array for cusp and cleft studies observations of the spatial extent of broadband ULF magnetic pulsations at cusp/cleft latitudes, J. Geophys. Res., 100, 19371-19386, <https://doi.org/10.1029/95JA00768>
+- MAGDAS / 210 Chain: Yumoto, K., and the CPMN Group (2001), Characteristics of Pi 2 magnetic pulsations observed at the CPMN stations: A review of the STEP results, Earth Planets Space, 53, 981-992.
+- McMAC: Chi, P. J., M. J. Engebretson, M. B. Moldwin, C. T. Russell, I. R. Mann, M. R. Hairston, M. Reno, J. Goldstein, L. I. Winkler, J. L. Cruz-Abeyro, D.-H. Lee, K. Yumoto, R. Dalrymple, B. Chen, and J. P. Gibson (2013), Sounding of the plasmasphere by Mid-continent MAgnetoseismic Chain magnetometers, J. Geophys. Res. Space Physics, 118, <https://doi.org/10.1002/jgra.50274>
 
 </details>
 
 <details>
-<summary>SuperMAG station network references</summary>
+<summary>WDC for Geomagnetism, Edinburgh</summary>
 
-- EMMA: Lichtenberger J., M. Clilverd, B. Heilig, M. Vellante, J. Manninen, C. Rodger, A. Collier, A. Jørgensen, J. Reda, R. Holzworth, and R. Friedel (2013), The plasmasphere during a space weather event: first results from the PLASMON project, J. Space Weather Space Clim., 3, A23, <https://www.swsc-journal.org/articles/swsc/pdf/2013/01/swsc120062.pdf>
-- IMAGE: Tanskanen, E.I. (2009), A comprehensive high-throughput analysis of substorms observed by IMAGE magnetometer network: Years 1993-2003 examined, 114, A05204, <https://doi.org/10.1029/2008JA013682>
-- MACCS: Engebretson, M. J., W. J. Hughes, J. L. Alford, E. Zesta, L. J. Cahill, Jr., R. L. Arnoldy, and G. D. Reeves (1995), Magnetometer array for cusp and cleft studies observations of the spatial extent of broadband ULF magnetic pulsations at cusp/cleft latitudes, J. Geophys. Res., 100, 19371-19386, <https://doi.org/10.1029/95JA00768>
-- McMAC: Chi, P. J., M. J. Engebretson, M. B. Moldwin, C. T. Russell, I. R. Mann, M. R. Hairston, M. Reno, J. Goldstein, L. I. Winkler, J. L. Cruz-Abeyro, D.-H. Lee, K. Yumoto, R. Dalrymple, B. Chen, and J. P. Gibson (2013), Sounding of the plasmasphere by Mid-continent MAgnetoseismic Chain magnetometers, J. Geophys. Res. Space Physics, 118, <https://doi.org/10.1002/jgra.50274>
-- MAGDAS / 210 Chain: Yumoto, K., and the CPMN Group (2001), Characteristics of Pi 2 magnetic pulsations observed at the CPMN stations: A review of the STEP results, Earth Planets Space, 53, 981-992.
-- CARISMA: Mann, I. R., et al. (2008), The upgraded CARISMA magnetometer array in the THEMIS era, Space Sci. Rev., 141, 413-451, <https://doi.org/10.1007/s11214-008-9457-6>
-- AALPIP: Clauer, C. R., et al. (2014), An autonomous adaptive low-power instrument platform (AAL-PIP) for remote high-latitude geospace data collection, Geosci. Instrum. Methods Data Syst., 3, 211-227, <https://doi.org/10.5194/gi-3-211-2014>
-- INTERMAGNET: Love, J. J., Chulliat, A. (2013), An international network of magnetic observatories, Eos, 94(42), 373-374, <https://doi.org/10.1002/2013EO420001>
+We acknowledge the WDC for Geomagnetism (Edinburgh) and the institutes that supply its data.
 
 </details>
 
@@ -133,12 +233,12 @@ For the ground magnetometer data we gratefully acknowledge: INTERMAGNET; USGS Ge
 
 - Language: Python 3.12
 - Dependency management: uv (with lockfile)
-- Configuration: pydantic-settings (environment variables)
-- Storage: MongoDB (with GridFS for large files), browsed via mongo-express
+- Configuration: pydantic-settings (environment variables) and TOML files (feeds, dashboard panels, curated metadata)
+- Storage: MongoDB time series collections, browsed via mongo-express
 - Frontend: Streamlit and Plotly
-- Scientific stack: pandas, xarray, NumPy/SciPy, astropy, sunpy, cdflib, netCDF4
+- Data handling: pandas, NumPy, xarray; cdasws, cdflib and netCDF4 for CDAWeb; hapiclient for HAPI servers
 - Containerization: Docker and Docker Compose
-- Quality tooling: pytest, Ruff (lint and format), mypy
+- Quality tooling: pytest with testcontainers, Ruff (lint and format), mypy
 
 ## Getting Started
 
@@ -157,7 +257,9 @@ The full stack runs in Docker. uv is only required for local development, tests,
    cp example.env .env
    ```
 
-2. Download the local data files into `data/` (see [Data Sources and Licenses](#data-sources-and-licenses) for their terms):
+2. Review `config/feeds.toml`: its feeds decide which datasets the pipeline service keeps current, and its `dashboard` table which panels the dashboard shows.
+
+3. Download the local data files into `data/` (see [Data Sources and Licenses](#data-sources-and-licenses) for their terms):
 
    ```bash
    curl -o data/SN_d_tot_V2.0.csv https://www.sidc.be/SILSO/INFO/sndtotcsv.php
@@ -166,7 +268,7 @@ The full stack runs in Docker. uv is only required for local development, tests,
    curl -o data/cme_catalog.txt https://cdaw.gsfc.nasa.gov/CME_list/UNIVERSAL_ver2/text_ver/univ_all.txt
    ```
 
-3. Build and start all services:
+4. Build and start all services:
 
    ```bash
    docker compose up --build -d
@@ -184,9 +286,9 @@ The full stack runs in Docker. uv is only required for local development, tests,
 
    The ports shown are the defaults; the published ports can be changed in `.env` (see `example.env`).
 
-4. Open the dashboard at [http://localhost:8501](http://localhost:8501).
+5. Open the dashboard at [http://localhost:8501](http://localhost:8501). On a fresh database the metadata worker needs a few minutes to build the catalog; feeds whose datasets are not catalogued yet wait for it.
 
-5. Stop the stack:
+6. Stop the stack:
 
    ```bash
    docker compose down
@@ -204,11 +306,11 @@ uv sync
 uv run pytest
 
 # Lint and format
-uv run ruff check src
-uv run ruff format src
+uv run ruff check src tests
+uv run ruff format src tests
 
-# Type-check
-uv run mypy src
+# Type-check (src and tests, as configured in pyproject.toml)
+uv run mypy
 ```
 
 `pytest` runs the unit tests; tests marked `integration` need Docker, start a throwaway MongoDB themselves (no running stack or credentials needed) and are run with `uv run pytest -m integration`.
@@ -228,14 +330,21 @@ Tools started outside Docker, such as the notebooks, can load the variables from
 ├── pyproject.toml              # Project metadata, dependencies, tool config
 ├── uv.lock                     # Locked dependency versions
 ├── example.env                 # Template for required environment variables
-├── config/                     # Feed file: datasets the pipeline service keeps loaded and their intervals
+├── config/                     # feeds.toml: feeds that keep datasets current, and the dashboard panels
 │   └── metadata/               # Curated metadata per provider, with the pages each value was taken from
 ├── data/                       # Local data files (not in the repository) and HAPI server list
 ├── docs/                       # Architecture diagram (editable draw.io SVG) and local data notes
 ├── notebooks/                  # Jupyter notebooks for exploratory analysis
 ├── src/
-│   ├── space_weather_analysis/ # Shared core library (clients, config, DB, logging, utils)
-│   │   └── timeseries/         # Time series documents and their storage in MongoDB time series collections
+│   ├── space_weather_analysis/ # Shared core library used by all components
+│   │   ├── catalog/            # Master catalog of the datasets and their sources
+│   │   ├── clients/            # Provider clients: HAPI, CDAWeb, GFZ, SWPC
+│   │   ├── metadata/           # Dataset metadata: builders per source, overlays of further sources, curated metadata
+│   │   ├── timeseries/         # Time series documents and their storage in MongoDB time series collections
+│   │   ├── coverage/           # Stored time ranges of each dataset
+│   │   ├── jobs/               # Job queue shared by frontend and pipeline service
+│   │   ├── scales/             # NOAA space weather scales and flare classes
+│   │   └── config/, database/, logging/, util/
 │   ├── catalog_collector/      # Metadata worker (metadata_worker.py)
 │   │   ├── data_catalog/       # Master catalog: GFZ entries and availability refresh
 │   │   ├── metadata_catalog/   # Dataset metadata: HAPI, CDAS, master file and SPASE metadata refresh
@@ -249,7 +358,11 @@ Tools started outside Docker, such as the notebooks, can load the variables from
 │   │   ├── chunk_status/       # Status of each fetched chunk, which decides when it is fetched again
 │   │   ├── pipelines/          # One pipeline per source type, the shared chunk loop and the pipeline factory
 │   │   └── parsing/            # Conversion of delivered data and local files into frames
-│   └── streamlit_app/          # Streamlit dashboard and plots
+│   └── streamlit_app/          # Streamlit app (main.py)
+│       ├── pages/              # Dashboard, dataset explorer and downloader pages
+│       ├── dashboard/          # Dashboard configuration, panel type registry, labels, freshness and valid ranges
+│       │   └── panels/         # Panel types: value, time series, table, feed status
+│       └── figures/, plots/    # Plot builders of the explorer
 └── tests/                      # Unit tests (tests/unit) and integration tests (tests/integration)
 ```
 
