@@ -47,7 +47,8 @@ source_type = "LOCAL"
 # source means naming another dataset and field. Each panel has a `type` (value, timeseries, table), a `row`
 # from 1 at the top and a relative `width`; the other keys depend on the type. A time series shows its `view`
 # up to now and loads its `history`, reachable by panning while live updates are paused. A `scale` names a
-# registered scale (noaa_g, noaa_s, noaa_r); own levels are given as `thresholds` instead.
+# registered scale (noaa_g, noaa_s, noaa_r); own levels are given as `thresholds` instead. `valid_min` and
+# `valid_max` add bounds of valid values to those of the metadata; a chart offers to hide invalid values only where any are known.
 
 [[dashboard.panel]]
 type = "value"
@@ -94,9 +95,10 @@ history = "P1Y"
 y_range = [0, 9.5]
 y_title = "Kp (0-9)"
 scale = "noaa_g"
+# Kp is defined from 0 to 9, which the metadata of neither source states
 series = [
-    { dataset = "Kp", field = "Kp", label = "Kp (GFZ)", style = "bars" },
-    { dataset = "swpc_kp_estimated", field = "estimated_kp", label = "Estimated Kp (SWPC)", color = "#0068C9" },
+    { dataset = "Kp", field = "Kp", label = "Kp (GFZ)", style = "bars", valid_min = 0, valid_max = 9 },
+    { dataset = "swpc_kp_estimated", field = "estimated_kp", label = "Estimated Kp (SWPC)", color = "#0068C9", valid_min = 0, valid_max = 9 },
 ]
 
 [[dashboard.panel]]

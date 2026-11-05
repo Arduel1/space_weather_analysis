@@ -8,13 +8,14 @@ from pydantic import Field
 
 from streamlit_app import data
 from streamlit_app.dashboard.freshness import panel_freshness
-from streamlit_app.dashboard.labels import Metadata, dataset_title, field_description, field_label, field_unit, sources_line
-from streamlit_app.dashboard.panels.base import PanelConfig, PanelContext, ScaleChoice, ValueFormat, collection_of
+from streamlit_app.dashboard.labels import HELP_LINE_BREAK, Metadata, dataset_title, field_description, field_label, field_unit, sources_line
+from streamlit_app.dashboard.panels.base import PanelConfig, PanelContext, ScaleChoice, ValidityChoice, ValueFormat, collection_of
 from streamlit_app.dashboard.scales import FORMATTERS, Level, format_value
+from streamlit_app.dashboard.validity import describe_validity, valid_range
 
 
-class ValuePanel(PanelConfig, ScaleChoice, ValueFormat):
-    """A tile with the newest value of one field and, with a scale, its level.
+class ValuePanel(PanelConfig, ScaleChoice, ValueFormat, ValidityChoice):
+    """A tile with the newest value of one field and, with a scale, its level; a hidden invalid value shows as "invalid".
 
     Attributes:
         dataset: The dataset ID, which must belong to a feed.
@@ -61,7 +62,7 @@ def value_view(panel: ValuePanel, latest: tuple[datetime, dict[str, Any]] | None
         The view; a missing, non-numeric or non-finite value shows "n/a" without level.
     """
     title = panel.title or field_label(metadata, panel.field)
-    help_text = " -- ".join(part for part in (field_description(metadata, panel.field), dataset_title(metadata)) if part)
+    help_text = HELP_LINE_BREAK.join(_help_lines(panel, metadata))
     labels = {"title": title, "help": help_text, "source": sources_line([metadata])}
     if latest is None:
         return ValueView(text="n/a", time=None, level=None, **labels)
@@ -70,11 +71,27 @@ def value_view(panel: ValuePanel, latest: tuple[datetime, dict[str, Any]] | None
     # bool is a subclass of int but no measurement
     if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
         return ValueView(text="n/a", time=time, level=None, **labels)
+    if panel.hide_invalid and not valid_range(metadata, panel.field, panel.valid_min, panel.valid_max).is_valid(float(value)):
+        return ValueView(text="invalid", time=time, level=None, **labels)
     # A named formatter writes a complete text such as a flare class, which takes no unit
     unit = "" if panel.format in FORMATTERS else field_unit(metadata, panel.field, panel.unit)
     text = f"{format_value(float(value), panel.format)} {unit}".rstrip()
     scale = panel.resolved_scale()
     return ValueView(text=text, time=time, level=scale.level_of(float(value)) if scale is not None else None, **labels)
+
+
+def _help_lines(panel: ValuePanel, metadata: Metadata) -> list[str]:
+    """Lists the lines of the tile help: field description, dataset title and, where known, the valid values."""
+    lines = []
+    description = field_description(metadata, panel.field)
+    if description:
+        lines.append(description)
+    title = dataset_title(metadata)
+    if title:
+        lines.append(f"Dataset: {title}")
+    if valid_range(metadata, panel.field, panel.valid_min, panel.valid_max).is_known:
+        lines.append(f"Valid values: {describe_validity(metadata, panel.field, panel.valid_min, panel.valid_max)}")
+    return lines
 
 
 def render_value(panel: ValuePanel, context: PanelContext, key: str) -> None:

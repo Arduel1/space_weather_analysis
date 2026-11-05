@@ -7,9 +7,10 @@ import pytest
 
 from streamlit_app.dashboard.labels import Metadata
 from streamlit_app.dashboard.panels.table import TIME_LABEL, TablePanel, table_frame
-from streamlit_app.dashboard.panels.timeseries import TimeseriesPanel, timeseries_figure
+from streamlit_app.dashboard.panels.timeseries import TimeseriesPanel, break_gaps, timeseries_figure, validity_help
 from streamlit_app.dashboard.panels.value import ValuePanel, ValueView, value_view
 from streamlit_app.dashboard.scales import Level, threshold_scale
+from streamlit_app.dashboard.validity import describe_validity
 
 NOW = datetime(2024, 1, 1, 3, tzinfo=UTC)
 VALUE_TIME = datetime(2024, 1, 1, 2, tzinfo=UTC)
@@ -82,7 +83,7 @@ def test_value_view_formats_the_newest_value_with_its_level(
                 "2.0e-05 Wm-2",
                 VALUE_TIME,
                 None,
-                help="Flux of the long channel -- Synthetic X-ray flux",
+                help="Flux of the long channel  \nDataset: Synthetic X-ray flux",
                 source="Source: Synthetic provider, CC0",
             ),
             id="configured-title-and-unit-win",
@@ -94,7 +95,7 @@ def test_value_view_formats_the_newest_value_with_its_level(
                 "2.0e-05 W/m^2",
                 VALUE_TIME,
                 None,
-                help="Flux of the long channel -- Synthetic X-ray flux",
+                help="Flux of the long channel  \nDataset: Synthetic X-ray flux",
                 source="Source: Synthetic provider, CC0",
             ),
             id="metadata-label-and-unit",
@@ -106,7 +107,7 @@ def test_value_view_formats_the_newest_value_with_its_level(
                 "M2.0",
                 VALUE_TIME,
                 None,
-                help="Flux of the long channel -- Synthetic X-ray flux",
+                help="Flux of the long channel  \nDataset: Synthetic X-ray flux",
                 source="Source: Synthetic provider, CC0",
             ),
             id="named-formatter-without-unit",
@@ -205,3 +206,81 @@ def test_table_frame_labels_unconfigured_columns_from_metadata() -> None:
     table = table_frame(panel, frame, FLUX_RECORD)
 
     assert table.columns.tolist() == [TIME_LABEL, "Long flux"]
+
+
+# Minutes 0, 1, 2 and, after a missing stretch, 12 and 13 after NOW
+GAPPY_MINUTES = [0, 1, 2, 12, 13]
+
+
+def _minute_values(minutes: list[int]) -> pd.Series:
+    """Provides the value 1.0 at each of the given minutes after NOW."""
+    return pd.Series(1.0, index=pd.DatetimeIndex([NOW + timedelta(minutes=minute) for minute in minutes]))
+
+
+@pytest.mark.parametrize(
+    ("minutes", "cadence", "expected_break_minutes"),
+    [
+        pytest.param(GAPPY_MINUTES, None, [7.0], id="median-spacing-finds-gap"),
+        pytest.param(GAPPY_MINUTES, timedelta(minutes=5), [], id="coarse-cadence-no-gap"),
+        pytest.param([0, 1, 2, 3], None, [], id="regular-values"),
+        pytest.param([0], None, [], id="single-value"),
+    ],
+)
+def test_break_gaps_inserts_a_missing_value_halfway_into_each_gap(
+    minutes: list[int], cadence: timedelta | None, expected_break_minutes: list[float]
+) -> None:
+    """A spacing longer than three times the cadence, or the median spacing without cadence, gets one NaN halfway in."""
+    broken = break_gaps(_minute_values(minutes), cadence)
+
+    break_minutes = [(time - NOW).total_seconds() / 60 for time in broken.index[broken.isna()]]
+    assert (break_minutes, broken.dropna().index.tolist()) == (expected_break_minutes, _minute_values(minutes).index.tolist())
+
+
+def test_timeseries_figure_hides_invalid_values_on_request() -> None:
+    """With hiding on, values outside the configured valid range of a series become gaps; with hiding off they stay."""
+    panel = TimeseriesPanel(type="timeseries", row=1, view="PT1H", history="PT1H", series=[{"dataset": "set", "field": "flux", "valid_min": 1e-8}])
+    frame = pd.DataFrame({"flux": [1e-9, 2e-8, 3e-8]}, index=pd.DatetimeIndex([NOW - timedelta(minutes=minute) for minute in (2, 1, 0)]))
+
+    hidden = timeseries_figure(panel, {"set": frame}, {}, NOW, hide_invalid=True)
+    shown = timeseries_figure(panel, {"set": frame}, {}, NOW, hide_invalid=False)
+
+    assert (bool(pd.isna(hidden.data[0].y[0])), float(shown.data[0].y[0])) == (True, 1e-9)
+
+
+@pytest.mark.parametrize(
+    ("metadata", "low", "high", "expected"),
+    [
+        pytest.param(
+            {"variables": [{"name": "flux", "fill": "0", "valid_min": 1e-9, "valid_max": 1.0}]}, None, None, "fill 0, valid 1e-09 to 1", id="metadata"
+        ),
+        pytest.param({"variables": [{"name": "flux", "fill": "0"}]}, 1e-9, None, "fill 0, valid >= 1e-09 (config)", id="configured-low-bound"),
+        pytest.param({}, None, 100.0, "valid <= 100 (config)", id="configured-high-bound"),
+        pytest.param({}, None, None, "no fill value or valid range known", id="nothing-known"),
+    ],
+)
+def test_describe_validity_names_fill_value_range_and_configured_bounds(
+    metadata: Metadata, low: float | None, high: float | None, expected: str
+) -> None:
+    """The description names fill value and valid range and marks bounds from the configuration."""
+    assert describe_validity(metadata, "flux", low, high) == expected
+
+
+def _kp_panel(series: list[dict[str, Any]]) -> TimeseriesPanel:
+    """Builds a time series panel of the given series over one hour."""
+    return TimeseriesPanel(type="timeseries", row=1, view="PT1H", history="PT1H", series=series)
+
+
+@pytest.mark.parametrize(
+    ("series", "expected"),
+    [
+        pytest.param(
+            [{"dataset": "kp", "field": "kp", "label": "Kp", "valid_min": 0, "valid_max": 9}, {"dataset": "other", "field": "x", "label": "X"}],
+            "Hides fill values and values outside the valid range:  \nKp: valid 0 (config) to 9 (config)  \nX: no fill value or valid range known",
+            id="one-series-with-bounds-lists-every-series",
+        ),
+        pytest.param([{"dataset": "other", "field": "x", "label": "X"}], None, id="nothing-known-no-switch"),
+    ],
+)
+def test_validity_help_lists_each_series_or_hides_the_switch(series: list[dict[str, Any]], expected: str | None) -> None:
+    """The switch help lists every series on its own line, and there is no switch when no series has a fill value or bound."""
+    assert validity_help(_kp_panel(series), {}) == expected

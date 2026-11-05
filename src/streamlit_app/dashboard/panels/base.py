@@ -129,6 +129,22 @@ class ValueFormat(BaseModel):
         return self
 
 
+class ValidityChoice(BaseModel):
+    """Which values of a field a panel hides as no measurement.
+
+    Attributes:
+        hide_invalid: Whether fill values and values outside the valid range are hidden at first.
+        valid_min: The smallest valid value, taking precedence over the metadata; None takes the metadata.
+        valid_max: The largest valid value, taking precedence over the metadata; None takes the metadata.
+    """
+
+    model_config = CLOSED
+
+    hide_invalid: bool = True
+    valid_min: float | None = None
+    valid_max: float | None = None
+
+
 class TimeWindow(BaseModel):
     """The time window of a panel over time.
 

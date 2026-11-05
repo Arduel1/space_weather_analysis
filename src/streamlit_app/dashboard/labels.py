@@ -6,9 +6,11 @@ from urllib.parse import urlsplit
 type Metadata = Mapping[str, Any]
 
 NO_METADATA = "no metadata"
+# Line break inside Streamlit help texts and captions, which render markdown
+HELP_LINE_BREAK = "  \n"
 
 
-def _variable(metadata: Metadata, field: str) -> Mapping[str, Any]:
+def variable_metadata(metadata: Metadata, field: str) -> Mapping[str, Any]:
     """Returns the metadata of one variable of a record; empty if the record does not describe it."""
     for variable in metadata.get("variables", []):
         if variable.get("name") == field:
@@ -40,7 +42,7 @@ def field_label(metadata: Metadata, field: str, configured: str = "") -> str:
     Returns:
         The label.
     """
-    return configured or _variable(metadata, field).get("label") or field
+    return configured or variable_metadata(metadata, field).get("label") or field
 
 
 def field_unit(metadata: Metadata, field: str, configured: str = "") -> str:
@@ -54,12 +56,12 @@ def field_unit(metadata: Metadata, field: str, configured: str = "") -> str:
     Returns:
         The unit; empty if neither gives one.
     """
-    return configured or _variable(metadata, field).get("units") or ""
+    return configured or variable_metadata(metadata, field).get("units") or ""
 
 
 def field_description(metadata: Metadata, field: str) -> str:
     """Returns the description of a field from its variable; empty if the record gives none."""
-    return _variable(metadata, field).get("description") or ""
+    return variable_metadata(metadata, field).get("description") or ""
 
 
 def attribution(metadata: Metadata) -> str:
