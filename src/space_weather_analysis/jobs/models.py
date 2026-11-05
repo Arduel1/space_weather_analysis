@@ -113,3 +113,23 @@ class Job(BaseModel):
         """
         fields = {key: value for key, value in document.items() if key != "_id"}
         return cls.model_validate({**fields, "id": str(document["_id"])})
+
+
+class FeedJobSummary(BaseModel):
+    """How the jobs of one configured feed went: its newest job and the outcomes within a time span.
+
+    Attributes:
+        feed: The name of the feed.
+        latest: The newest job of the feed, of any age.
+        runs: The jobs of the feed created within the span.
+        completed: The jobs of the span that ended COMPLETED without missing chunks.
+        with_gaps: The jobs of the span that ended COMPLETED with missing chunks.
+        failed: The jobs of the span that ended FAILED.
+    """
+
+    feed: str
+    latest: Job
+    runs: int = 0
+    completed: int = 0
+    with_gaps: int = 0
+    failed: int = 0

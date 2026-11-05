@@ -54,6 +54,7 @@ def test_main_shows_the_dashboard_by_default(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(data, "read_latest", lambda *_: None)
     monkeypatch.setattr(data, "read_recent", lambda *_: pd.DataFrame())
     monkeypatch.setattr(data, "read_newest_time", lambda _: None)
+    monkeypatch.setattr(data, "get_feed_summaries", lambda _: [])
     monkeypatch.setattr(data, "get_metadata", lambda _: {})
 
     app = _run("main.py")
@@ -85,6 +86,7 @@ def test_dashboard_shows_tiles_charts_and_notes_for_missing_feeds(monkeypatch: p
     monkeypatch.setattr(data, "read_latest", lambda collection, _: (latest_time, newest[collection]) if collection in newest else None)
     monkeypatch.setattr(data, "read_recent", lambda collection, *_: _feed_frame() if collection in newest else pd.DataFrame())
     monkeypatch.setattr(data, "read_newest_time", lambda _: latest_time)
+    monkeypatch.setattr(data, "get_feed_summaries", lambda _: [])
     monkeypatch.setattr(data, "get_metadata", lambda _: {"source": {"type": "SWPC", "provider": "Synthetic provider"}})
 
     app = _run("pages/dashboard.py")
@@ -92,7 +94,8 @@ def test_dashboard_shows_tiles_charts_and_notes_for_missing_feeds(monkeypatch: p
     assert [metric.value for metric in app.metric] == ["4.00", "C2.0", "5.00e-01 pfu", "120"]
     # Only the Kp chart has a valid range, configured in the project feed file
     assert [toggle.label for toggle in app.toggle] == ["Live updates", "Hide invalid values"]
-    assert (len(app.get("plotly_chart")), len(app.dataframe), len(app.info)) == (3, 1, 1)
+    # Notes: the sunspot chart without data and the feed status without jobs
+    assert (len(app.get("plotly_chart")), len(app.dataframe), len(app.info)) == (3, 1, 2)
     assert [caption.value.split(" -- ")[-1] for caption in app.caption if "Source:" in caption.value] == ["Source: Synthetic provider"] * 8
     assert [caption.value.split(" newest value")[0] for caption in app.caption if " UTC, " in caption.value] == [
         "2024-01-01 01:00 UTC, :red[stale],"

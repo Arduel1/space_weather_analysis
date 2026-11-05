@@ -155,3 +155,10 @@ columns = [
     { field = "kinetic_energy", label = "Kinetic energy (erg)" },
     { field = "remarks", label = "Remarks" },
 ]
+
+# Readable status of every feed, from its jobs instead of the logs
+[[dashboard.panel]]
+type = "feeds"
+title = "Feed status"
+row = 4
+window = "P1D"

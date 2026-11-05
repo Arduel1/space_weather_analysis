@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Self
 
@@ -173,10 +173,12 @@ class PanelContext:
     Attributes:
         now: The time of the drawing.
         feed_intervals: The interval of the feed loading each dataset, by dataset ID; None for a feed loaded only on start.
+        feed_schedule: The interval of each feed, by feed name; None for a feed loaded only on start.
     """
 
     now: datetime
     feed_intervals: Mapping[str, timedelta | None]
+    feed_schedule: Mapping[str, timedelta | None] = field(default_factory=dict)
 
 
 # Height of chart and table panels in pixels, so that the whole grid fits on one screen

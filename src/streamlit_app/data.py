@@ -15,7 +15,7 @@ from space_weather_analysis.config.errors import format_settings_error
 from space_weather_analysis.config.mongo import MongoSettings
 from space_weather_analysis.coverage.repository import CoverageRepository, MongoCoverageRepository
 from space_weather_analysis.database.connection import MongoConnection
-from space_weather_analysis.jobs.models import Job
+from space_weather_analysis.jobs.models import FeedJobSummary, Job
 from space_weather_analysis.jobs.repository import JobRepository, MongoJobRepository
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
 from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository, TimeSeriesRepository
@@ -341,3 +341,23 @@ def get_job(job_id: str) -> Job | None:
     except DATABASE_ERRORS:
         logger.exception("Error reading job %s", job_id)
         return None
+
+
+@st.cache_data(ttl=READ_TTL, show_spinner=False)
+def get_feed_summaries(since: datetime) -> list[FeedJobSummary]:
+    """Reads how the jobs of every feed went: its newest job and the outcomes since a time.
+
+    Args:
+        since: The start of the span the outcomes are counted in.
+
+    Returns:
+        One summary per feed that has a job, sorted by feed name; empty on error.
+    """
+    repositories = get_repositories()
+    if repositories is None:
+        return []
+    try:
+        return repositories.jobs.feed_summaries(since)
+    except DATABASE_ERRORS:
+        logger.exception("Error reading the feed job summaries")
+        return []

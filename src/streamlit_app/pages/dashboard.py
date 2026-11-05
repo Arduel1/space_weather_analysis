@@ -3,7 +3,14 @@ from datetime import UTC, datetime, timedelta
 import streamlit as st
 
 from streamlit_app import data
-from streamlit_app.dashboard.config import CONFIG_ERRORS, DashboardConfig, DashboardSettings, load_dashboard_config, load_feed_intervals
+from streamlit_app.dashboard.config import (
+    CONFIG_ERRORS,
+    DashboardConfig,
+    DashboardSettings,
+    load_dashboard_config,
+    load_feed_intervals,
+    load_feed_schedule,
+)
 from streamlit_app.dashboard.panel_types import PANEL_TYPES
 from streamlit_app.dashboard.panels.base import PanelContext
 
@@ -50,9 +57,10 @@ feeds_file = DashboardSettings().feeds_file
 try:
     dashboard_config = load_dashboard_config(feeds_file)
     feed_intervals = load_feed_intervals(feeds_file)
+    feed_schedule = load_feed_schedule(feeds_file)
 except CONFIG_ERRORS as error:
     st.error(f"The dashboard table of the feed file cannot be read: {error}")
     st.stop()
 
-_show_panels(dashboard_config, PanelContext(now=datetime.now(UTC), feed_intervals=feed_intervals))
+_show_panels(dashboard_config, PanelContext(now=datetime.now(UTC), feed_intervals=feed_intervals, feed_schedule=feed_schedule))
 _redraw_on_new_data(frozenset(dashboard_config.collections()))

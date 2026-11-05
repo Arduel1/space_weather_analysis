@@ -4,6 +4,7 @@ from types import MappingProxyType
 from typing import Any
 
 from streamlit_app.dashboard.panels.base import PanelConfig, PanelContext
+from streamlit_app.dashboard.panels.feeds import FeedsPanel, render_feeds
 from streamlit_app.dashboard.panels.table import TablePanel, render_table
 from streamlit_app.dashboard.panels.timeseries import TimeseriesPanel, render_timeseries
 from streamlit_app.dashboard.panels.value import ValuePanel, render_value
@@ -28,5 +29,6 @@ PANEL_TYPES: Mapping[str, PanelType[Any]] = MappingProxyType(
         "value": PanelType(ValuePanel, render_value),
         "timeseries": PanelType(TimeseriesPanel, render_timeseries),
         "table": PanelType(TablePanel, render_table),
+        "feeds": PanelType(FeedsPanel, render_feeds),
     }
 )

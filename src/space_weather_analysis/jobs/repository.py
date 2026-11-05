@@ -8,7 +8,7 @@ from pymongo import ASCENDING, ReturnDocument
 from pymongo.database import Database
 
 from space_weather_analysis.catalog.models import SourceType
-from space_weather_analysis.jobs.models import ChunkGap, FinalJobStatus, Job, JobParameters, JobStatus
+from space_weather_analysis.jobs.models import ChunkGap, FeedJobSummary, FinalJobStatus, Job, JobParameters, JobStatus
 
 
 class JobRepository(ABC):
@@ -48,6 +48,17 @@ class JobRepository(ABC):
 
         Returns:
             True if a job of the feed has not ended yet.
+        """
+
+    @abstractmethod
+    def feed_summaries(self, since: datetime) -> list[FeedJobSummary]:
+        """Summarizes the jobs of every feed: its newest job and the outcomes of the jobs created since a time.
+
+        Args:
+            since: The start of the span the outcomes are counted in.
+
+        Returns:
+            One summary per feed that has a job, sorted by feed name.
         """
 
     @abstractmethod
@@ -191,6 +202,50 @@ class MongoJobRepository(JobRepository):
             True if a job of the feed has not ended yet.
         """
         return self.collection.find_one({"feed": feed, "status": {"$in": [JobStatus.PENDING, JobStatus.RUNNING]}}, {"_id": 1}) is not None
+
+    def feed_summaries(self, since: datetime) -> list[FeedJobSummary]:
+        """Summarizes the jobs of every feed with one aggregation: its newest job and the outcomes since a time.
+
+        Args:
+            since: The start of the span the outcomes are counted in.
+
+        Returns:
+            One summary per feed that has a job, sorted by feed name.
+        """
+        in_span = {"$gte": ["$created_at", since]}
+        has_gaps = {"$gt": [{"$size": {"$ifNull": ["$missing_chunks", []]}}, 0]}
+        is_completed = {"$eq": ["$status", JobStatus.COMPLETED]}
+
+        def count_if(*conditions: dict[str, Any]) -> dict[str, Any]:
+            return {"$sum": {"$cond": [{"$and": [in_span, *conditions]}, 1, 0]}}
+
+        pipeline: list[dict[str, Any]] = [
+            {"$match": {"feed": {"$type": "string"}}},
+            # ObjectIds grow with their creation time, so the first job per feed is its newest
+            {"$sort": {"_id": -1}},
+            {
+                "$group": {
+                    "_id": "$feed",
+                    "latest": {"$first": "$$ROOT"},
+                    "runs": count_if(),
+                    "completed": count_if(is_completed, {"$not": [has_gaps]}),
+                    "with_gaps": count_if(is_completed, has_gaps),
+                    "failed": count_if({"$eq": ["$status", JobStatus.FAILED]}),
+                }
+            },
+            {"$sort": {"_id": 1}},
+        ]
+        return [
+            FeedJobSummary(
+                feed=group["_id"],
+                latest=Job.from_document(group["latest"]),
+                runs=group["runs"],
+                completed=group["completed"],
+                with_gaps=group["with_gaps"],
+                failed=group["failed"],
+            )
+            for group in self.collection.aggregate(pipeline)
+        ]
 
     def get(self, job_id: str) -> Job | None:
         """Reads one job.

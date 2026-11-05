@@ -119,8 +119,32 @@ class _FeedInterval(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
+    name: str = ""
     datasets: list[str] = Field(default_factory=list)
     interval: IsoDuration | None = None
+
+
+def _read_feed_intervals(path: pathlib.Path) -> list[_FeedInterval]:
+    """Reads name, datasets and interval of every feed of the feed file."""
+    with path.open("rb") as file:
+        return [_FeedInterval.model_validate(table) for table in tomllib.load(file).get("feed", [])]
+
+
+def load_feed_schedule(path: pathlib.Path) -> dict[str, timedelta | None]:
+    """Reads the interval of each feed of the feed file.
+
+    Args:
+        path: The path of the feed file.
+
+    Returns:
+        The interval by feed name; None for feeds loaded only on start.
+
+    Raises:
+        OSError: If the file cannot be read.
+        tomllib.TOMLDecodeError: If the file is no valid TOML.
+        pydantic.ValidationError: If a feed gives an interval that is no ISO 8601 duration.
+    """
+    return {feed.name: feed.interval for feed in _read_feed_intervals(path)}
 
 
 def load_feed_intervals(path: pathlib.Path) -> dict[str, timedelta | None]:
@@ -137,8 +161,7 @@ def load_feed_intervals(path: pathlib.Path) -> dict[str, timedelta | None]:
         tomllib.TOMLDecodeError: If the file is no valid TOML.
         pydantic.ValidationError: If a feed gives an interval that is no ISO 8601 duration.
     """
-    with path.open("rb") as file:
-        feeds = [_FeedInterval.model_validate(table) for table in tomllib.load(file).get("feed", [])]
+    feeds = _read_feed_intervals(path)
     intervals: dict[str, timedelta | None] = {}
     for feed in feeds:
         for dataset in feed.datasets:
@@ -150,5 +173,5 @@ def load_feed_intervals(path: pathlib.Path) -> dict[str, timedelta | None]:
     return intervals
 
 
-# The failures of load_dashboard_config and load_feed_intervals, for callers that show them instead of raising
+# The failures of load_dashboard_config, load_feed_intervals and load_feed_schedule, for callers that show them instead of raising
 CONFIG_ERRORS = (OSError, tomllib.TOMLDecodeError, ValidationError)

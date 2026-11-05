@@ -4,7 +4,7 @@ import pytest
 from pymongo.database import Database
 
 from space_weather_analysis.catalog.models import SourceType
-from space_weather_analysis.jobs.models import ChunkGap, Job, JobParameters, JobStatus
+from space_weather_analysis.jobs.models import ChunkGap, FeedJobSummary, FinalJobStatus, Job, JobParameters, JobStatus
 from space_weather_analysis.jobs.repository import MongoJobRepository
 
 START = datetime(2024, 1, 1, tzinfo=UTC)
@@ -60,6 +60,28 @@ def test_claim_next_pending_takes_only_jobs_of_the_given_source_types(db: Databa
     claimed_untyped = repository.claim_next_pending(source_types=[None])
 
     assert (claimed_hapi and claimed_hapi.id, claimed_gfz, claimed_untyped and claimed_untyped.id) == (hapi_id, None, untyped_id)
+
+
+@pytest.mark.integration
+def test_feed_summaries_name_the_newest_job_and_count_outcomes_in_the_span(db: Database) -> None:
+    """Per feed the newest job is named and the outcomes of jobs created since the start are counted; jobs without feed are left out."""
+    repository = MongoJobRepository(db)
+    gap = ChunkGap(dataset_id="synthetic/one", start=START, stop=END, reason="SourceUnreachableError: no answer")
+    outcomes: list[tuple[FinalJobStatus, tuple[ChunkGap, ...]]] = [(JobStatus.COMPLETED, ()), (JobStatus.COMPLETED, (gap,)), (JobStatus.FAILED, ())]
+    for status, missing_chunks in outcomes:
+        job_id = repository.create(["synthetic/one"], START, END, feed="live")
+        repository.finish(job_id, status, missing_chunks=missing_chunks)
+    repository.create(["synthetic/two"], START, END, feed="start-only")
+    repository.create(["synthetic/three"], START, END)
+
+    in_span = repository.feed_summaries(datetime(2000, 1, 1, tzinfo=UTC))
+    after_span = repository.feed_summaries(datetime(2999, 1, 1, tzinfo=UTC))
+
+    def outline(summaries: list[FeedJobSummary]) -> list[tuple[str, str, int, int, int, int]]:
+        return [(summary.feed, summary.latest.status, summary.runs, summary.completed, summary.with_gaps, summary.failed) for summary in summaries]
+
+    assert outline(in_span) == [("live", "FAILED", 3, 1, 1, 1), ("start-only", "PENDING", 1, 0, 0, 0)]
+    assert outline(after_span) == [("live", "FAILED", 0, 0, 0, 0), ("start-only", "PENDING", 0, 0, 0, 0)]
 
 
 @pytest.mark.integration
