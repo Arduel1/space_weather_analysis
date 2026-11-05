@@ -2,7 +2,7 @@ from typing import Any
 
 import requests
 
-from space_weather_analysis.clients.json_download import download_json
+from space_weather_analysis.clients.download import download_json
 from space_weather_analysis.metadata.normalize import normalize_units, optional_text
 from space_weather_analysis.util.error_handling import DataProcessingError, ResourceNotFoundError
 

@@ -5,7 +5,7 @@ from typing import Any
 import requests
 
 from space_weather_analysis.catalog.repository import CatalogRepository
-from space_weather_analysis.clients.json_download import download_json
+from space_weather_analysis.clients.download import download_json
 from space_weather_analysis.metadata.normalize import optional_text
 from space_weather_analysis.metadata.overlays.cdas import CdasTimeInterval, cdas_time_interval
 from space_weather_analysis.metadata.overlays.cdaweb import cdas_dataset_id, is_cdaweb_source

@@ -125,7 +125,7 @@ def test_failed_chunks_are_stored_as_missing_and_fail_the_job_only_when_all_fail
     ("source_type", "datasets"),
     [
         pytest.param(SourceType.GFZ_POTSDAM, ["kp"], id="unknown_gfz_index"),
-        pytest.param(SourceType.LOCAL, ["silso_sunspot_daily"], id="missing_local_file"),
+        pytest.param(SourceType.LOCAL, ["not_a_local_dataset"], id="unknown_local_dataset"),
     ],
 )
 def test_invalid_request_fails_the_job_with_the_reason(db: Database, tmp_path: pathlib.Path, source_type: SourceType, datasets: list[str]) -> None:
@@ -210,3 +210,17 @@ def test_job_with_datasets_of_two_source_types_is_split_into_one_job_per_lane(db
     assert gfz_job is not None and local_job is not None
     assert (gfz_job.id, gfz_job.parameters.datasets, local_job.parameters.datasets) == (job_id, [INDEX], ["cme_catalog"])
     assert repository.claim_next_pending() is None
+
+
+@pytest.mark.integration
+def test_run_until_idle_runs_every_due_job_and_returns(db: Database, tmp_path: pathlib.Path, gfz_server: FakeGfzServer) -> None:
+    """Without catalog wait the runner completes the job of a named source type, fails the job of an uncatalogued dataset at once, and returns."""
+    repository = MongoJobRepository(db)
+    known_id = repository.create([INDEX], DAY_ONE, DAY_TWO, source_type=SourceType.GFZ_POTSDAM)
+    uncatalogued_id = repository.create(["not_catalogued"], DAY_ONE, DAY_TWO)
+    runner = JobRunner(db, tmp_path, pipeline_for=lambda source_type: _gfz_pipeline(db, gfz_server.url), catalog_wait_limit=timedelta(0))
+
+    runner.run_until_idle()
+
+    statuses = [job.status if job is not None else None for job in (repository.get(known_id), repository.get(uncatalogued_id))]
+    assert statuses == [JobStatus.COMPLETED, JobStatus.FAILED]

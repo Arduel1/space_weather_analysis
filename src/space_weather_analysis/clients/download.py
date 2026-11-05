@@ -1,4 +1,6 @@
 import json
+import os
+import pathlib
 import tempfile
 from http import HTTPStatus
 from typing import Any
@@ -78,6 +80,44 @@ def download_json_streamed(session: requests.Session, url: str, timeout: tuple[f
             return json.load(download)
         except ValueError as e:
             raise DataProcessingError(f"{what} {url} is no JSON: {e}") from e
+
+
+def download_file(session: requests.Session, url: str, target: pathlib.Path, timeout: tuple[float, float], what: str) -> None:
+    """Downloads one file of a provider and replaces the target file with it only once it is complete.
+
+    Args:
+        session: The HTTP session for the request.
+        url: The location of the file.
+        target: The path the file is stored at.
+        timeout: The connect timeout and the longest wait for the next chunk in seconds.
+        what: What the file is, named in the error messages.
+
+    Raises:
+        ResourceNotFoundError: If the provider answers that the file does not exist (HTTP 404).
+        SourceUnreachableError: If the provider sent no answer.
+        DataRetrievalError: If the download fails or the status is no other 2xx; carries the Retry-After wait of HTTP 429 and 503.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # A partial download stays in a temporary file next to the target, so a failure keeps the previous file
+    descriptor, partial_name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.")
+    partial_path = pathlib.Path(partial_name)
+    try:
+        with os.fdopen(descriptor, "wb") as download:
+            try:
+                with session.get(url, timeout=timeout, stream=True) as response:
+                    _raise_for_status(response, url, what)
+                    for chunk in response.iter_content(DOWNLOAD_CHUNK_BYTES):
+                        download.write(chunk)
+            except (requests.ConnectionError, requests.Timeout) as e:
+                raise SourceUnreachableError(f"{what} {url} is unreachable: {e}") from e
+            except requests.RequestException as e:
+                raise DataRetrievalError(f"{what} {url} could not be downloaded: {e}") from e
+    except BaseException:
+        partial_path.unlink(missing_ok=True)
+        raise
+    # The temporary file is readable only by its owner; the stored file gets the usual permissions of a data file
+    partial_path.chmod(0o644)
+    partial_path.replace(target)
 
 
 def _raise_for_status(response: requests.Response, url: str, what: str) -> None:

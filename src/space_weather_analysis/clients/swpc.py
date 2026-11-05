@@ -12,7 +12,7 @@ from urllib3.util.retry import Retry
 
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.clients.base import DataClient, FetchResult
-from space_weather_analysis.clients.json_download import download_json
+from space_weather_analysis.clients.download import download_json
 from space_weather_analysis.util.error_handling import DataProcessingError
 from space_weather_analysis.util.time_utils import ensure_aware
 

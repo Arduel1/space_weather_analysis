@@ -2,7 +2,7 @@ from typing import Any
 
 import requests
 
-from space_weather_analysis.clients.json_download import download_json
+from space_weather_analysis.clients.download import download_json
 from space_weather_analysis.util.error_handling import DataProcessingError
 
 # Connect and read timeout in seconds; the largest master files have a few MB.

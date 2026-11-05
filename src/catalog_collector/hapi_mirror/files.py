@@ -2,7 +2,7 @@ from typing import Any
 
 import requests
 
-from space_weather_analysis.clients.json_download import download_json, download_json_streamed
+from space_weather_analysis.clients.download import download_json, download_json_streamed
 
 # The HAPI project (Heliophysics Application Programmer's Interface, https://hapi-server.org/) runs a mirror
 # that fetches the /catalog and /info responses of all known HAPI servers every night and publishes them as files.

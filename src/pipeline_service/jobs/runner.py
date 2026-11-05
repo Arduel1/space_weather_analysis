@@ -40,7 +40,7 @@ class JobRunner:
     A job ends COMPLETED when at least one of its chunks was ingested or none needed ingesting; the chunks
     that failed are stored with it as missing chunks. It ends FAILED for an invalid request, when every
     chunk failed, or on an unexpected error. A job naming a dataset the catalog does not hold yet waits in the
-    queue and is tried again until CATALOG_WAIT_LIMIT has passed since its creation.
+    queue and is tried again until the catalog wait limit has passed since its creation.
     """
 
     POLLING_INTERVAL_SECONDS = 10
@@ -51,6 +51,7 @@ class JobRunner:
         data_dir: pathlib.Path,
         pipeline_for: Callable[[SourceType], Pipeline] | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        catalog_wait_limit: timedelta = CATALOG_WAIT_LIMIT,
     ) -> None:
         """Initializes the job runner.
 
@@ -59,9 +60,11 @@ class JobRunner:
             data_dir: The directory holding the local dataset files.
             pipeline_for: Builds the pipeline of a source type; the PipelineFactory with its defaults if None.
             clock: Returns the current time in UTC.
+            catalog_wait_limit: How long a job naming a dataset the catalog does not hold waits before it fails.
         """
         self.db = db
         self.clock = clock
+        self.catalog_wait_limit = catalog_wait_limit
         self.job_repository: JobRepository = MongoJobRepository(db)
         self.catalog_repository: CatalogRepository = MongoCatalogRepository(db)
         self.pipeline_for = pipeline_for if pipeline_for is not None else PipelineFactory(self.db, data_dir).get_pipeline
@@ -74,6 +77,18 @@ class JobRunner:
             lane = threading.Thread(target=self._poll, args=(partial(self.process_next_job, source_type),), name=f"lane-{source_type}", daemon=True)
             lane.start()
         self._poll(self.dispatch_next_job)
+
+    def run_until_idle(self) -> None:
+        """Runs the due jobs one after the other, handing out jobs without source type first, until no job is due.
+
+        Raises:
+            pymongo.errors.PyMongoError: If a job cannot be claimed or its end cannot be stored.
+        """
+        logger.info("Job runner started for the queued jobs.")
+        took_job = True
+        while took_job:
+            took_job = self.dispatch_next_job() or any(self.process_next_job(source_type) for source_type in SourceType)
+        logger.info("Job runner finished: no job is due.")
 
     def _poll(self, take_next_job: Callable[[], bool]) -> None:
         """Takes jobs until the process ends, waiting POLLING_INTERVAL_SECONDS whenever no job was due.
@@ -201,9 +216,9 @@ class JobRunner:
             error: The error naming the missing dataset.
         """
         now = self.clock()
-        if now - job.created_at >= CATALOG_WAIT_LIMIT:
-            logger.warning("Job %s failed: %s, still after %s", job.id, error, CATALOG_WAIT_LIMIT)
-            self.job_repository.finish(job.id, JobStatus.FAILED, f"{error} The catalog did not list it within {CATALOG_WAIT_LIMIT}.")
+        if now - job.created_at >= self.catalog_wait_limit:
+            logger.warning("Job %s failed: %s, still after %s", job.id, error, self.catalog_wait_limit)
+            self.job_repository.finish(job.id, JobStatus.FAILED, f"{error} The catalog did not list it within {self.catalog_wait_limit}.")
             return
         logger.info("Job %s waits for the catalog: %s", job.id, error)
         self.job_repository.requeue(job.id, now + CATALOG_RETRY_DELAY, str(error))

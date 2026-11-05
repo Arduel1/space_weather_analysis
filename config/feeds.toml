@@ -32,6 +32,8 @@ interval = "PT1M"
 [[feed]]
 name = "kp"
 datasets = ["Kp"]
+# Named, so the feed also runs without master catalog, as in the static demo
+source_type = "GFZ_POTSDAM"
 start = 2020-01-01T00:00:00Z
 # One value per 3 hours; hourly fetches take up new and revised preliminary values soon after GFZ publishes them
 interval = "PT1H"

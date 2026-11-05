@@ -259,7 +259,7 @@ The full stack runs in Docker. uv is only required for local development, tests,
 
 2. Review `config/feeds.toml`: its feeds decide which datasets the pipeline service keeps current, and its `dashboard` table which panels the dashboard shows.
 
-3. Download the local data files into `data/` (see [Data Sources and Licenses](#data-sources-and-licenses) for their terms):
+3. The pipeline service downloads the local data files into `data/` itself when they are missing or older than a day (see [Data Sources and Licenses](#data-sources-and-licenses) for their terms). To fetch them by hand instead:
 
    ```bash
    curl -o data/SN_d_tot_V2.0.csv https://www.sidc.be/SILSO/INFO/sndtotcsv.php
@@ -325,6 +325,7 @@ Tools started outside Docker, such as the notebooks, can load the variables from
 
 ```text
 .
+├── .github/workflows/demo.yml  # Hourly build of the static dashboard demo on GitHub Pages
 ├── docker-compose.yml          # Five-service stack definition
 ├── Dockerfile                  # Shared image for all Python services
 ├── pyproject.toml              # Project metadata, dependencies, tool config

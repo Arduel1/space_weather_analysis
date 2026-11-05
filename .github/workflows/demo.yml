@@ -1,0 +1,123 @@
+name: Dashboard demo on GitHub Pages
+
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "src/**"
+      - "config/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/demo.yml"
+
+permissions:
+  contents: read
+
+# One run at a time, as every run continues the stored state of the previous one
+concurrency:
+  group: dashboard-demo
+  cancel-in-progress: false
+
+env:
+  # Database, local dataset files and the database dump kept between runs
+  STATE_DIR: demo-state
+  MONGO_USER: demo
+  MONGO_PASS: demo
+  MONGO_HOST: localhost
+  MONGO_DB_NAME: space_weather
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mongo:
+        image: mongo:8
+        env:
+          MONGO_INITDB_ROOT_USERNAME: demo
+          MONGO_INITDB_ROOT_PASSWORD: demo
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand(\"ping\").ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          version: "0.13.5"
+          enable-cache: true
+
+      - name: Install the locked runtime dependencies
+        run: uv sync --locked --no-dev
+
+      # A new key per run, as cache entries cannot be overwritten; the newest entry with the prefix is restored
+      - name: Restore the state of the previous run
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.STATE_DIR }}
+          key: demo-state-${{ github.run_id }}
+          restore-keys: demo-state-
+
+      - name: Restore the database
+        run: |
+          if [ -f "$STATE_DIR/database.archive.gz" ]; then
+            docker cp "$STATE_DIR/database.archive.gz" "${{ job.services.mongo.id }}:/tmp/database.archive.gz"
+            docker exec "${{ job.services.mongo.id }}" mongorestore --quiet --username demo --password demo \
+              --authenticationDatabase admin --gzip --archive=/tmp/database.archive.gz --drop
+          else
+            echo "No stored database, every feed loads its whole range."
+          fi
+
+      - name: Load every feed once
+        env:
+          PYTHONPATH: src
+          PIPELINE_RUN_ONCE: "true"
+          PIPELINE_DATA_DIR: ${{ env.STATE_DIR }}/data
+        run: uv run --no-sync python -m pipeline_service.main
+
+      - name: Export the dashboard and add the web frontend
+        env:
+          PYTHONPATH: src
+        run: |
+          mkdir -p _site
+          cp -r web/. _site/
+          uv run --no-sync python -m site_export.main --output _site/data
+
+      - name: Dump the database
+        run: |
+          mkdir -p "$STATE_DIR"
+          docker exec "${{ job.services.mongo.id }}" mongodump --quiet --username demo --password demo \
+            --authenticationDatabase admin --db "$MONGO_DB_NAME" --gzip --archive=/tmp/database.archive.gz
+          docker cp "${{ job.services.mongo.id }}:/tmp/database.archive.gz" "$STATE_DIR/database.archive.gz"
+
+      - name: Store the state for the next run
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.STATE_DIR }}
+          key: demo-state-${{ github.run_id }}
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

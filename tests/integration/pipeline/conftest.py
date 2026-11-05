@@ -1,19 +1,22 @@
 import pathlib
 import shutil
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, NamedTuple
 
 import pytest
 from pymongo.database import Database
 
-from pipeline_service.pipelines.local import LocalPipeline
+from pipeline_service.pipelines.local import LOCAL_DATASETS, LocalPipeline
 from space_weather_analysis.coverage.repository import MongoCoverageRepository
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
 from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository
 
 # The files in data/ hold invented values in the file layout of their data provider.
 DATA_DIR = pathlib.Path(__file__).parent / "data"
+# The local datasets without download URL, so the pipeline reads only the files the tests write
+OFFLINE_DATASETS = {dataset_id: replace(dataset, url=None) for dataset_id, dataset in LOCAL_DATASETS.items()}
 
 
 class _InputFile(NamedTuple):
@@ -92,6 +95,7 @@ def local_pipeline(db: Database) -> Callable[[pathlib.Path], LocalPipeline]:
             coverage_repository=MongoCoverageRepository(db),
             metadata_repository=MongoMetadataRepository(db),
             data_dir=data_dir,
+            local_datasets=OFFLINE_DATASETS,
         )
 
     return build

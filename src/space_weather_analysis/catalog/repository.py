@@ -68,6 +68,10 @@ class CatalogRepository(ABC):
         """
 
     @abstractmethod
+    def is_empty(self) -> bool:
+        """Tells whether the catalog holds no item."""
+
+    @abstractmethod
     def get_source_map(self, source_type: str) -> CatalogMap:
         """Reads the sources of one type for every dataset that has one.
 
@@ -177,6 +181,10 @@ class MongoCatalogRepository(CatalogRepository):
         """
         documents = self.collection.find({}, {"_id": 0}).sort("dataset_id", ASCENDING)
         return [_catalog_item(document) for document in documents]
+
+    def is_empty(self) -> bool:
+        """Tells whether the catalog holds no item."""
+        return self.collection.find_one({}, {"_id": 1}) is None
 
     def get_source_map(self, source_type: str) -> CatalogMap:
         """Reads the sources of one type for every dataset that has one.

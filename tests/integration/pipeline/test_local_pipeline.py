@@ -1,13 +1,18 @@
+import os
 import pathlib
+import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pymongo.database import Database
+from pytest_httpserver import HTTPServer
 
-from pipeline_service.pipelines.local import LocalPipeline
+from pipeline_service.pipelines.local import LOCAL_DATASETS, LocalPipeline
 from space_weather_analysis.coverage.repository import MongoCoverageRepository
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
+from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository
 
 LocalPipelineFor = Callable[[pathlib.Path], LocalPipeline]
 WriteDatasetInput = Callable[[pathlib.Path, str], None]
@@ -16,6 +21,8 @@ WriteDatasetInput = Callable[[pathlib.Path, str], None]
 SUNSPOT_COLLECTION = "silso_sunspot_daily"
 CME_COLLECTION = "cme_catalog"
 
+# The synthetic sunspot file a fake provider serves for download
+SYNTHETIC_SUNSPOTS = pathlib.Path(__file__).parent / "data" / "synthetic_sunspots.csv"
 # Data rows in each synthetic file in data/.
 ROWS_PER_INPUT_FILE = 3
 
@@ -152,3 +159,37 @@ def test_local_run_saves_metadata_record_with_curated_descriptions(
             "decimal_year": None,
         },
     )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("file_age", "server_status", "expected_requests"),
+    [
+        pytest.param(None, 200, 1, id="missing-file-downloaded"),
+        pytest.param(timedelta(days=2), 500, 1, id="outdated-file-kept-when-download-fails"),
+        pytest.param(timedelta(hours=1), 200, 0, id="fresh-file-not-downloaded"),
+    ],
+)
+def test_file_with_download_url_is_fetched_when_missing_or_outdated(
+    db: Database, tmp_path: pathlib.Path, httpserver: HTTPServer, file_age: timedelta | None, server_status: int, expected_requests: int
+) -> None:
+    """A missing or outdated file is fetched before reading, a failed fetch keeps the previous file, and a fresh file is read as it is."""
+    content = SYNTHETIC_SUNSPOTS.read_text(encoding="utf-8")
+    httpserver.expect_request("/sunspots.csv").respond_with_data(content, status=server_status)
+    dataset = replace(LOCAL_DATASETS[SUNSPOT_COLLECTION], url=httpserver.url_for("/sunspots.csv"))
+    if file_age is not None:
+        stored_file = tmp_path / dataset.file_name
+        stored_file.write_text(content, encoding="utf-8")
+        modified = time.time() - file_age.total_seconds()
+        os.utime(stored_file, (modified, modified))
+    pipeline = LocalPipeline(
+        timeseries=MongoTimeSeriesRepository(db),
+        coverage_repository=MongoCoverageRepository(db),
+        metadata_repository=MongoMetadataRepository(db),
+        data_dir=tmp_path,
+        local_datasets={SUNSPOT_COLLECTION: dataset},
+    )
+
+    report = pipeline.run([SUNSPOT_COLLECTION])
+
+    assert (len(httpserver.log), report.gaps, db[SUNSPOT_COLLECTION].count_documents({})) == (expected_requests, [], ROWS_PER_INPUT_FILE)
