@@ -4,9 +4,10 @@ from datetime import UTC, date, datetime
 import pydantic
 import pytest
 
-from space_weather_analysis.metadata.curated import CuratedDataset, CuratedReference, CuratedVariable, load_curated
-from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSource, MetadataSourceKind, SourceInfo, VariableMetadata
+from space_weather_analysis.metadata.curated import CuratedDataset, CuratedLink, CuratedReference, CuratedVariable, load_curated
+from space_weather_analysis.metadata.models import DatasetMetadata, LinkInfo, MetadataSource, MetadataSourceKind, SourceInfo, VariableMetadata
 from space_weather_analysis.metadata.overlays.curated import apply_curated_overlay
+from space_weather_analysis.metadata.overlays.linked import apply_linked_overlay
 
 PROJECT_CURATED_DIR = pathlib.Path(__file__).parents[3] / "config" / "metadata"
 RETRIEVED_AT = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
@@ -82,7 +83,7 @@ def test_invalid_curated_data_is_rejected(tmp_path: pathlib.Path, files: dict[st
 
 
 def test_curated_overlay_wins_over_record_values_and_lists_one_provenance_entry_per_reference() -> None:
-    """Curated values replace the record values and mark the variable fields as curated, add no variable and replace curated provenance."""
+    """Curated values replace the record values and mark the variable fields as curated, add no variable and list the pages with what they cover."""
     record = DatasetMetadata(
         dataset_id="alpha",
         collection="alpha",
@@ -96,7 +97,7 @@ def test_curated_overlay_wins_over_record_values_and_lists_one_provenance_entry_
     )
     curated = CuratedDataset(
         title="Curated title",
-        variable=[CuratedVariable(name="flux", units="W/m^2", label="Flux"), CuratedVariable(name="missing", units="nT")],
+        variable=[CuratedVariable(name="flux", units="W/m^2", valid_min=0), CuratedVariable(name="missing", units="nT")],
         reference=[
             CuratedReference(url="https://provider.invalid/page", retrieved=date(2026, 10, 2), covers="title"),
             CuratedReference(url="https://provider.invalid/units", retrieved=date(2026, 10, 3), covers="units"),
@@ -112,18 +113,70 @@ def test_curated_overlay_wins_over_record_values_and_lists_one_provenance_entry_
                 name="flux",
                 source_name="flux",
                 units="W/m^2",
-                label="Flux",
+                valid_min=0,
                 field_sources={
                     "name": MetadataSourceKind.FILE,
                     "source_name": MetadataSourceKind.FILE,
                     "units": MetadataSourceKind.CURATED,
-                    "label": MetadataSourceKind.CURATED,
+                    "valid_min": MetadataSourceKind.CURATED,
                 },
             ).model_dump()
         ],
         [
             MetadataSource(kind=MetadataSourceKind.FILE, url="https://provider.invalid/data.json", retrieved_at=RETRIEVED_AT),
-            MetadataSource(kind=MetadataSourceKind.CURATED, url="https://provider.invalid/page", retrieved_at=datetime(2026, 10, 2, tzinfo=UTC)),
-            MetadataSource(kind=MetadataSourceKind.CURATED, url="https://provider.invalid/units", retrieved_at=datetime(2026, 10, 3, tzinfo=UTC)),
+            MetadataSource(
+                kind=MetadataSourceKind.CURATED, url="https://provider.invalid/page", retrieved_at=datetime(2026, 10, 2, tzinfo=UTC), covers="title"
+            ),
+            MetadataSource(
+                kind=MetadataSourceKind.CURATED, url="https://provider.invalid/units", retrieved_at=datetime(2026, 10, 3, tzinfo=UTC), covers="units"
+            ),
         ],
+    )
+
+
+def test_linked_overlay_fills_only_missing_values_and_marks_them_linked() -> None:
+    """A linked field takes the missing description and valid range, keeps its unit and gets no fill; the record gets SPASE ID and provenance."""
+    linked_record = DatasetMetadata(
+        dataset_id="RICH",
+        collection="RICH",
+        source=SourceInfo(type="HAPI"),
+        links=LinkInfo(resource_url="https://provider.invalid/rich", spase_resource_id="spase://NASA/NumericalData/RICH"),
+        variables=[
+            VariableMetadata.from_single_source(
+                MetadataSourceKind.HAPI, name="V", source_name="V", description="Flow speed", units="Km/s", fill="9999.0", valid_min=0
+            )
+        ],
+        updated_at=RETRIEVED_AT,
+    )
+    record = DatasetMetadata(
+        dataset_id="poor",
+        collection="poor",
+        source=SourceInfo(type="SWPC"),
+        variables=[
+            VariableMetadata.from_single_source(MetadataSourceKind.CURATED, name="speed", source_name="speed", units="km/s"),
+            VariableMetadata(name="other", source_name="other"),
+        ],
+    )
+
+    apply_linked_overlay(record, linked_record, CuratedLink(dataset="RICH", fields={"speed": "V"}))
+
+    speed, other = record.variables
+    assert (speed.description, speed.units, speed.fill, speed.valid_min, speed.field_sources, other.description) == (
+        "Flow speed",
+        "km/s",
+        None,
+        0.0,
+        {
+            "name": MetadataSourceKind.CURATED,
+            "source_name": MetadataSourceKind.CURATED,
+            "units": MetadataSourceKind.CURATED,
+            "description": MetadataSourceKind.LINKED,
+            "valid_min": MetadataSourceKind.LINKED,
+        },
+        None,
+    )
+    assert (record.links.spase_resource_id, record.links.documentation, [(entry.kind, entry.url) for entry in record.provenance]) == (
+        "spase://NASA/NumericalData/RICH",
+        ["https://provider.invalid/rich"],
+        [(MetadataSourceKind.LINKED, "https://provider.invalid/rich")],
     )

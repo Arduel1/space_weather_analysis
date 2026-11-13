@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 from space_weather_analysis.util.hapi_parameters import null_string_to_none
 
@@ -6,7 +6,7 @@ from space_weather_analysis.util.hapi_parameters import null_string_to_none
 NO_UNIT_TEXTS = frozenset({"none", "unitless", "undefined", "dimensionless"})
 
 
-def optional_text(value: Any) -> Optional[str]:
+def optional_text(value: Any) -> str | None:
     """Converts a provider metadata value into text, keeping the text unchanged.
 
     Args:
@@ -24,7 +24,22 @@ def optional_text(value: Any) -> Optional[str]:
     return text
 
 
-def normalize_units(value: Any) -> Optional[str]:
+def optional_texts(value: Any) -> list[str]:
+    """Converts a repeated provider metadata value into the list of its texts.
+
+    Args:
+        value: The value as given by the provider: one value, a list of values or None.
+
+    Returns:
+        The entries as text in their order, leaving out those optional_text finds missing.
+    """
+    if value is None:
+        return []
+    entries = value if isinstance(value, list) else [value]
+    return [text for text in (optional_text(entry) for entry in entries) if text]
+
+
+def normalize_units(value: Any) -> str | None:
     """Normalizes a unit given by a provider.
 
     Args:

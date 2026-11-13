@@ -1,56 +1,30 @@
-# Curated metadata of the NOAA Space Weather Prediction Center (SWPC) products. SWPC publishes no machine-readable
-# metadata for its JSON files. Every value is taken from the pages listed under `reference`; `covers` names the values
-# each page gives. Check these pages when updating a value.
-# License: the current spaceweather.gov pages state no terms of use. NOAA states for its open data that it may be used
-# as desired and asks for attribution (AWS Open Data registry); an archived SWPC page calls the data public domain.
+# Curated metadata of the NOAA Space Weather Prediction Center (SWPC) products, which have no machine-readable metadata.
+# License: NOAA open data, free use with attribution (AWS Open Data registry); an archived SWPC page says public domain.
+
+# GOES X-ray flux and flares
 
 [dataset.swpc_goes_xray]
 title = "GOES primary X-ray flux (1-minute)"
-description = "Solar X-ray flux in two bands from the X-ray sensor of the SWPC primary GOES satellite, 1-minute averages. The 0.1-0.8 nm band defines the flare class and the NOAA radio blackout scale."
 provider = "NOAA Space Weather Prediction Center"
 resource_url = "https://www.spaceweather.gov/products/goes-x-ray-flux"
 time = { cadence = "PT1M" }
 
 [dataset.swpc_goes_xray.citation]
-license = "Public domain (U.S. government work), attribution requested"
+license = "Public domain (U.S. government work)"
 rules_of_use = "https://registry.opendata.aws/noaa-space-weather"
 
 [[dataset.swpc_goes_xray.variable]]
 name = "long_flux"
-label = "0.1-0.8 nm"
-description = "X-ray flux 0.1-0.8 nm (1-8 Angstrom), the band that defines the flare class"
 units = "W/m^2"
 
 [[dataset.swpc_goes_xray.variable]]
 name = "short_flux"
-label = "0.05-0.4 nm"
-description = "X-ray flux 0.05-0.4 nm (0.5-4 Angstrom)"
 units = "W/m^2"
-
-[[dataset.swpc_goes_xray.variable]]
-name = "long_electron_contamination"
-label = "0.1-0.8 nm electron contamination"
-description = "Flag `electron_contaminaton` of the SWPC file for the 0.1-0.8 nm value; its meaning is not documented on the product page"
-
-[[dataset.swpc_goes_xray.variable]]
-name = "short_electron_contamination"
-label = "0.05-0.4 nm electron contamination"
-description = "Flag `electron_contaminaton` of the SWPC file for the 0.05-0.4 nm value; its meaning is not documented on the product page"
-
-[[dataset.swpc_goes_xray.variable]]
-name = "satellite"
-label = "Satellite"
-description = "Number of the GOES satellite that measured the value"
 
 [[dataset.swpc_goes_xray.reference]]
 url = "https://www.spaceweather.gov/products/goes-x-ray-flux"
 retrieved = 2026-11-05
-covers = "title, the two bands, 0.1-0.8 nm for the flare class, 1-minute averages, primary satellite"
-
-[[dataset.swpc_goes_xray.reference]]
-url = "https://services.swpc.noaa.gov/json/goes/primary/"
-retrieved = 2026-11-03
-covers = "fields of the JSON file: flux, energy band, satellite, electron_contaminaton"
+covers = "title, 1-minute averages, units W/m^2 of both bands"
 
 [[dataset.swpc_goes_xray.reference]]
 url = "https://registry.opendata.aws/noaa-space-weather"
@@ -62,79 +36,70 @@ url = "https://webarchive.library.unt.edu/web/20121014023244/http://www.swpc.noa
 retrieved = 2026-11-05
 covers = "archived SWPC statement that the data are public domain"
 
+[dataset.swpc_xray_flares]
+title = "GOES X-ray flares (7 days)"
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://services.swpc.noaa.gov/json/goes/primary/"
+
+[dataset.swpc_xray_flares.citation]
+license = "Public domain (U.S. government work)"
+rules_of_use = "https://registry.opendata.aws/noaa-space-weather"
+
+[[dataset.swpc_xray_flares.reference]]
+url = "https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7-day.json"
+retrieved = 2026-11-06
+covers = "fields of the JSON file: begin, peak and end time, class at peak, peak flux, satellite"
+
+[[dataset.swpc_xray_flares.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-05
+covers = "NOAA open data terms: free use, attribution requested"
+
+# GOES protons
+
 [dataset.swpc_goes_protons]
 title = "GOES primary integral proton flux (5-minute)"
-description = "Integral proton flux above eight energy thresholds from the SWPC primary GOES satellite, 5-minute averages. The >=10 MeV flux defines the NOAA solar radiation storm scale."
 provider = "NOAA Space Weather Prediction Center"
 resource_url = "https://www.spaceweather.gov/products/goes-proton-flux"
 time = { cadence = "PT5M" }
+same_as = { dataset = "OMNI2_H0_MRG1HR", fields = { p_ge10mev_flux = "PR-FLX_101800" } }
 
 [dataset.swpc_goes_protons.citation]
-license = "Public domain (U.S. government work), attribution requested"
+license = "Public domain (U.S. government work)"
 rules_of_use = "https://registry.opendata.aws/noaa-space-weather"
 
 [[dataset.swpc_goes_protons.variable]]
 name = "p_ge1mev_flux"
-label = ">=1 MeV"
-description = "Integral proton flux >=1 MeV"
 units = "pfu"
 
 [[dataset.swpc_goes_protons.variable]]
 name = "p_ge5mev_flux"
-label = ">=5 MeV"
-description = "Integral proton flux >=5 MeV"
-units = "pfu"
-
-[[dataset.swpc_goes_protons.variable]]
-name = "p_ge10mev_flux"
-label = ">=10 MeV"
-description = "Integral proton flux >=10 MeV, the flux of the NOAA solar radiation storm scale; 1 pfu = 1 proton / (cm^2 s sr)"
 units = "pfu"
 
 [[dataset.swpc_goes_protons.variable]]
 name = "p_ge30mev_flux"
-label = ">=30 MeV"
-description = "Integral proton flux >=30 MeV"
 units = "pfu"
 
 [[dataset.swpc_goes_protons.variable]]
 name = "p_ge50mev_flux"
-label = ">=50 MeV"
-description = "Integral proton flux >=50 MeV"
 units = "pfu"
 
 [[dataset.swpc_goes_protons.variable]]
 name = "p_ge60mev_flux"
-label = ">=60 MeV"
-description = "Integral proton flux >=60 MeV"
 units = "pfu"
 
 [[dataset.swpc_goes_protons.variable]]
 name = "p_ge100mev_flux"
-label = ">=100 MeV"
-description = "Integral proton flux >=100 MeV"
 units = "pfu"
 
 [[dataset.swpc_goes_protons.variable]]
 name = "p_ge500mev_flux"
-label = ">=500 MeV"
-description = "Integral proton flux >=500 MeV"
 units = "pfu"
-
-[[dataset.swpc_goes_protons.variable]]
-name = "satellite"
-label = "Satellite"
-description = "Number of the GOES satellite that measured the value"
 
 [[dataset.swpc_goes_protons.reference]]
 url = "https://www.spaceweather.gov/products/goes-proton-flux"
 retrieved = 2026-11-05
-covers = "title, integral channels >=1 to >=500 MeV, pfu as protons / (cm^2 s sr), 5-minute averages, >=10 MeV for the S scale"
-
-[[dataset.swpc_goes_protons.reference]]
-url = "https://services.swpc.noaa.gov/json/goes/primary/"
-retrieved = 2026-11-03
-covers = "fields of the JSON file: flux, energy threshold, satellite"
+covers = "title, 5-minute averages, unit pfu of the integral channels"
 
 [[dataset.swpc_goes_protons.reference]]
 url = "https://registry.opendata.aws/noaa-space-weather"
@@ -146,42 +111,616 @@ url = "https://webarchive.library.unt.edu/web/20121014023244/http://www.swpc.noa
 retrieved = 2026-11-05
 covers = "archived SWPC statement that the data are public domain"
 
+# GOES electrons
+
+[dataset.swpc_goes_electrons]
+title = "GOES primary integral electron flux (5-minute)"
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://www.spaceweather.gov/products/goes-electron-flux"
+time = { cadence = "PT5M" }
+
+[dataset.swpc_goes_electrons.citation]
+license = "Public domain (U.S. government work)"
+rules_of_use = "https://registry.opendata.aws/noaa-space-weather"
+
+[[dataset.swpc_goes_electrons.variable]]
+name = "e_ge2mev_flux"
+units = "electrons/(cm^2 s sr)"
+
+[[dataset.swpc_goes_electrons.reference]]
+url = "https://www.spaceweather.gov/products/goes-electron-flux"
+retrieved = 2026-11-05
+covers = "title, 5-minute averages, unit of the >2 MeV channel"
+
+[[dataset.swpc_goes_electrons.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-05
+covers = "NOAA open data terms: free use, attribution requested"
+
+# F10.7 solar radio flux
+
+[dataset.swpc_f107]
+title = "Solar radio flux F10.7 (daily)"
+provider = "NOAA Space Weather Prediction Center; measurements by the National Research Council Canada"
+resource_url = "https://www.swpc.noaa.gov/phenomena/f107-cm-radio-emissions"
+time = { cadence = "P1D" }
+
+[dataset.swpc_f107.citation]
+acknowledgement = "These F10.7 measurements are provided courtesy of the National Research Council Canada in partnership with the Natural Resources Canada."
+license = "No terms stated; acknowledgement requested"
+
+[[dataset.swpc_f107.variable]]
+name = "f107"
+units = "sfu"
+
+[[dataset.swpc_f107.reference]]
+url = "https://www.swpc.noaa.gov/phenomena/f107-cm-radio-emissions"
+retrieved = 2026-11-05
+covers = "title, measurements by the National Research Council Canada, unit sfu, acknowledgement of NRC Canada"
+
+[[dataset.swpc_f107.reference]]
+url = "https://services.swpc.noaa.gov/products/10cm-flux-30-day.json"
+retrieved = 2026-11-05
+covers = "one value per day"
+
+# Solar regions
+
+[dataset.swpc_solar_regions]
+title = "Sunspot regions of the last 30 days"
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://services.swpc.noaa.gov/json/solar_regions.json"
+time = { cadence = "P1D", timestamp_location = "begin" }
+
+[dataset.swpc_solar_regions.citation]
+license = "Public domain (U.S. government work)"
+
+[[dataset.swpc_solar_regions.reference]]
+url = "https://services.swpc.noaa.gov/json/solar_regions.json"
+retrieved = 2026-11-08
+covers = "fields of the JSON file: day of observation, NOAA region number, latitude, longitude, area, spot and magnetic class, flares per region"
+
+[[dataset.swpc_solar_regions.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-08
+covers = "NOAA open data terms: free use"
+
+# Images of the Sun: GOES SUVI
+
+[dataset.swpc_suvi_094]
+title = "GOES SUVI 094 Angstrom images"
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://services.swpc.noaa.gov/products/animations/"
+
+[dataset.swpc_suvi_094.citation]
+license = "Public domain (U.S. government work)"
+
+[[dataset.swpc_suvi_094.reference]]
+url = "https://services.swpc.noaa.gov/products/animations/"
+retrieved = 2026-11-06
+covers = "resource URL, the frame lists of the SWPC image sequences"
+
+[[dataset.swpc_suvi_094.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-06
+covers = "NOAA open data terms: free use"
+
+[dataset.swpc_suvi_131]
+title = "GOES SUVI 131 Angstrom images"
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://services.swpc.noaa.gov/products/animations/"
+
+[dataset.swpc_suvi_131.citation]
+license = "Public domain (U.S. government work)"
+
+[[dataset.swpc_suvi_131.reference]]
+url = "https://services.swpc.noaa.gov/products/animations/"
+retrieved = 2026-11-06
+covers = "resource URL, the frame lists of the SWPC image sequences"
+
+[[dataset.swpc_suvi_131.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-06
+covers = "NOAA open data terms: free use"
+
+[dataset.swpc_suvi_171]
+title = "GOES SUVI 171 Angstrom images"
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://services.swpc.noaa.gov/products/animations/"
+
+[dataset.swpc_suvi_171.citation]
+license = "Public domain (U.S. government work)"
+
+[[dataset.swpc_suvi_171.reference]]
+url = "https://services.swpc.noaa.gov/products/animations/"
+retrieved = 2026-11-06
+covers = "resource URL, the frame lists of the SWPC image sequences"
+
+[[dataset.swpc_suvi_171.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-06
+covers = "NOAA open data terms: free use"
+
+[dataset.swpc_suvi_195]
+title = "GOES SUVI 195 Angstrom images"
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://services.swpc.noaa.gov/products/animations/"
+
+[dataset.swpc_suvi_195.citation]
+license = "Public domain (U.S. government work)"
+
+[[dataset.swpc_suvi_195.reference]]
+url = "https://services.swpc.noaa.gov/products/animations/"
+retrieved = 2026-11-05
+covers = "resource URL, the frame lists of the SWPC image sequences"
+
+[[dataset.swpc_suvi_195.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-05
+covers = "NOAA open data terms: free use, attribution requested"
+
+[dataset.swpc_suvi_284]
+title = "GOES SUVI 284 Angstrom images"
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://services.swpc.noaa.gov/products/animations/"
+
+[dataset.swpc_suvi_284.citation]
+license = "Public domain (U.S. government work)"
+
+[[dataset.swpc_suvi_284.reference]]
+url = "https://services.swpc.noaa.gov/products/animations/"
+retrieved = 2026-11-06
+covers = "resource URL, the frame lists of the SWPC image sequences"
+
+[[dataset.swpc_suvi_284.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-06
+covers = "NOAA open data terms: free use"
+
+[dataset.swpc_suvi_304]
+title = "GOES SUVI 304 Angstrom images"
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://services.swpc.noaa.gov/products/animations/"
+
+[dataset.swpc_suvi_304.citation]
+license = "Public domain (U.S. government work)"
+
+[[dataset.swpc_suvi_304.reference]]
+url = "https://services.swpc.noaa.gov/products/animations/"
+retrieved = 2026-11-05
+covers = "resource URL, the frame lists of the SWPC image sequences"
+
+[[dataset.swpc_suvi_304.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-05
+covers = "NOAA open data terms: free use, attribution requested"
+
+# Images of the Sun: SDO
+
+[dataset.sdo_hmi_continuum]
+title = "SDO HMI continuum images of the Sun"
+provider = "NASA/SDO and the AIA, EVE, and HMI science teams, served by NOAA Space Weather Prediction Center"
+resource_url = "https://services.swpc.noaa.gov/products/animations/"
+
+[dataset.sdo_hmi_continuum.citation]
+license = "No copyright"
+acknowledgement = "Courtesy of NASA/SDO and the AIA, EVE, and HMI science teams."
+
+[[dataset.sdo_hmi_continuum.reference]]
+url = "https://sdo.gsfc.nasa.gov/data/rules.php"
+retrieved = 2026-11-05
+covers = "SDO images are not copyrighted, credit line"
+
+[dataset.sdo_aia_193]
+title = "SDO AIA 193 Angstrom images"
+provider = "NASA/SDO and the AIA, EVE, and HMI science teams, rendered by the Helioviewer Project (ESA/NASA)"
+resource_url = "https://api.helioviewer.org/docs/v2/"
+
+[dataset.sdo_aia_193.citation]
+license = "No copyright"
+acknowledgement = "Courtesy of NASA/SDO and the AIA, EVE, and HMI science teams."
+
+[[dataset.sdo_aia_193.reference]]
+url = "https://sdo.gsfc.nasa.gov/data/rules.php"
+retrieved = 2026-11-05
+covers = "SDO images are not copyrighted, credit line"
+
+[[dataset.sdo_aia_193.reference]]
+url = "https://api.helioviewer.org/docs/v2/"
+retrieved = 2026-11-09
+covers = "screenshot service of the Helioviewer Project rendering the AIA images"
+
+[dataset.sdo_aia_flare_zoom]
+title = "SDO AIA 131 Angstrom images of the newest flare"
+provider = "NASA/SDO and the AIA, EVE, and HMI science teams, rendered by the Helioviewer Project (ESA/NASA)"
+resource_url = "https://api.helioviewer.org/docs/v2/"
+
+[dataset.sdo_aia_flare_zoom.citation]
+license = "No copyright"
+acknowledgement = "Courtesy of NASA/SDO and the AIA, EVE, and HMI science teams."
+
+[[dataset.sdo_aia_flare_zoom.reference]]
+url = "https://sdo.gsfc.nasa.gov/data/rules.php"
+retrieved = 2026-11-05
+covers = "SDO images are not copyrighted, credit line"
+
+[[dataset.sdo_aia_flare_zoom.reference]]
+url = "https://api.helioviewer.org/docs/v2/"
+retrieved = 2026-11-09
+covers = "screenshot service of the Helioviewer Project rendering the AIA images around a point"
+
+# Coronagraph images: SOHO LASCO
+
+[dataset.swpc_lasco_c2]
+title = "SOHO LASCO C2 coronagraph images"
+provider = "SOHO/LASCO consortium, served by NOAA Space Weather Prediction Center"
+resource_url = "https://services.swpc.noaa.gov/products/animations/"
+
+[dataset.swpc_lasco_c2.citation]
+license = "Free for non-commercial use; the acknowledgement is requested"
+acknowledgement = "Courtesy of SOHO/LASCO consortium. SOHO is a project of international cooperation between ESA and NASA."
+
+[[dataset.swpc_lasco_c2.reference]]
+url = "https://services.swpc.noaa.gov/products/animations/"
+retrieved = 2026-11-05
+covers = "resource URL, the frame lists of the SWPC image sequences"
+
+[[dataset.swpc_lasco_c2.reference]]
+url = "https://soho.nascom.nasa.gov/data/summary/copyright.html"
+retrieved = 2026-11-05
+covers = "SOHO image use and the requested acknowledgement"
+
+[dataset.swpc_lasco_c3]
+title = "SOHO LASCO C3 coronagraph images"
+provider = "SOHO/LASCO consortium, served by NOAA Space Weather Prediction Center"
+resource_url = "https://services.swpc.noaa.gov/products/animations/"
+
+[dataset.swpc_lasco_c3.citation]
+license = "Free for non-commercial use; the acknowledgement is requested"
+acknowledgement = "Courtesy of SOHO/LASCO consortium. SOHO is a project of international cooperation between ESA and NASA."
+
+[[dataset.swpc_lasco_c3.reference]]
+url = "https://services.swpc.noaa.gov/products/animations/"
+retrieved = 2026-11-05
+covers = "resource URL, the frame lists of the SWPC image sequences"
+
+[[dataset.swpc_lasco_c3.reference]]
+url = "https://soho.nascom.nasa.gov/data/summary/copyright.html"
+retrieved = 2026-11-05
+covers = "SOHO image use and the requested acknowledgement"
+
+# Solar wind plasma and magnetic field at L1
+
+[dataset.swpc_solar_wind_plasma]
+title = "Real-time solar wind plasma (1-minute)"
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://www.swpc.noaa.gov/products/real-time-solar-wind"
+time = { cadence = "PT1M" }
+same_as = { dataset = "OMNI2_H0_MRG1HR", fields = { proton_speed = "V1800", proton_density = "N1800", proton_temperature = "T1800" } }
+
+[dataset.swpc_solar_wind_plasma.citation]
+license = "Public domain (U.S. government work)"
+rules_of_use = "https://registry.opendata.aws/noaa-space-weather"
+
+[[dataset.swpc_solar_wind_plasma.reference]]
+url = "https://www.swpc.noaa.gov/products/real-time-solar-wind"
+retrieved = 2026-11-05
+covers = "title"
+
+[[dataset.swpc_solar_wind_plasma.reference]]
+url = "https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json"
+retrieved = 2026-11-05
+covers = "one row per spacecraft and minute"
+
+[[dataset.swpc_solar_wind_plasma.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-05
+covers = "NOAA open data terms: free use, attribution requested"
+
+[dataset.swpc_solar_wind_mag]
+title = "Real-time interplanetary magnetic field (1-minute)"
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://www.swpc.noaa.gov/products/real-time-solar-wind"
+time = { cadence = "PT1M" }
+same_as = { dataset = "OMNI2_H0_MRG1HR", fields = { by_gsm = "BY_GSM1800", bz_gsm = "BZ_GSM1800" } }
+
+[dataset.swpc_solar_wind_mag.citation]
+license = "Public domain (U.S. government work)"
+rules_of_use = "https://registry.opendata.aws/noaa-space-weather"
+
+[[dataset.swpc_solar_wind_mag.variable]]
+name = "bt"
+units = "nT"
+
+[[dataset.swpc_solar_wind_mag.variable]]
+name = "bx_gsm"
+units = "nT"
+
+[[dataset.swpc_solar_wind_mag.reference]]
+url = "https://www.swpc.noaa.gov/products/real-time-solar-wind"
+retrieved = 2026-11-05
+covers = "title"
+
+[[dataset.swpc_solar_wind_mag.reference]]
+url = "https://services.swpc.noaa.gov/json/rtsw/rtsw_mag_1m.json"
+retrieved = 2026-11-05
+covers = "one row per spacecraft and minute"
+
+[[dataset.swpc_solar_wind_mag.reference]]
+url = "https://services.swpc.noaa.gov/text/ace-magnetometer.txt"
+retrieved = 2026-11-05
+covers = "unit nT of Bt and Bx (GSM) in the SWPC real-time magnetometer text product"
+
+[[dataset.swpc_solar_wind_mag.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-05
+covers = "NOAA open data terms: free use, attribution requested"
+
+# STEREO A beacon
+
+[dataset.swpc_stereo_a]
+title = "Real-time solar wind at STEREO A (beacon, 1-minute)"
+provider = "NASA STEREO, served by NOAA Space Weather Prediction Center"
+resource_url = "https://www.spaceweather.gov/products/solar-terrestrial-relations-observatory-stereo"
+time = { cadence = "PT1M" }
+
+[dataset.swpc_stereo_a.citation]
+license = "Public domain (U.S. government work)"
+rules_of_use = "https://registry.opendata.aws/noaa-space-weather"
+
+[[dataset.swpc_stereo_a.variable]]
+name = "speed"
+units = "km/s"
+
+[[dataset.swpc_stereo_a.variable]]
+name = "density"
+units = "cm^-3"
+
+[[dataset.swpc_stereo_a.variable]]
+name = "bt"
+units = "nT"
+
+[[dataset.swpc_stereo_a.variable]]
+name = "lead_lag_days"
+units = "d"
+
+[[dataset.swpc_stereo_a.reference]]
+url = "https://www.spaceweather.gov/products/solar-terrestrial-relations-observatory-stereo"
+retrieved = 2026-11-09
+covers = "title, real-time STEREO plots with the co-rotation lead/lag time"
+
+[[dataset.swpc_stereo_a.reference]]
+url = "https://services.swpc.noaa.gov/json/stereo/stereo_a_1m.json"
+retrieved = 2026-11-09
+covers = "fields speed_KPS, density_cm3, Bt_nT, lead_lag_time_days and their units; proton channels high_energy_protons_13-21_MeV and low_energy_protons_623-2224_keV without unit"
+
+[[dataset.swpc_stereo_a.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-09
+covers = "NOAA open data terms: free use, attribution requested"
+
+# WSA-Enlil: solar wind at Earth and images
+
+[dataset.swpc_enlil_earth]
+title = "WSA-Enlil solar wind at Earth (model)"
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://www.spaceweather.gov/products/wsa-enlil-solar-wind-prediction"
+
+[dataset.swpc_enlil_earth.citation]
+license = "Public domain (U.S. government work)"
+rules_of_use = "https://registry.opendata.aws/noaa-space-weather"
+
+[[dataset.swpc_enlil_earth.variable]]
+name = "speed"
+units = "km/s"
+
+[[dataset.swpc_enlil_earth.variable]]
+name = "density"
+units = "cm^-3"
+
+[[dataset.swpc_enlil_earth.variable]]
+name = "temperature"
+units = "K"
+
+[[dataset.swpc_enlil_earth.reference]]
+url = "https://www.spaceweather.gov/products/wsa-enlil-solar-wind-prediction"
+retrieved = 2026-11-09
+covers = "title, model WSA-Enlil, run a few times a day, forecast of the solar wind at Earth"
+
+[[dataset.swpc_enlil_earth.reference]]
+url = "https://services.swpc.noaa.gov/json/enlil_time_series.json"
+retrieved = 2026-11-09
+covers = "fields v_r, earth_particles_per_cm3, temperature, polarity, cloud"
+
+[[dataset.swpc_enlil_earth.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-09
+covers = "NOAA open data terms: free use, attribution requested"
+
+[dataset.swpc_enlil]
+title = "WSA-Enlil solar wind model images"
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://www.spaceweather.gov/products/wsa-enlil-solar-wind-prediction"
+
+[dataset.swpc_enlil.citation]
+license = "Public domain (U.S. government work)"
+rules_of_use = "https://registry.opendata.aws/noaa-space-weather"
+
+[[dataset.swpc_enlil.reference]]
+url = "https://www.spaceweather.gov/products/wsa-enlil-solar-wind-prediction"
+retrieved = 2026-11-09
+covers = "title, the animation of density and speed in the ecliptic and the meridian through Earth"
+
+[[dataset.swpc_enlil.reference]]
+url = "https://services.swpc.noaa.gov/products/animations/enlil.json"
+retrieved = 2026-11-09
+covers = "frame list of the newest run, hourly frames from two days before to five days after the run"
+
+[[dataset.swpc_enlil.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-09
+covers = "NOAA open data terms: free use, attribution requested"
+
+# Kp
+
 [dataset.swpc_kp_estimated]
 title = "Estimated planetary K index (1-minute)"
-description = "Planetary K index estimated by SWPC every minute from ground magnetometers at Sitka, Meanook, Ottawa, Fredericksburg, Hartland, Wingst, Niemegk and Canberra; a nowcast, not the official Kp of GFZ."
 provider = "NOAA Space Weather Prediction Center"
 resource_url = "https://www.spaceweather.gov/products/planetary-k-index"
 time = { cadence = "PT1M" }
 
 [dataset.swpc_kp_estimated.citation]
-license = "Public domain (U.S. government work), attribution requested"
+license = "Public domain (U.S. government work)"
 rules_of_use = "https://registry.opendata.aws/noaa-space-weather"
 
 [[dataset.swpc_kp_estimated.variable]]
 name = "estimated_kp"
-label = "Estimated Kp"
-description = "Estimated planetary K index, 0 to 9"
 valid_min = 0
 valid_max = 9
 
 [[dataset.swpc_kp_estimated.variable]]
 name = "kp_index"
-label = "Kp index (integer)"
-description = "Integer part of the estimated planetary K index"
 valid_min = 0
 valid_max = 9
 
 [[dataset.swpc_kp_estimated.reference]]
 url = "https://www.spaceweather.gov/products/planetary-k-index"
 retrieved = 2026-11-05
-covers = "title, stations of the estimate, official Kp at GFZ, Kp from 0 to 9"
+covers = "title, Kp from 0 to 9"
 
 [[dataset.swpc_kp_estimated.reference]]
 url = "https://services.swpc.noaa.gov/json/planetary_k_index_1m.json"
 retrieved = 2026-11-03
-covers = "fields of the JSON file: estimated_kp, kp_index, time stamps without zone"
+covers = "one value per minute"
 
 [[dataset.swpc_kp_estimated.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-05
+covers = "NOAA open data terms: free use, attribution requested"
+
+# Aurora: OVATION images and grid
+
+[dataset.swpc_ovation_north]
+title = "OVATION aurora images, northern hemisphere"
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://services.swpc.noaa.gov/products/animations/"
+
+[dataset.swpc_ovation_north.citation]
+license = "Public domain (U.S. government work)"
+
+[[dataset.swpc_ovation_north.reference]]
+url = "https://services.swpc.noaa.gov/products/animations/"
+retrieved = 2026-11-05
+covers = "resource URL, the frame lists of the SWPC image sequences"
+
+[[dataset.swpc_ovation_north.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-05
+covers = "NOAA open data terms: free use, attribution requested"
+
+[dataset.swpc_ovation_south]
+title = "OVATION aurora images, southern hemisphere"
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://services.swpc.noaa.gov/products/animations/"
+
+[dataset.swpc_ovation_south.citation]
+license = "Public domain (U.S. government work)"
+
+[[dataset.swpc_ovation_south.reference]]
+url = "https://services.swpc.noaa.gov/products/animations/"
+retrieved = 2026-11-06
+covers = "resource URL, the frame lists of the SWPC image sequences"
+
+[[dataset.swpc_ovation_south.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-06
+covers = "NOAA open data terms: free use"
+
+[dataset.swpc_ovation_grid]
+title = "OVATION aurora model: probability of aurora (1 degree grid)"
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://www.spaceweather.gov/products/aurora-30-minute-forecast"
+
+[dataset.swpc_ovation_grid.citation]
+license = "Public domain (U.S. government work)"
+rules_of_use = "https://registry.opendata.aws/noaa-space-weather"
+
+[[dataset.swpc_ovation_grid.reference]]
+url = "https://www.spaceweather.gov/products/aurora-30-minute-forecast"
+retrieved = 2026-11-09
+covers = "title, OVATION model, map valid about 30 minutes after the solar wind measurement at L1"
+
+[[dataset.swpc_ovation_grid.reference]]
+url = "https://services.swpc.noaa.gov/json/ovation_aurora_latest.json"
+retrieved = 2026-11-09
+covers = "Observation Time, Forecast Time, coordinates as longitude, latitude and aurora probability"
+
+[[dataset.swpc_ovation_grid.reference]]
+url = "https://doi.org/10.1029/2009JA014326"
+retrieved = 2026-11-09
+covers = "Newell et al. (2009), the OVATION Prime model"
+
+[[dataset.swpc_ovation_grid.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-09
+covers = "NOAA open data terms: free use, attribution requested"
+
+# Ionosphere images: D-RAP and GloTEC
+
+[dataset.swpc_drap_global]
+title = "D-RAP: HF radio absorption in the lower ionosphere (global)"
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://www.spaceweather.gov/products/d-region-absorption-predictions-d-rap"
+
+[dataset.swpc_drap_global.citation]
+license = "Public domain (U.S. government work)"
+rules_of_use = "https://registry.opendata.aws/noaa-space-weather"
+
+[[dataset.swpc_drap_global.reference]]
+url = "https://services.swpc.noaa.gov/products/animations/d-rap/global.json"
+retrieved = 2026-11-09
+covers = "frame list, one frame per minute over the last hours"
+
+[[dataset.swpc_drap_global.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-09
+covers = "NOAA open data terms: free use, attribution requested"
+
+[dataset.swpc_glotec_anomaly]
+title = "GloTEC: total electron content against its 30-day median"
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://www.spaceweather.gov/products/glotec"
+
+[dataset.swpc_glotec_anomaly.citation]
+license = "Public domain (U.S. government work)"
+rules_of_use = "https://registry.opendata.aws/noaa-space-weather"
+
+[[dataset.swpc_glotec_anomaly.reference]]
+url = "https://services.swpc.noaa.gov/products/animations/glotec/anomaly_urt.json"
+retrieved = 2026-11-09
+covers = "frame list, one frame per ten minutes over the last day"
+
+[[dataset.swpc_glotec_anomaly.reference]]
+url = "https://registry.opendata.aws/noaa-space-weather"
+retrieved = 2026-11-09
+covers = "NOAA open data terms: free use, attribution requested"
+
+# Alerts
+
+[dataset.swpc_alerts]
+title = "SWPC alerts, watches and warnings"
+provider = "NOAA Space Weather Prediction Center"
+resource_url = "https://www.spaceweather.gov/products/alerts-watches-and-warnings"
+
+[dataset.swpc_alerts.citation]
+license = "Public domain (U.S. government work)"
+rules_of_use = "https://registry.opendata.aws/noaa-space-weather"
+
+[[dataset.swpc_alerts.reference]]
+url = "https://services.swpc.noaa.gov/products/alerts.json"
+retrieved = 2026-11-06
+covers = "fields of the JSON file: product_id, issue_datetime, message"
+
+[[dataset.swpc_alerts.reference]]
 url = "https://registry.opendata.aws/noaa-space-weather"
 retrieved = 2026-11-05
 covers = "NOAA open data terms: free use, attribution requested"

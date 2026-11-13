@@ -1,9 +1,7 @@
-# Curated metadata of the GFZ Potsdam indices. Every value is taken from the pages listed under `reference`;
-# `covers` names the values each page gives. Check these pages when updating a value.
+# Curated metadata of the GFZ Potsdam indices.
 
 [dataset.Kp]
 title = "Geomagnetic Kp index"
-description = "Planetary three-hour index of geomagnetic activity, the mean standardized K index of 13 geomagnetic observatories between 44 and 60 degrees geomagnetic latitude, from 0 to 9 in steps of one third."
 provider = "GFZ Helmholtz Centre for Geosciences"
 resource_url = "https://kp.gfz.de/en/"
 time = { cadence = "PT3H", timestamp_location = "begin" }
@@ -15,20 +13,13 @@ license = "CC BY 4.0"
 
 [[dataset.Kp.variable]]
 name = "Kp"
-label = "Kp"
-description = "Planetary geomagnetic Kp index of the three-hour interval starting at the time stamp, 0 to 9 in steps of one third"
 valid_min = 0
 valid_max = 9
-
-[[dataset.Kp.variable]]
-name = "status"
-label = "Status"
-description = "def: definitive value; pre: preliminary nowcast value, replaced by the definitive one later"
 
 [[dataset.Kp.reference]]
 url = "https://kp.gfz.de/app/format/json.txt"
 retrieved = 2026-10-27
-covers = "time stamp at the start of the three-hour interval, Kp in thirds from 0 to 9, meaning of status def and pre"
+covers = "time stamp at the start of the three-hour interval, Kp from 0 to 9"
 
 [[dataset.Kp.reference]]
 url = "https://kp.gfz.de/en/"
@@ -40,7 +31,32 @@ url = "https://doi.org/10.5880/Kp.0001"
 retrieved = 2026-10-15
 covers = "DOI and citation text of the data publication"
 
-[[dataset.Kp.reference]]
-url = "https://www.spaceweather.gov/products/planetary-k-index"
-retrieved = 2026-11-05
-covers = "definition as mean standardized K index of 13 observatories between 44 and 60 degrees geomagnetic latitude"
+[dataset.Hp30]
+title = "Geomagnetic Hp30 index"
+provider = "GFZ Helmholtz Centre for Geosciences"
+resource_url = "https://kp.gfz.de/en/hp30-hp60"
+time = { cadence = "PT30M", timestamp_location = "begin" }
+
+[dataset.Hp30.citation]
+doi = "10.5880/Hpo.0002"
+text = "Matzka, J., Bronkalla, O., Kervalishvili, G., Rauberg, J. and Yamazaki, Y. (2022). Geomagnetic Hpo index. V. 2.0. GFZ Data Services. https://doi.org/10.5880/Hpo.0002; Yamazaki, Y., Matzka, J., Stolle, C., Kervalishvili, G., Rauberg, J., Bronkalla, O., Morschhauser, A., Bruinsma, S., Shprits, Y. Y. and Jackson, D. R. (2022). Geomagnetic Activity Index Hpo. Geophysical Research Letters, 49(10). https://doi.org/10.1029/2022GL098860"
+license = "CC BY 4.0"
+
+[[dataset.Hp30.variable]]
+name = "Hp30"
+valid_min = 0
+
+[[dataset.Hp30.reference]]
+url = "https://kp.gfz.de/app/format/json.txt"
+retrieved = 2026-11-06
+covers = "time stamp at the start of the interval, Hp30 from 0 in steps of one third without upper bound, license CC BY 4.0"
+
+[[dataset.Hp30.reference]]
+url = "https://doi.org/10.5880/Hpo.0002"
+retrieved = 2026-11-06
+covers = "DOI, citation text, license CC BY 4.0, request to also cite Yamazaki et al. (2022)"
+
+[[dataset.Hp30.reference]]
+url = "https://doi.org/10.1029/2022GL098860"
+retrieved = 2026-11-06
+covers = "citation text of Yamazaki et al. (2022)"

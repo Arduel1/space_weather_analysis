@@ -32,6 +32,8 @@ dependencies = [
     "streamlit>=1.51.0,<2",
     "plotly>=6.5.0,<7",
     "pydantic-settings>=2,<3",
+    "pillow>=12,<13",
+    "sunkit-magex>=1,<2",
 ]
 
 [dependency-groups]
@@ -100,7 +102,6 @@ ignore = ["D100", "D104"]
 "src/pipeline_service/parsing/netcdf.py" = ["BLE001", "G004", "SIM102", "UP006", "UP035", "UP045"]
 "src/pipeline_service/parsing/time_decoding.py" = ["BLE001", "G004", "UP006", "UP007", "UP017", "UP035", "UP045"]
 "src/space_weather_analysis/database/bulk.py" = ["G004", "UP007", "UP035"]
-"src/space_weather_analysis/metadata/normalize.py" = ["UP045"]
 "src/space_weather_analysis/util/types.py" = ["UP006", "UP035", "UP040"]
 "src/streamlit_app/plots/kp.py" = ["RET505"]
 "src/streamlit_app/plots/sunspots.py" = ["PERF401"]

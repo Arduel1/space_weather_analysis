@@ -1,0 +1,39 @@
+# Curated metadata of the stored positions of planets and spacecraft.
+
+[dataset.body_positions]
+title = "Positions of planets and spacecraft"
+provider = "NASA/JPL Solar System Dynamics (Horizons); planets from the astropy built-in ephemeris"
+resource_url = "https://ssd.jpl.nasa.gov/horizons/"
+time = { cadence = "P1D" }
+
+[dataset.body_positions.citation]
+license = "Public domain"
+acknowledgement = "NASA/JPL Solar System Dynamics, Horizons On-Line Ephemeris System, https://ssd.jpl.nasa.gov"
+rules_of_use = "https://ssd.jpl.nasa.gov/faq.html"
+
+[[dataset.body_positions.variable]]
+name = "longitude"
+units = "deg"
+
+[[dataset.body_positions.variable]]
+name = "latitude"
+units = "deg"
+
+[[dataset.body_positions.variable]]
+name = "distance"
+units = "AU"
+
+[[dataset.body_positions.reference]]
+url = "https://ssd.jpl.nasa.gov/faq.html"
+retrieved = 2026-11-09
+covers = "data public domain, no permission needed, recommended citation"
+
+[[dataset.body_positions.reference]]
+url = "https://ssd.jpl.nasa.gov/horizons/"
+retrieved = 2026-11-09
+covers = "Horizons ephemerides of spacecraft"
+
+[[dataset.body_positions.reference]]
+url = "https://docs.sunpy.org/en/stable/reference/coordinates/index.html"
+retrieved = 2026-11-09
+covers = "heliographic Stonyhurst coordinates: longitude from the Sun-Earth line, latitude, distance"

@@ -1,0 +1,22 @@
+# Curated metadata of the daily NOAA sunspot regions as the Heliophysics Event Knowledgebase (HEK) of the Lockheed
+# Martin Solar and Astrophysics Laboratory serves them.
+
+[dataset.hek_noaa_regions]
+title = "Daily NOAA sunspot regions (HEK)"
+provider = "NOAA Space Weather Prediction Center, served by the Heliophysics Event Knowledgebase (LMSAL)"
+resource_url = "https://www.lmsal.com/hek/"
+time = { cadence = "P1D", timestamp_location = "begin" }
+
+[dataset.hek_noaa_regions.citation]
+doi = "10.1007/s11207-010-9624-2"
+text = "Hurlburt, N., Cheung, M., Schrijver, C. et al. (2012). Heliophysics Event Knowledgebase for the Solar Dynamics Observatory (SDO) and Beyond. Solar Physics 275, 67-78. https://doi.org/10.1007/s11207-010-9624-2"
+
+[[dataset.hek_noaa_regions.reference]]
+url = "https://link.springer.com/article/10.1007/s11207-010-9624-2"
+retrieved = 2026-11-08
+covers = "citation of the HEK"
+
+[[dataset.hek_noaa_regions.reference]]
+url = "https://www.lmsal.com/hek/her?cosec=2&cmd=search&type=column&event_type=ar&param0=frm_name&op0==&value0=NOAA%20SWPC%20Observer"
+retrieved = 2026-11-08
+covers = "region entries of the reporter NOAA SWPC Observer, one per region and day, with heliographic latitude and longitude, area, McIntosh and Mount Wilson class"

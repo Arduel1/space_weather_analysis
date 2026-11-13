@@ -4,7 +4,7 @@ from types import MappingProxyType
 from typing import Any
 
 from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSource, MetadataSourceKind, VariableMetadata, VectorComponent
-from space_weather_analysis.metadata.normalize import optional_text
+from space_weather_analysis.metadata.normalize import optional_text, optional_texts
 
 # SPASE (Space Physics Archive Search and Extract, https://spase-group.org/) ranks below curated and ISTP metadata
 # and above HAPI and data file metadata, so it only replaces fields that are unset or come from these sources or itself.
@@ -24,11 +24,13 @@ def apply_spase_overlay(record: DatasetMetadata, payload: dict[str, Any], retrie
 
     Each record variable whose provider name is the ParameterKey of a SPASE parameter takes description,
     unit, fill value, valid range, element label, coordinate system and vector component from it. The
-    cadence of the dataset is taken from the SPASE record, as no higher-ranked source gives one.
+    cadence, the observed regions, the measurement types and the instruments of the dataset are taken
+    from the SPASE record, as no higher-ranked source gives them.
 
     Args:
         record: The metadata record, changed in place.
-        payload: The SPASE record as parsed by the collector: `cadence` and `parameters` keyed by ParameterKey.
+        payload: The SPASE record as parsed by the collector: `cadence`, `observed_regions`, `measurement_types`,
+            `instrument_ids` and `parameters` keyed by ParameterKey.
         retrieved_at: When the SPASE record was read.
         url: The location the SPASE record was read from.
     """
@@ -42,6 +44,9 @@ def apply_spase_overlay(record: DatasetMetadata, payload: dict[str, Any], retrie
     cadence = optional_text(payload.get("cadence"))
     if cadence:
         record.time.cadence = cadence
+    record.observed_regions = optional_texts(payload.get("observed_regions"))
+    record.measurement_types = optional_texts(payload.get("measurement_types"))
+    record.instrument_ids = optional_texts(payload.get("instrument_ids"))
     record.replace_provenance(MetadataSource(kind=MetadataSourceKind.SPASE, url=url, retrieved_at=retrieved_at))
 
 

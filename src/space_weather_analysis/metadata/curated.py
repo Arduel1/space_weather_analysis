@@ -1,16 +1,13 @@
 import pathlib
-import tomllib
 from datetime import date
 from functools import cache
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from space_weather_analysis.metadata.models import TimestampLocation
-
-# The model of every table is closed, so a mistyped key fails the validation instead of being ignored
-_CLOSED = ConfigDict(extra="forbid", frozen=True)
+from space_weather_analysis.util.config_files import CLOSED, load_toml
 
 
 class CuratedSettings(BaseSettings):
@@ -34,7 +31,7 @@ class CuratedReference(BaseModel):
         covers: Which values come from the page.
     """
 
-    model_config = _CLOSED
+    model_config = CLOSED
 
     url: str = Field(min_length=1)
     retrieved: date
@@ -52,7 +49,7 @@ class CuratedCitation(BaseModel):
         rules_of_use: The terms of use text or URL.
     """
 
-    model_config = _CLOSED
+    model_config = CLOSED
 
     doi: str | None = None
     text: str | None = None
@@ -69,59 +66,72 @@ class CuratedTime(BaseModel):
         timestamp_location: The position of each time stamp in its measurement interval.
     """
 
-    model_config = _CLOSED
+    model_config = CLOSED
 
     cadence: str | None = None
     timestamp_location: TimestampLocation | None = None
 
 
 class CuratedVariable(BaseModel):
-    """The curated description of one stored field.
+    """The curated facts of one stored field that no provider publishes machine-readably.
+
+    Descriptions and labels are not curated: they come from provider metadata, or through a `same_as` link for fields
+    without provider metadata.
 
     Attributes:
         name: The field name in the data documents.
-        label: The short label.
-        description: What the field holds.
         units: The unit of the values.
         fill: The value the provider writes for a missing measurement.
         valid_min: The smallest valid value.
         valid_max: The largest valid value.
     """
 
-    model_config = _CLOSED
+    model_config = CLOSED
 
     name: str = Field(min_length=1)
-    label: str | None = None
-    description: str | None = None
     units: str | None = None
     fill: str | float | None = None
     valid_min: float | None = None
     valid_max: float | None = None
 
 
+class CuratedLink(BaseModel):
+    """A link to the stored metadata record of another dataset that holds the same quantities.
+
+    Attributes:
+        dataset: The dataset ID of the linked record.
+        fields: The variable name in the linked record by field name of this dataset; only fields with the identical quantity.
+    """
+
+    model_config = CLOSED
+
+    dataset: str = Field(min_length=1)
+    fields: dict[str, str] = Field(min_length=1)
+
+
 class CuratedDataset(BaseModel):
-    """The curated metadata of one dataset; every value needs a reference it was taken from.
+    """The curated metadata of one dataset: only facts no provider publishes machine-readably, each from a referenced page.
 
     Attributes:
         title: The title of the dataset.
-        description: The description of the dataset.
         provider: The organization providing the data.
         resource_url: The landing page of the dataset at the provider.
         citation: How the dataset is cited and under which terms it may be used.
         time: The time axis.
         variable: The curated fields.
+        same_as: The link to the record of a dataset that holds the same quantities with provider metadata.
         reference: The pages the values were taken from, at least one.
     """
 
-    model_config = _CLOSED
+    model_config = CLOSED
 
     title: str | None = None
-    description: str | None = None
     provider: str | None = None
     resource_url: str | None = None
     citation: CuratedCitation = Field(default_factory=CuratedCitation)
     time: CuratedTime = Field(default_factory=CuratedTime)
     variable: list[CuratedVariable] = Field(default_factory=list)
+    same_as: CuratedLink | None = None
     reference: list[CuratedReference] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -137,7 +147,7 @@ class CuratedDataset(BaseModel):
 class _CuratedFile(BaseModel):
     """The content of one curated metadata file, a table `dataset` with one subtable per dataset ID."""
 
-    model_config = _CLOSED
+    model_config = CLOSED
 
     dataset: dict[str, CuratedDataset] = Field(default_factory=dict)
 
@@ -159,8 +169,7 @@ def load_curated(directory: pathlib.Path) -> dict[str, CuratedDataset]:
     """
     curated: dict[str, CuratedDataset] = {}
     for path in sorted(directory.glob("*.toml")):
-        with path.open("rb") as file:
-            datasets = _CuratedFile.model_validate(tomllib.load(file)).dataset
+        datasets = load_toml(path, _CuratedFile).dataset
         repeated = sorted(curated.keys() & datasets.keys())
         if repeated:
             raise ValueError(f"{path.name} describes datasets that another curated file describes too: {repeated}")

@@ -1,0 +1,29 @@
+# Curated metadata of the list of near-Earth interplanetary coronal mass ejections (ICMEs) of Richardson and Cane.
+
+[dataset.icme_list]
+title = "Near-Earth interplanetary coronal mass ejections since 1996 (Richardson and Cane)"
+provider = "Ian Richardson and Hilary Cane (NASA GSFC, University of Tasmania)"
+resource_url = "https://izw1.caltech.edu/ACE/ASC/DATA/level3/icmetable2.htm"
+
+[dataset.icme_list.citation]
+doi = "10.7910/DVN/C2MHTH"
+acknowledgement = "Richardson and Cane list of near-Earth ICMEs, doi:10.7910/DVN/C2MHTH; Cane and Richardson (2003), doi:10.1029/2002JA009817; Richardson and Cane (2010), doi:10.1007/s11207-010-9568-6."
+
+[[dataset.icme_list.variable]]
+name = "dst"
+units = "nT"
+
+[[dataset.icme_list.reference]]
+url = "https://izw1.caltech.edu/ACE/ASC/DATA/level3/icmetable2.htm"
+retrieved = 2026-11-10
+covers = "title, columns (ICME start and end, Dst, associated LASCO CMEs), request to include the DOI 10.7910/DVN/C2MHTH"
+
+[[dataset.icme_list.reference]]
+url = "https://doi.org/10.1029/2002JA009817"
+retrieved = 2026-11-10
+covers = "Cane and Richardson (2003), method of the list"
+
+[[dataset.icme_list.reference]]
+url = "https://doi.org/10.1007/s11207-010-9568-6"
+retrieved = 2026-11-10
+covers = "Richardson and Cane (2010), catalog for solar cycle 23"

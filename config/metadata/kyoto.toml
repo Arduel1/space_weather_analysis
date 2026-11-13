@@ -1,0 +1,18 @@
+# Terms of the indices of the World Data Center (WDC) for Geomagnetism, Kyoto, which the HAPI (Heliophysics Application
+# Programmer's Interface) info does not state as acknowledgement text.
+
+[dataset.hour_dst.citation]
+acknowledgement = "The Dst index used in this paper/presentation was provided by the WDC for Geomagnetism, Kyoto (https://wdc.kugi.kyoto-u.ac.jp/wdc/Sec3.html)."
+
+[[dataset.hour_dst.reference]]
+url = "https://wdc.kugi.kyoto-u.ac.jp/wdc/cresample.html"
+retrieved = 2026-11-06
+covers = "acknowledgement text for an index"
+
+[dataset.min_asysym.citation]
+acknowledgement = "The ASY/SYM indices used in this paper/presentation were provided by the WDC for Geomagnetism, Kyoto (https://wdc.kugi.kyoto-u.ac.jp/wdc/Sec3.html)."
+
+[[dataset.min_asysym.reference]]
+url = "https://wdc.kugi.kyoto-u.ac.jp/wdc/cresample.html"
+retrieved = 2026-11-06
+covers = "acknowledgement text for an index"

@@ -1,0 +1,20 @@
+# Curated metadata of the polar field observations of the Wilcox Solar Observatory (WSO), Stanford University.
+
+[dataset.wso_polar_fields]
+title = "Polar magnetic field of the Sun, Wilcox Solar Observatory"
+provider = "Wilcox Solar Observatory, Stanford University"
+resource_url = "http://wso.stanford.edu/Polar.html"
+time = { cadence = "P10D" }
+
+[dataset.wso_polar_fields.citation]
+acknowledgement = "Wilcox Solar Observatory data used in this study were obtained via the web site http://wso.stanford.edu, courtesy of J.T. Hoeksema."
+
+[[dataset.wso_polar_fields.reference]]
+url = "http://wso.stanford.edu/Polar.html"
+retrieved = 2026-11-08
+covers = "observations since May 1976, polemost apertures north and south, 10-day averages of a centred 30-day window, 20 nHz low pass filtered values without the yearly projection effect"
+
+[[dataset.wso_polar_fields.reference]]
+url = "https://arxiv.org/pdf/1303.0345"
+retrieved = 2026-11-08
+covers = "wording of the acknowledgement of WSO data"

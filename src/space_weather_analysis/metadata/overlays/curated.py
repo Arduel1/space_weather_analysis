@@ -25,7 +25,7 @@ def apply_curated_overlay(record: DatasetMetadata, curated: CuratedDataset) -> N
         record: The metadata record, changed in place.
         curated: The curated metadata of the dataset.
     """
-    _set_given(record, {"title": curated.title, "description": curated.description})
+    _set_given(record, {"title": curated.title})
     _set_given(record.source, {"provider": curated.provider})
     _set_given(record.links, {"resource_url": curated.resource_url})
     _set_given(record.citation, curated.citation.model_dump())
@@ -41,6 +41,11 @@ def apply_curated_overlay(record: DatasetMetadata, curated: CuratedDataset) -> N
 
     record.provenance = [entry for entry in record.provenance if entry.kind != MetadataSourceKind.CURATED]
     record.provenance.extend(
-        MetadataSource(kind=MetadataSourceKind.CURATED, url=reference.url, retrieved_at=datetime.combine(reference.retrieved, time(), UTC))
+        MetadataSource(
+            kind=MetadataSourceKind.CURATED,
+            url=reference.url,
+            retrieved_at=datetime.combine(reference.retrieved, time(), UTC),
+            covers=reference.covers,
+        )
         for reference in curated.reference
     )

@@ -1,0 +1,21 @@
+# Terms of DONKI (Space Weather Database Of Notifications, Knowledge, Information), the event database of the Community
+# Coordinated Modeling Center (CCMC), whose API serves the events without metadata.
+
+[dataset.donki_events]
+title = "DONKI space weather events"
+provider = "Community Coordinated Modeling Center (CCMC), NASA Goddard Space Flight Center"
+resource_url = "https://ccmc.gsfc.nasa.gov/tools/DONKI/"
+
+[dataset.donki_events.citation]
+acknowledgement = "We acknowledge the Community Coordinated Modeling Center (CCMC) at Goddard Space Flight Center for the use of the DONKI, https://ccmc.gsfc.nasa.gov/tools/DONKI/."
+rules_of_use = "https://ccmc.gsfc.nasa.gov/tools/DONKI/"
+
+[[dataset.donki_events.reference]]
+url = "https://ccmc.gsfc.nasa.gov/tools/DONKI/"
+retrieved = 2026-11-06
+covers = "provider, rules of the road, data provided as is, API address"
+
+[[dataset.donki_events.reference]]
+url = "https://ccmc.gsfc.nasa.gov/publication-policy/"
+retrieved = 2026-11-06
+covers = "sample acknowledgement for CCMC tools and systems, filled in for DONKI"

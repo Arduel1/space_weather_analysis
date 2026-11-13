@@ -143,9 +143,9 @@ def read_dataset_range(dataset_id: str, start: datetime | None, stop: datetime |
         return pd.DataFrame()
     if coverage is None or coverage.first_timestamp is None or coverage.last_timestamp is None:
         return pd.DataFrame()
-    # The stop is exclusive, so the latest document needs a stop just after it
+    # The stop is exclusive, so the latest document needs a stop just after it; MongoDB keeps whole milliseconds
     range_start = start or coverage.first_timestamp
-    range_stop = stop or coverage.last_timestamp + timedelta(microseconds=1)
+    range_stop = stop or coverage.last_timestamp + timedelta(milliseconds=1)
     return _read_range(coverage.collection, range_start, range_stop)
 
 

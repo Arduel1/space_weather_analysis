@@ -26,6 +26,8 @@ class MetadataSourceKind(StrEnum):
     API = "api"
     # The dataset list of CDAS, the CDAWeb Coordinated Data Analysis System web services (https://cdaweb.gsfc.nasa.gov/WebServices/REST/).
     CDAS = "cdas"
+    # The stored record of another dataset that holds the same quantity, linked in the curated metadata.
+    LINKED = "linked"
 
 
 class DataType(StrEnum):
@@ -159,12 +161,14 @@ class MetadataSource(BaseModel):
         url: The location the metadata was read from.
         retrieved_at: When the metadata was read.
         last_modified: The modification time the source reports, as given by the source.
+        covers: Which values of the record the source gave; None where the source gave the whole record.
     """
 
     kind: MetadataSourceKind
     url: str | None = None
     retrieved_at: UtcDatetime
     last_modified: str | None = None
+    covers: str | None = None
 
 
 class VariableMetadata(BaseModel):
@@ -233,6 +237,9 @@ class DatasetMetadata(BaseModel):
         source: The system the dataset is ingested from.
         title: The title given by the provider.
         description: The description given by the provider, unchanged.
+        observed_regions: The SPASE ObservedRegion terms, the regions the data describe, such as Heliosphere.NearEarth.
+        measurement_types: The SPASE MeasurementType terms, the kinds of measurement, such as ThermalPlasma.
+        instrument_ids: The SPASE resource IDs of the instruments that made the measurements.
         time: The time axis of the dataset.
         citation: How the dataset is cited and under which terms it may be used.
         links: References to descriptions outside this project.
@@ -247,6 +254,9 @@ class DatasetMetadata(BaseModel):
     source: SourceInfo
     title: str | None = None
     description: str | None = None
+    observed_regions: list[str] = Field(default_factory=list)
+    measurement_types: list[str] = Field(default_factory=list)
+    instrument_ids: list[str] = Field(default_factory=list)
     time: TimeInfo = Field(default_factory=TimeInfo)
     citation: CitationInfo = Field(default_factory=CitationInfo)
     links: LinkInfo = Field(default_factory=LinkInfo)

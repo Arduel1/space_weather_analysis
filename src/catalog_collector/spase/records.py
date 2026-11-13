@@ -3,15 +3,12 @@ from typing import Any
 import requests
 
 from space_weather_analysis.clients.download import download_json
-from space_weather_analysis.metadata.normalize import normalize_units, optional_text
+from space_weather_analysis.metadata.normalize import normalize_units, optional_text, optional_texts
+from space_weather_analysis.metadata.spase.resources import SPASE_ID_PREFIX, SPASE_RECORD_URL
 from space_weather_analysis.util.error_handling import DataProcessingError, ResourceNotFoundError
 
-# SPASE (Space Physics Archive Search and Extract, https://spase-group.org/) describes heliophysics datasets
-# in records named by a resource ID `spase://{authority}/{path}`; spase-metadata.org serves each record as JSON.
-SPASE_ID_PREFIX = "spase://"
-SPASE_RECORD_URL = "https://spase-metadata.org/{resource_path}.json"
-
-# Connect and read timeout in seconds; a record has some ten KB.
+# Connect and read timeout of a request for a SPASE record (Space Physics Archive Search and Extract,
+# https://spase-group.org/) in seconds; a record has some ten KB.
 SPASE_TIMEOUT = (10.0, 60.0)
 
 
@@ -27,10 +24,10 @@ def spase_record_url(resource_id: str | None) -> str | None:
     text = optional_text(resource_id)
     if text is None or not text.startswith(SPASE_ID_PREFIX):
         return None
-    resource_path = text[len(SPASE_ID_PREFIX) :].strip("/")
+    resource_path = text.removeprefix(SPASE_ID_PREFIX).strip("/")
     if "/" not in resource_path:
         return None
-    return SPASE_RECORD_URL.format(resource_path=resource_path)
+    return SPASE_RECORD_URL.format(path=resource_path)
 
 
 def fetch_spase_record(session: requests.Session, url: str) -> dict[str, Any] | None:
@@ -67,9 +64,10 @@ def parse_spase_record(document: Any) -> dict[str, Any]:
         document: The parsed JSON form of the record.
 
     Returns:
-        The cadence as ISO 8601 duration and the parameters keyed by ParameterKey, the name of the
-        variable in the data files, each with description, units, valid range, fill value,
-        coordinate system and its elements with 0-based index.
+        The cadence as ISO 8601 duration, the lists of ObservedRegion and MeasurementType terms and of
+        InstrumentID resource IDs, and the parameters keyed by ParameterKey, the name of the variable in
+        the data files, each with description, units, valid range, fill value, coordinate system and its
+        elements with 0-based index.
 
     Raises:
         KeyError, TypeError, AttributeError: If the document is no SPASE record of numerical data.
@@ -93,7 +91,13 @@ def parse_spase_record(document: Any) -> dict[str, Any]:
             "coordinate_representation": optional_text(coordinate_system.get("CoordinateRepresentation")),
             "elements": [_element(element) for element in _as_list(structure.get("Element"))],
         }
-    return {"cadence": optional_text(temporal_description.get("Cadence")), "parameters": parameters}
+    return {
+        "cadence": optional_text(temporal_description.get("Cadence")),
+        "observed_regions": optional_texts(numerical_data.get("ObservedRegion")),
+        "measurement_types": optional_texts(numerical_data.get("MeasurementType")),
+        "instrument_ids": optional_texts(numerical_data.get("InstrumentID")),
+        "parameters": parameters,
+    }
 
 
 def _element(element: dict[str, Any]) -> dict[str, Any]:

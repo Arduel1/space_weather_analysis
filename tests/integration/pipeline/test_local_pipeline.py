@@ -128,31 +128,31 @@ title = "Invented sunspot title"
 
 [[dataset.silso_sunspot_daily.variable]]
 name = "sunspot_number"
-description = "Invented sunspot number description"
+units = "invented unit"
 
 [[dataset.silso_sunspot_daily.reference]]
 url = "https://provider.invalid/page"
 retrieved = 2026-10-01
-covers = "title, description of sunspot_number"
+covers = "title, unit of sunspot_number"
 """
 
 
 @pytest.mark.integration
-def test_local_run_saves_metadata_record_with_curated_descriptions(
+def test_local_run_saves_metadata_record_with_curated_values(
     db: Database, sunspot_dir: pathlib.Path, local_pipeline: LocalPipelineFor, no_curated_metadata: pathlib.Path
 ) -> None:
-    """A run saves a LOCAL record with one variable per stored column, its title and a variable description taken from the curated file."""
+    """A run saves a LOCAL record with one variable per stored column, its title and a variable unit taken from the curated file."""
     (no_curated_metadata / "silso.toml").write_text(SUNSPOT_CURATED_TOML, encoding="utf-8")
 
     local_pipeline(sunspot_dir).run([SUNSPOT_COLLECTION])
 
     record = MongoMetadataRepository(db).get(SUNSPOT_COLLECTION)
     assert record is not None
-    assert (record.source.type, record.title, {variable.name: variable.description for variable in record.variables}) == (
+    assert (record.source.type, record.title, {variable.name: variable.units for variable in record.variables}) == (
         "LOCAL",
         "Invented sunspot title",
         {
-            "sunspot_number": "Invented sunspot number description",
+            "sunspot_number": "invented unit",
             "std_dev": None,
             "num_observations": None,
             "is_provisional": None,

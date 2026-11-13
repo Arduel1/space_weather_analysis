@@ -42,6 +42,9 @@ SPASE_RECORD: dict[str, Any] = {
         "Version": "2.7.2",
         "NumericalData": {
             "ResourceID": SPASE_ID,
+            "InstrumentID": "spase://SMWG/Instrument/SYNTH/MAG",
+            "MeasurementType": ["MagneticField", "ThermalPlasma"],
+            "ObservedRegion": "Heliosphere.NearEarth",
             "TemporalDescription": {"TimeSpan": {"StartDate": "2020-01-01T00:00:00Z", "RelativeStopDate": "-P2M"}, "Cadence": "PT1M"},
             "Parameter": [
                 {
@@ -177,7 +180,7 @@ def test_plan_lists_one_spase_record_per_cdas_dataset_with_a_spase_id(db: Databa
 def test_spase_record_sets_coordinate_system_vector_components_and_cadence(
     db: Database, httpserver: HTTPServer, http_session: requests.Session
 ) -> None:
-    """Without master file, labels, valid ranges, coordinate system and Cartesian components come per element from SPASE."""
+    """Without master file, labels, valid ranges, coordinate system and vector components come per element from SPASE, regions per dataset."""
     _store(db)
     httpserver.expect_request(SPASE_PATH).respond_with_json(SPASE_RECORD)
 
@@ -194,6 +197,11 @@ def test_spase_record_sets_coordinate_system_vector_components_and_cadence(
         "PT1M",
         "SPASE B",
         ["hapi", "spase", "cdas"],
+    )
+    assert (record.observed_regions, record.measurement_types, record.instrument_ids) == (
+        ["Heliosphere.NearEarth"],
+        ["MagneticField", "ThermalPlasma"],
+        ["spase://SMWG/Instrument/SYNTH/MAG"],
     )
 
 

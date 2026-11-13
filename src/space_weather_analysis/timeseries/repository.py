@@ -114,15 +114,20 @@ class TimeSeriesRepository(ABC):
         """
 
     @abstractmethod
-    def read_latest(self, collection: str, fields: Sequence[str] | None = None) -> tuple[datetime, dict[str, Any]] | None:
+    def read_latest(
+        self, collection: str, fields: Sequence[str] | None = None, data_values: Mapping[str, Any] | None = None
+    ) -> tuple[datetime, dict[str, Any]] | None:
         """Reads the newest document.
 
         Args:
             collection: The name of the collection.
             fields: The data fields to read; None reads every data field.
+            data_values: The values that data fields must equal for a document to be read, by field name; None reads the
+                newest document of all.
 
         Returns:
-            The aware UTC time stamp and the data fields of the newest document, without the fields it lacks; None if the collection is empty.
+            The aware UTC time stamp and the data fields of the newest matching document, without the fields it lacks; None
+            if no document matches.
         """
 
     @abstractmethod
@@ -277,17 +282,24 @@ class MongoTimeSeriesRepository(TimeSeriesRepository):
         columns = list(fields) if fields is not None else None
         return pd.DataFrame(rows, index=_utc_index(times), columns=columns)
 
-    def read_latest(self, collection: str, fields: Sequence[str] | None = None) -> tuple[datetime, dict[str, Any]] | None:
+    def read_latest(
+        self, collection: str, fields: Sequence[str] | None = None, data_values: Mapping[str, Any] | None = None
+    ) -> tuple[datetime, dict[str, Any]] | None:
         """Reads the newest document.
 
         Args:
             collection: The name of the collection.
             fields: The data fields to read; None reads every data field.
+            data_values: The values that data fields must equal for a document to be read, by field name; None reads the
+                newest document of all.
 
         Returns:
-            The aware UTC time stamp and the data fields of the newest document, without the fields it lacks; None if the collection is empty.
+            The aware UTC time stamp and the data fields of the newest matching document, without the fields it lacks; None
+            if no document matches.
         """
-        document = self.db[collection].find_one({}, projection=_data_projection(fields), sort=[(TIME_FIELD, DESCENDING)])
+        # The data fields of a document lie below DATA_FIELD, so a filter names them by their dotted path
+        query = {f"{DATA_FIELD}.{field_name}": value for field_name, value in (data_values or {}).items()}
+        document = self.db[collection].find_one(query, projection=_data_projection(fields), sort=[(TIME_FIELD, DESCENDING)])
         if document is None:
             return None
         timestamp: datetime = document[TIME_FIELD]
