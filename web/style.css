@@ -12,10 +12,39 @@
   --stale: #c62828;
   --static: #6e7781;
   --running: #0b62c4;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --series-8: #e34948;
+  /* Colors of the data themes, the same quantity in the same color on every page: the categorical palette slots
+     sun 4, solar wind 3, magnetic field 1, particles 7, CMEs 2, storms 8, aurora 6, STEREO A 5 */
+  --theme-sun: var(--series-4);
+  --theme-wind: var(--series-3);
+  --theme-field: var(--series-1);
+  --theme-particles: var(--series-7);
+  --theme-cme: var(--series-2);
+  --theme-storm: var(--series-8);
+  --theme-aurora: var(--series-6);
+  --theme-stereo: var(--series-5);
+  /* Ordinal ramp of the blue sequential steps 250, 450, 650 for ordered bands, light (weak) to dark (strong); the dark
+     mode turns it so that the weak band lies nearest the surface (steps 600, 400, 150) */
+  --ordinal-1: #86b6ef;
+  --ordinal-2: #2a78d6;
+  --ordinal-3: #104281;
+  --seq-100: #cde2fb;
+  --seq-250: #86b6ef;
+  --seq-400: #3987e5;
+  --seq-550: #1c5cab;
+  --seq-700: #0d366b;
 }
 
+/* Dark tokens follow the system setting unless the viewer picks light; the theme button sets data-theme on the root */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --background: #0e1117;
     --surface: #161b22;
     --border: #30363d;
@@ -28,7 +57,59 @@
     --stale: #f85149;
     --static: #8b949e;
     --running: #58a6ff;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+    --ordinal-1: #184f95;
+    --ordinal-2: #3987e5;
+    --ordinal-3: #b7d3f6;
+    --seq-100: #0d366b;
+    --seq-250: #1c5cab;
+    --seq-400: #3987e5;
+    --seq-550: #86b6ef;
+    --seq-700: #cde2fb;
   }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #0e1117;
+  --surface: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --muted: #9198a1;
+  --grid: #262c34;
+  --link: #58a6ff;
+  --live: #3fb950;
+  --delayed: #e3a03b;
+  --stale: #f85149;
+  --static: #8b949e;
+  --running: #58a6ff;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  --ordinal-1: #184f95;
+  --ordinal-2: #3987e5;
+  --ordinal-3: #b7d3f6;
+  --seq-100: #0d366b;
+  --seq-250: #1c5cab;
+  --seq-400: #3987e5;
+  --seq-550: #86b6ef;
+  --seq-700: #cde2fb;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 * {
@@ -52,13 +133,28 @@ h1 {
   font-size: 1.6rem;
 }
 
-h2 {
-  font-size: 1rem;
-  margin: 1rem 0 0.4rem;
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
-.page-header {
-  margin-bottom: 12px;
+.page-header .caption {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.theme-button,
+.about-close button {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
 }
 
 .tabs {
@@ -107,23 +203,121 @@ h2 {
   padding: 10px 12px;
 }
 
-.panel-title {
-  font-weight: 600;
-  margin-bottom: 4px;
+/* Panels stacked in one column of a row; the last one fills the height the row leaves */
+.column {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.help {
-  cursor: help;
-  color: var(--muted);
-  border: 1px solid var(--border);
+.column > .panel {
+  flex: 0 0 auto;
+}
+
+.column > .panel:last-child {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The video of the last panel of a column takes the height the row leaves instead of setting it, so that the column
+   ends with the panels beside it */
+.column > .panel:last-child .video-stage {
+  flex: 1 1 0;
+  min-height: 200px;
+  contain: size;
+}
+
+.column > .panel:last-child .video-stage .frame {
+  height: 100%;
+  max-height: none;
+}
+
+.info-button {
+  margin-left: auto;
+  flex: none;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
-  display: inline-block;
-  width: 1.2em;
-  height: 1.2em;
-  line-height: 1.1em;
-  text-align: center;
-  font-size: 0.75em;
-  margin-left: 4px;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--muted);
+  font: italic 600 0.8rem Georgia, serif;
+  cursor: pointer;
+}
+
+.info-button:hover {
+  color: var(--text);
+}
+
+/* The content fills the dialog, so that a click on the dialog element itself is a click on the backdrop */
+dialog#about {
+  max-width: min(760px, 92vw);
+  max-height: 85vh;
+  overflow: auto;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0;
+}
+
+.about-content {
+  padding: 0 18px 12px;
+}
+
+dialog#about::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+/* The close button stays in view while the dialog scrolls */
+.about-close {
+  position: sticky;
+  top: 0;
+  text-align: right;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.formula {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1rem;
+}
+
+.about-dataset h3 {
+  margin: 8px 0 4px;
+}
+
+.about-dataset h4 {
+  margin: 12px 0 4px;
+  font-size: 0.9rem;
+}
+
+.about-dataset dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.about-dataset dt {
+  color: var(--muted);
+}
+
+.about-dataset dd {
+  margin: 0;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  margin-bottom: 4px;
 }
 
 .tile-value {
@@ -141,6 +335,180 @@ h2 {
   font-size: 0.85rem;
 }
 
+/* The replay bar stays at the top of the window while the page scrolls past it, above the chart toolbars */
+.replay {
+  position: sticky;
+  top: 0;
+  z-index: 1100;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px;
+}
+
+.replay-track {
+  flex: 1 1 auto;
+  position: relative;
+  padding-bottom: 16px;
+}
+
+.replay-track input[type="range"] {
+  width: 100%;
+  margin: 0;
+}
+
+/* Time marks under the slider, each centred on its time */
+.replay-marks span {
+  position: absolute;
+  bottom: 0;
+  transform: translateX(-50%);
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.replay-time {
+  min-width: 13em;
+  font-size: 0.85rem;
+}
+
+.replay button {
+  background: var(--background);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.frame {
+  display: block;
+  width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  background: #000000;
+  border-radius: 4px;
+}
+
+.chart-tall {
+  height: auto;
+}
+
+/* 3D view of the magnetic field: the WebGL canvas with the label layer of three.js on top */
+.field-view {
+  position: relative;
+  height: 520px;
+  touch-action: none;
+}
+
+.field-view canvas {
+  display: block;
+}
+
+.field-labels {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.field-region,
+.field-event {
+  font-size: 11px;
+  color: var(--text);
+}
+
+.field-region {
+  box-sizing: border-box;
+  border: 3px solid;
+  border-radius: 50%;
+}
+
+.field-region span,
+.field-event span {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.field-event {
+  width: 10px;
+  height: 10px;
+}
+
+.field-flare::before,
+.field-cme::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.field-flare::before {
+  background: #ffd43b;
+  transform: rotate(45deg);
+}
+
+.field-cme::before {
+  background: linear-gradient(45deg, transparent 40%, #ff6b6b 40% 60%, transparent 60%), linear-gradient(-45deg, transparent 40%, #ff6b6b 40% 60%, transparent 60%);
+}
+
+.field-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 0.8rem;
+  margin: 4px 0;
+}
+
+.field-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.swatch-line {
+  width: 18px;
+  height: 3px;
+  background: var(--swatch);
+}
+
+.swatch-ring {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--swatch);
+  border-radius: 50%;
+}
+
+.swatch-scale {
+  width: 70px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.context {
+  font-size: 0.8rem;
+  margin: 2px 0;
+}
+
+.messages pre {
+  white-space: pre-wrap;
+  font-size: 0.78rem;
+  margin: 4px 0 8px;
+}
+
+.messages summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  margin: 3px 0;
+}
+
 .chart {
   height: 300px;
 }
@@ -151,8 +519,144 @@ h2 {
 }
 
 .toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 0.85rem;
   color: var(--muted);
+}
+
+/* Info buttons inside a line stand right after its text */
+.toggle .info-button,
+.caption .info-button {
+  margin-left: 0;
+  width: 18px;
+  height: 18px;
+  font-size: 0.7rem;
+}
+
+.footnotes {
+  font-weight: 400;
+  font-size: 0.7rem;
+}
+
+.footnotes a {
+  text-decoration: none;
+  padding: 0 1px;
+}
+
+#sources summary {
+  cursor: pointer;
+  font-weight: 600;
+  margin: 1rem 0 0.4rem;
+}
+
+#credits li {
+  margin-bottom: 4px;
+  border-radius: 4px;
+}
+
+#credits li.highlight {
+  background: var(--seq-100);
+}
+
+.tile-chart {
+  height: 150px;
+  margin: 4px 0;
+}
+
+/* Tiles keep a width their small charts can be read at, wrapping into further lines on narrow screens */
+.row {
+  flex-wrap: wrap;
+}
+
+.panel-value {
+  flex: 1 1 300px;
+}
+
+/* Image panels as video players: variant tabs, the frame, and a bar with play, frame slider and full screen */
+.video-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.video-tabs button,
+.video-button {
+  background: var(--background);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.video-tabs button[aria-pressed="true"] {
+  background: var(--link);
+  border-color: var(--link);
+  color: var(--background);
+}
+
+.video-tabs button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.video-stage {
+  background: #000000;
+  border-radius: 4px;
+}
+
+.video-stage:fullscreen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video-stage:fullscreen .frame {
+  max-height: 100vh;
+  height: 100%;
+}
+
+.video-grid {
+  display: grid;
+  gap: 6px;
+}
+
+.video-grid:fullscreen {
+  background: #000000;
+  align-content: center;
+}
+
+.video-cell {
+  position: relative;
+  margin: 0;
+  background: #000000;
+  border-radius: 4px;
+}
+
+/* The name of each view stands on its image, like the labels of the providers */
+.video-cell figcaption,
+.disk-stage figcaption {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  color: #ffffff;
+  font-size: 0.78rem;
+  text-shadow: 0 0 3px #000000;
+}
+
+.video-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.video-bar input[type="range"] {
+  flex: 1 1 auto;
 }
 
 table {
@@ -173,10 +677,6 @@ th {
   position: sticky;
   top: 0;
   background: var(--surface);
-}
-
-.feed {
-  margin-bottom: 8px;
 }
 
 .state-live,
@@ -225,4 +725,141 @@ th {
   .row {
     flex-direction: column;
   }
+}
+
+/* Definitions of the event kinds of an event chain view */
+.terms {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.terms dt {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.terms dd {
+  margin: 0 0 4px;
+}
+
+.terms summary {
+  cursor: pointer;
+}
+
+/* Data updates: one row per kind of data, its problem in a line below its name */
+table.updates td {
+  white-space: normal;
+  vertical-align: top;
+}
+
+table.updates .problem {
+  color: var(--stale);
+}
+
+/* Sun disk view: the square image with the region markers drawn over it */
+.disk-grid {
+  display: grid;
+  gap: 6px;
+}
+
+.disk-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  margin: 0;
+  background: #000000;
+  border-radius: 4px;
+}
+
+.disk-stage img,
+.disk-stage svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.region-marker {
+  fill: none;
+  stroke-width: 0.005;
+}
+
+.region-label {
+  font-size: 0.03px;
+  fill: #ffffff;
+  paint-order: stroke;
+  stroke: #000000;
+  stroke-width: 0.004px;
+}
+
+/* Coronal holes and Earth to scale on the images of the whole Sun */
+.hole-outline {
+  fill: rgba(61, 220, 151, 0.12);
+  stroke: #3ddc97;
+  stroke-width: 0.004;
+}
+
+.earth-scale {
+  fill: #4dabf7;
+  stroke: #ffffff;
+  stroke-width: 0.002;
+}
+
+/* The map of the solar system beside the distances over time; side by side on wide screens, stacked on narrow ones */
+.helio-views {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .helio-views {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* The view from above of the magnetic connection panel stays narrow beside its proton chart */
+.connection-disk {
+  max-width: 560px;
+}
+
+/* The choices above the map of the solar system: its reach and which CMEs it draws */
+.helio-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+/* The turnable Earth of the aurora view */
+.globe-view {
+  position: relative;
+  height: 520px;
+}
+
+/* A video stage or cell without an image at the shown moment: the last frame fades and a note says so */
+.video-stage[data-missing],
+.video-cell[data-missing],
+.disk-stage[data-missing] {
+  position: relative;
+}
+
+.video-stage[data-missing] .frame,
+.video-cell[data-missing] .frame,
+.disk-stage[data-missing] img,
+.disk-stage[data-missing] svg {
+  opacity: 0.15;
+}
+
+.video-stage[data-missing]::after,
+.video-cell[data-missing]::after,
+.disk-stage[data-missing]::after {
+  content: attr(data-missing);
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 0.9rem;
 }

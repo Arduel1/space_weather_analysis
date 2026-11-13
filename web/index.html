@@ -6,18 +6,32 @@
   <title>Space Weather Dashboard</title>
   <meta name="description" content="Space weather dashboard of the Space Weather Analysis project, built from the providers' data.">
   <link rel="stylesheet" href="style.css">
-  <!-- Plotly.js 4.1.2 (MIT license, npm package plotly.js-dist-min), served from this site so that no request goes to a third party -->
-  <script src="vendor/plotly.min.js"
-          integrity="sha384-hHv6D3tTUUBpp4tVv6t2Dc3oGuRhphmWOTKUR8jWyN0Pnon1g3iebKCNDNmKmxo8" defer></script>
-  <script src="app.js" defer></script>
+  <!-- Plotly.js and three.js are served from this site, so that no request goes to a third party; their versions are
+       pinned in package.json. three.js is loaded only by the pages showing a 3D view. -->
+  <script src="vendor/plotly.min.js" defer></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three/three.module.js",
+        "three/addons/": "./vendor/three/addons/"
+      }
+    }
+  </script>
+  <script type="module" src="js/main.js"></script>
 </head>
 <body>
   <header class="page-header">
-    <h1>Space Weather Dashboard</h1>
-    <p id="build-info" class="caption">Loading...</p>
+    <div>
+      <h1>Space Weather Dashboard</h1>
+      <p id="build-info" class="caption">Loading...</p>
+    </div>
   </header>
   <nav id="pages" class="tabs" aria-label="Dashboard pages" hidden></nav>
   <main id="dashboard" aria-live="polite"></main>
+  <dialog id="about" aria-label="About this data">
+    <form method="dialog" class="about-close"><button type="submit" aria-label="Close">Close</button></form>
+    <div class="about-content"></div>
+  </dialog>
   <footer class="page-footer">
     <p>
       Static demo of <a href="https://github.com/Arduel1/space_weather_analysis">Space Weather Analysis</a>, a private,
@@ -25,7 +39,8 @@
     </p>
     <p>
       The values are shown as the providers publish them; missing values are left out and long series are thinned for
-      drawing. Under each panel the freshness of its newest value is rated against your clock.
+      drawing. Under each panel the freshness of its newest value is rated against your clock. The numbers at the panel
+      titles lead to the sources below.
     </p>
     <p>
       The page is hosted on GitHub Pages, so GitHub receives the connection data of every visit (see the
@@ -33,8 +48,10 @@
       General Privacy Statement</a>). The page itself sets no cookies, stores nothing in the browser and loads nothing
       from other services.
     </p>
-    <h2>Data sources</h2>
-    <ul id="credits"></ul>
+    <details id="sources">
+      <summary>Data sources and formulas</summary>
+      <ol id="credits"></ol>
+    </details>
   </footer>
 </body>
 </html>
