@@ -1,0 +1,141 @@
+# Image sequences, one table per dataset ID: the frame list of the provider, how the frame time is read from the image
+# path, and spacing, size and keep time of the stored frames (durations in ISO 8601).
+
+# GOES SUVI (Solar Ultraviolet Imager) extreme ultraviolet images of the Sun, 195 Angstrom
+[product.swpc_suvi_195]
+list_url = "https://services.swpc.noaa.gov/products/animations/suvi-primary-195.json"
+base_url = "https://services.swpc.noaa.gov"
+time_pattern = '_s(\d{8}T\d{6})Z_'
+time_format = "%Y%m%dT%H%M%S"
+spacing = "PT12M"
+
+# GOES SUVI extreme ultraviolet images of the Sun, 304 Angstrom
+[product.swpc_suvi_304]
+list_url = "https://services.swpc.noaa.gov/products/animations/suvi-primary-304.json"
+base_url = "https://services.swpc.noaa.gov"
+time_pattern = '_s(\d{8}T\d{6})Z_'
+time_format = "%Y%m%dT%H%M%S"
+spacing = "PT12M"
+
+# SOHO LASCO (Large Angle and Spectrometric Coronagraph) C2 coronagraph images
+[product.swpc_lasco_c2]
+list_url = "https://services.swpc.noaa.gov/products/animations/lasco-c2.json"
+base_url = "https://services.swpc.noaa.gov"
+time_pattern = '(\d{8}_\d{4})_c2_'
+time_format = "%Y%m%d_%H%M"
+spacing = "PT12M"
+
+# SOHO LASCO C3 coronagraph images
+[product.swpc_lasco_c3]
+list_url = "https://services.swpc.noaa.gov/products/animations/lasco-c3.json"
+base_url = "https://services.swpc.noaa.gov"
+time_pattern = '(\d{8}_\d{4})_c3_'
+time_format = "%Y%m%d_%H%M"
+spacing = "PT12M"
+
+# OVATION (auroral oval model of SWPC) aurora images of the northern hemisphere
+[product.swpc_ovation_north]
+list_url = "https://services.swpc.noaa.gov/products/animations/ovation_north_24h.json"
+base_url = "https://services.swpc.noaa.gov"
+time_pattern = 'aurora_N_(\d{4}-\d{2}-\d{2}_\d{4})'
+time_format = "%Y-%m-%d_%H%M"
+spacing = "PT15M"
+
+# GOES SUVI extreme ultraviolet images of the Sun, 094 Angstrom
+[product.swpc_suvi_094]
+list_url = "https://services.swpc.noaa.gov/products/animations/suvi-primary-094.json"
+base_url = "https://services.swpc.noaa.gov"
+time_pattern = '_s(\d{8}T\d{6})Z_'
+time_format = "%Y%m%dT%H%M%S"
+spacing = "PT12M"
+
+# GOES SUVI extreme ultraviolet images of the Sun, 131 Angstrom
+[product.swpc_suvi_131]
+list_url = "https://services.swpc.noaa.gov/products/animations/suvi-primary-131.json"
+base_url = "https://services.swpc.noaa.gov"
+time_pattern = '_s(\d{8}T\d{6})Z_'
+time_format = "%Y%m%dT%H%M%S"
+spacing = "PT12M"
+
+# GOES SUVI extreme ultraviolet images of the Sun, 171 Angstrom
+[product.swpc_suvi_171]
+list_url = "https://services.swpc.noaa.gov/products/animations/suvi-primary-171.json"
+base_url = "https://services.swpc.noaa.gov"
+time_pattern = '_s(\d{8}T\d{6})Z_'
+time_format = "%Y%m%dT%H%M%S"
+spacing = "PT12M"
+
+# GOES SUVI extreme ultraviolet images of the Sun, 284 Angstrom
+[product.swpc_suvi_284]
+list_url = "https://services.swpc.noaa.gov/products/animations/suvi-primary-284.json"
+base_url = "https://services.swpc.noaa.gov"
+time_pattern = '_s(\d{8}T\d{6})Z_'
+time_format = "%Y%m%dT%H%M%S"
+spacing = "PT12M"
+
+# OVATION aurora images of the southern hemisphere
+[product.swpc_ovation_south]
+list_url = "https://services.swpc.noaa.gov/products/animations/ovation_south_24h.json"
+base_url = "https://services.swpc.noaa.gov"
+time_pattern = 'aurora_S_(\d{4}-\d{2}-\d{2}_\d{4})'
+time_format = "%Y-%m-%d_%H%M"
+spacing = "PT15M"
+
+# SDO HMI (Helioseismic and Magnetic Imager) continuum images of the Sun, in which the sunspots are seen
+[product.sdo_hmi_continuum]
+list_url = "https://services.swpc.noaa.gov/products/animations/sdo-hmii.json"
+base_url = "https://services.swpc.noaa.gov"
+time_pattern = '(\d{8}_\d{6})_512_HMII'
+time_format = "%Y%m%d_%H%M%S"
+spacing = "PT12M"
+solar_disk = true
+
+# SDO AIA (Atmospheric Imaging Assembly) images of the Sun at 193 Angstrom, rendered by Helioviewer, in which the
+# coronal holes are dark; Helioviewer scales every image to the Sun seen from 1 AU, so the disk is known and the coronal
+# holes are found in each frame
+[product.sdo_aia_193]
+spacing = "PT12M"
+helioviewer = { layers = "[SDO,AIA,AIA,193,1,100]", image_scale = 4.8 }
+solar_disk = true
+coronal_holes = true
+
+# SDO AIA images at 131 Angstrom, which show the hot plasma of flares, zoomed onto the place of the newest DONKI flare
+# from 10 minutes before its begin to 10 minutes after its end; only the frames of that flare are kept. 1.8 arcseconds
+# per pixel over 512 pixels show about 920 arcseconds, the active region with its surroundings
+[product.sdo_aia_flare_zoom]
+spacing = "PT12S"
+helioviewer = { layers = "[SDO,AIA,AIA,131,1,100]", image_scale = 1.8 }
+zoom = { events = "donki_events", event_type = "FLR" }
+
+# The WSA-Enlil solar wind model of SWPC as images: density and speed in the plane of the planets and in the plane
+# through Sun and Earth, with the values at Earth and STEREO A; each run lists hourly frames from two days before to
+# five days after its run time and replaces the previous run, and the images keep their size to stay readable
+[product.swpc_enlil]
+list_url = "https://services.swpc.noaa.gov/products/animations/enlil.json"
+base_url = "https://services.swpc.noaa.gov"
+time_pattern = '_(\d{8}T\d{6})\.jpg$'
+time_format = "%Y%m%dT%H%M%S"
+spacing = "PT2H"
+size = 960
+model_run = true
+
+# D-RAP (D Region Absorption Prediction) of SWPC: the highest radio frequency that loses at least 1 dB on its way
+# through the lower ionosphere, from the X-ray flux on the day side and the energetic protons over the poles; the list
+# holds the last hours at one minute
+[product.swpc_drap_global]
+list_url = "https://services.swpc.noaa.gov/products/animations/d-rap/global.json"
+base_url = "https://services.swpc.noaa.gov"
+time_pattern = '_SWPC_(\d{14})_GLOBAL'
+time_format = "%Y%m%d%H%M%S"
+spacing = "PT15M"
+size = 850
+
+# GloTEC (Global Total Electron Content) of SWPC: the total electron content of the ionosphere against its median of
+# the last 30 days, from GNSS (satellite navigation) receivers worldwide; the list holds the last day at ten minutes
+[product.swpc_glotec_anomaly]
+list_url = "https://services.swpc.noaa.gov/products/animations/glotec/anomaly_urt.json"
+base_url = "https://services.swpc.noaa.gov"
+time_pattern = '_(\d{8}T\d{6})\.png$'
+time_format = "%Y%m%dT%H%M%S"
+spacing = "PT20M"
+size = 835

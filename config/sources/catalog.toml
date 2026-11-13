@@ -1,0 +1,23 @@
+# Master catalog items the pipeline service saves on every start for datasets the catalog lacks, so feeds load them
+# without the metadata worker; `cadence` sizes the fetched chunks until a metadata record of the dataset gives one.
+
+# OMNI 2 hourly solar wind, magnetic field and geomagnetic indices; the CDAWeb HAPI server reports no cadence
+[[dataset]]
+dataset_id = "OMNI2_H0_MRG1HR"
+sources = [
+    { type = "HAPI", source_id = "https://cdaweb.gsfc.nasa.gov/hapi", time_range = { start_time = "1963-01-01T00:00:00Z", end_time = "2026-10-30T14:00:00Z" }, ongoing = true, cadence = "PT1H" },
+]
+
+# Hourly Dst index of the WDC for Geomagnetism, Kyoto, which the HAPI metadata mirror does not list
+[[dataset]]
+dataset_id = "hour_dst"
+sources = [
+    { type = "HAPI", source_id = "https://wdc.kugi.kyoto-u.ac.jp/hapi", time_range = { start_time = "1957-01-01T00:29:30Z", end_time = "2026-11-06T12:00:00Z" }, ongoing = true, cadence = "PT1H" },
+]
+
+# 1-minute ASY and SYM indices of the WDC for Geomagnetism, Kyoto; the provisional data end some days before now
+[[dataset]]
+dataset_id = "min_asysym"
+sources = [
+    { type = "HAPI", source_id = "https://wdc.kugi.kyoto-u.ac.jp/hapi", time_range = { start_time = "1981-01-01T00:00:00Z", end_time = "2026-11-06T12:00:00Z" }, ongoing = true, cadence = "PT1M" },
+]

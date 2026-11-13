@@ -99,7 +99,7 @@ class GfzPipeline:
 class GfzChunkSource:
     """The GFZ steps of a chunked run, keeping the latest response of each index for its metadata."""
 
-    # The Kp index has one value every 3 hours
+    # The indices have one value every 30 minutes or every 3 hours
     granularity = Granularity.HOURS
 
     def __init__(self, client: GfzClient, timeseries: TimeSeriesRepository, metadata_repository: MetadataRepository, unit: TimeBucket | None) -> None:

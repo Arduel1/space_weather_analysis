@@ -7,9 +7,15 @@ from pymongo.database import Database
 from pipeline_service.chunk_status.repository import ChunkStatusRepository, MongoChunkStatusRepository
 from pipeline_service.pipelines.base import Pipeline
 from pipeline_service.pipelines.cdaweb import CdawebPipeline
+from pipeline_service.pipelines.donki import DonkiPipeline
+from pipeline_service.pipelines.ephemeris import EphemerisPipeline
 from pipeline_service.pipelines.gfz import GfzPipeline
 from pipeline_service.pipelines.hapi import HapiPipeline
+from pipeline_service.pipelines.hek import HekPipeline
+from pipeline_service.pipelines.images import ImagePipeline
 from pipeline_service.pipelines.local import LocalPipeline
+from pipeline_service.pipelines.ovation import OvationPipeline
+from pipeline_service.pipelines.pfss import PfssPipeline
 from pipeline_service.pipelines.swpc import SwpcPipeline
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
@@ -18,6 +24,11 @@ from space_weather_analysis.clients.swpc import SwpcClient
 from space_weather_analysis.coverage.repository import CoverageRepository, MongoCoverageRepository
 from space_weather_analysis.metadata.repository import MetadataRepository, MongoMetadataRepository
 from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository, TimeSeriesRepository
+
+# The directory below the data directory holding the files served with the dashboard, one directory per dataset
+MEDIA_DIRECTORY = "media"
+# The directory below the data directory holding the downloaded GONG synoptic maps
+GONG_MAP_DIRECTORY = "gong"
 
 
 class PipelineFactory:
@@ -89,6 +100,47 @@ class PipelineFactory:
                     coverage_repository=self.coverage_repository,
                     metadata_repository=self.metadata_repository,
                     client=self.swpc_client,
+                )
+            case SourceType.IMAGES:
+                return ImagePipeline(
+                    timeseries=self.timeseries,
+                    coverage_repository=self.coverage_repository,
+                    metadata_repository=self.metadata_repository,
+                    media_dir=self.data_dir / MEDIA_DIRECTORY,
+                )
+            case SourceType.GONG:
+                return PfssPipeline(
+                    timeseries=self.timeseries,
+                    coverage_repository=self.coverage_repository,
+                    metadata_repository=self.metadata_repository,
+                    media_dir=self.data_dir / MEDIA_DIRECTORY,
+                    map_dir=self.data_dir / GONG_MAP_DIRECTORY,
+                )
+            case SourceType.HEK:
+                return HekPipeline(
+                    timeseries=self.timeseries,
+                    metadata_repository=self.metadata_repository,
+                    coverage_repository=self.coverage_repository,
+                    chunk_status=self.chunk_status,
+                )
+            case SourceType.DONKI:
+                return DonkiPipeline(
+                    timeseries=self.timeseries,
+                    coverage_repository=self.coverage_repository,
+                    metadata_repository=self.metadata_repository,
+                )
+            case SourceType.EPHEMERIS:
+                return EphemerisPipeline(
+                    timeseries=self.timeseries,
+                    coverage_repository=self.coverage_repository,
+                    metadata_repository=self.metadata_repository,
+                )
+            case SourceType.OVATION:
+                return OvationPipeline(
+                    timeseries=self.timeseries,
+                    coverage_repository=self.coverage_repository,
+                    metadata_repository=self.metadata_repository,
+                    media_dir=self.data_dir / MEDIA_DIRECTORY,
                 )
             case _:
                 assert_never(source_type)

@@ -3,7 +3,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any, cast
 
-from pymongo import ASCENDING, ReplaceOne
+from pymongo import ASCENDING, ReplaceOne, UpdateOne
 from pymongo.database import Database
 
 from space_weather_analysis.catalog.models import CatalogEntryDict, CatalogMap, MasterCatalogItem
@@ -34,6 +34,19 @@ class CatalogRepository(ABC):
 
         Args:
             items: The catalog items, at most one per dataset ID.
+        """
+
+    @abstractmethod
+    def save_missing(self, items: Sequence[MasterCatalogItem]) -> list[str]:
+        """Inserts the catalog items of the datasets the catalog does not hold yet.
+
+        Of stored items, only a missing source cadence is added.
+
+        Args:
+            items: The catalog items, at most one per dataset ID.
+
+        Returns:
+            The IDs of the inserted datasets.
         """
 
     @abstractmethod
@@ -143,6 +156,47 @@ class MongoCatalogRepository(CatalogRepository):
             document = {"dataset_id": item["dataset_id"], "sources": item["sources"]}
             operations.append(ReplaceOne({"dataset_id": item["dataset_id"]}, document, upsert=True))
         bulk_write_in_batches(self.collection, operations, self.BATCH_SIZE)
+
+    def save_missing(self, items: Sequence[MasterCatalogItem]) -> list[str]:
+        """Inserts the catalog items of the datasets the catalog does not hold yet.
+
+        Of stored items, only a missing source cadence is added.
+
+        Args:
+            items: The catalog items, at most one per dataset ID.
+
+        Returns:
+            The IDs of the inserted datasets.
+
+        Raises:
+            pymongo.errors.BulkWriteError: If the write fails.
+        """
+        if not items:
+            return []
+        self._ensure_indexes()
+        operations = []
+        for item in items:
+            document = {"dataset_id": item["dataset_id"], "sources": item["sources"]}
+            operations.append(UpdateOne({"dataset_id": item["dataset_id"]}, {"$setOnInsert": document}, upsert=True))
+        result = self.collection.bulk_write(operations, ordered=False)
+        # A stored source without cadence takes the cadence of the configured source with the same type and ID
+        cadence_updates = []
+        for item in items:
+            for source in item["sources"]:
+                cadence = source.get("cadence")
+                if cadence:
+                    cadence_updates.append(
+                        UpdateOne(
+                            {"dataset_id": item["dataset_id"]},
+                            {"$set": {"sources.$[source].cadence": cadence}},
+                            array_filters=[
+                                {"source.type": source["type"], "source.source_id": source["source_id"], "source.cadence": {"$exists": False}}
+                            ],
+                        )
+                    )
+        bulk_write_in_batches(self.collection, cadence_updates, self.BATCH_SIZE)
+        # The upserted IDs are keyed by the index of their operation
+        return [items[operation_index]["dataset_id"] for operation_index in sorted(result.upserted_ids or {})]
 
     def get(self, dataset_id: str) -> MasterCatalogItem | None:
         """Reads the catalog item of one dataset.

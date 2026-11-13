@@ -2,10 +2,10 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 from pipeline_service.pipelines.base import ProgressCallback
-from pipeline_service.pipelines.chunks import CHUNK_ERRORS, METADATA_SAVE_ERRORS, record_gap, refresh_coverage
+from pipeline_service.pipelines.chunks import METADATA_SAVE_ERRORS, refresh_coverage, require_known_datasets, resolve_time_range, run_per_dataset
 from pipeline_service.pipelines.report import IngestionReport
 from space_weather_analysis.catalog.models import SourceType
-from space_weather_analysis.clients.swpc import SWPC_PRODUCTS, SwpcClient
+from space_weather_analysis.clients.swpc import SwpcClient
 from space_weather_analysis.coverage.repository import CoverageRepository
 from space_weather_analysis.metadata.minimal import build_minimal_metadata
 from space_weather_analysis.metadata.overlays.layering import save_with_overlays
@@ -13,9 +13,7 @@ from space_weather_analysis.metadata.repository import MetadataRepository
 from space_weather_analysis.timeseries.documents import frame_to_documents, source_identifier
 from space_weather_analysis.timeseries.models import Granularity
 from space_weather_analysis.timeseries.repository import TimeSeriesRepository
-from space_weather_analysis.util.error_handling import SourceUnreachableError
 from space_weather_analysis.util.naming import sanitize_collection_name
-from space_weather_analysis.util.time_utils import ensure_aware
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +28,8 @@ REFETCH_OVERLAP = timedelta(hours=1)
 # Time the oldest stored document may lie after the start for the stored data to count as reaching back to it; the
 # oldest row of a rolling file lies a moment after the start of a lookback as long as the file
 STORED_START_TOLERANCE = timedelta(hours=1)
+# Time after the last value of a model run up to which the stored values are replaced, as the end of a range is exclusive
+RUN_END_MARGIN = timedelta(seconds=1)
 
 
 class SwpcPipeline:
@@ -74,7 +74,7 @@ class SwpcPipeline:
         Once SWPC sent no answer, the remaining datasets of the run are reported as gaps without a request.
 
         Args:
-            datasets: The IDs of SWPC datasets, keys of SWPC_PRODUCTS.
+            datasets: The IDs of SWPC datasets, keys of the products of the client.
             start_time: The start of the time range (inclusive); None starts DEFAULT_LOOKBACK before the end.
             end_time: The end of the time range (exclusive); None ends now.
             progress_callback: Receives the progress of the run; None to report nothing.
@@ -85,35 +85,30 @@ class SwpcPipeline:
         Raises:
             ValueError: If no dataset is given or a dataset ID is no SWPC dataset.
         """
-        if not datasets:
-            raise ValueError("The SWPC pipeline needs at least one dataset.")
-        unknown_datasets = sorted(set(datasets) - SWPC_PRODUCTS.keys())
-        if unknown_datasets:
-            raise ValueError(f"Unknown SWPC datasets {unknown_datasets}; known are {sorted(SWPC_PRODUCTS)}.")
-        stop = ensure_aware(end_time) if end_time is not None else datetime.now(UTC)
-        start = ensure_aware(start_time) if start_time is not None else stop - DEFAULT_LOOKBACK
+        require_known_datasets(datasets, self.client.products, "SWPC")
+        start, stop = resolve_time_range(start_time, end_time, DEFAULT_LOOKBACK)
 
-        report = IngestionReport()
-        unreachable: SourceUnreachableError | None = None
-        for dataset_index, dataset_id in enumerate(datasets):
-            report.chunks_total += 1
-            if unreachable is not None:
-                record_gap(report, dataset_id, start, stop, f"Not requested, the provider was unreachable: {unreachable}")
-                continue
-            collection = sanitize_collection_name(dataset_id)
-            try:
-                if self._ingest(dataset_id, collection, start, stop):
-                    refresh_coverage(self.coverage_repository, dataset_id, collection)
-            except SourceUnreachableError as error:
-                logger.warning("SWPC unreachable, the remaining datasets of this run are not requested: %s", error)
-                record_gap(report, dataset_id, start, stop, f"{type(error).__name__}: {error}")
-                unreachable = error
-            except CHUNK_ERRORS as error:
-                logger.warning("SWPC dataset %s not ingested: %s", dataset_id, error)
-                record_gap(report, dataset_id, start, stop, f"{type(error).__name__}: {error}")
-            if progress_callback:
-                progress_callback((dataset_index + 1) / len(datasets), f"Processed SWPC dataset {dataset_id}")
-        return report
+        return run_per_dataset(
+            datasets,
+            (start, stop),
+            lambda dataset_id: self._ingest_and_refresh(dataset_id, start, stop),
+            provider="SWPC",
+            dataset_kind="SWPC",
+            progress_callback=progress_callback,
+        )
+
+    def _ingest_and_refresh(self, dataset_id: str, start: datetime, stop: datetime) -> None:
+        """Ingests a dataset and refreshes its coverage if SWPC delivered data.
+
+        Raises:
+            SourceUnreachableError: If SWPC sent no answer.
+            DataRetrievalError: If the download failed.
+            DataProcessingError: If the file cannot be read.
+            pymongo.errors.PyMongoError: If the documents cannot be stored.
+        """
+        collection = sanitize_collection_name(dataset_id)
+        if self._ingest(dataset_id, collection, start, stop):
+            refresh_coverage(self.coverage_repository, dataset_id, collection)
 
     def _ingest(self, dataset_id: str, collection: str, start: datetime, stop: datetime) -> bool:
         """Fetches the file of a dataset from the start or shortly before its newest stored document, and writes the differences.
@@ -121,6 +116,7 @@ class SwpcPipeline:
         See _fetch_start for where the fetch starts.
 
         The written span starts at the first delivered time, not at the start, so stored documents older than the file stay.
+        A model run reaching ahead is fetched from the start and replaces the stored values up to its last time.
 
         Args:
             dataset_id: The dataset ID.
@@ -137,15 +133,18 @@ class SwpcPipeline:
             DataProcessingError: If the file cannot be read.
             pymongo.errors.PyMongoError: If the documents cannot be stored.
         """
-        fetch_start = self._fetch_start(dataset_id, collection, start)
+        product = self.client.products[dataset_id]
+        fetch_start = start if product.reaches_ahead else self._fetch_start(dataset_id, collection, start)
         result = self.client.fetch(dataset_id, fetch_start, stop)
         if result.data is None:
             logger.info("SWPC file of %s holds no value between %s and %s", dataset_id, fetch_start, stop)
             return False
         frame = result.data
-        documents = frame_to_documents(frame, source_identifier(SourceType.SWPC, SWPC_PRODUCTS[dataset_id].provider_id))
+        documents = frame_to_documents(frame, source_identifier(SourceType.SWPC, product.provider_id))
         self.timeseries.ensure_collection(collection, SWPC_GRANULARITY)
-        self.timeseries.replace_range(collection, frame.index.min().to_pydatetime(), stop, documents)
+        # The values of a model run after now replace those of the previous run as well
+        written_stop = max(stop, frame.index.max().to_pydatetime() + RUN_END_MARGIN) if product.reaches_ahead else stop
+        self.timeseries.replace_range(collection, frame.index.min().to_pydatetime(), written_stop, documents)
         self._save_metadata(dataset_id, collection, [str(column) for column in frame.columns], result.source_url or self.client.base_url)
         return True
 

@@ -11,7 +11,9 @@ import pandas as pd
 import requests
 
 from pipeline_service.parsing.cme_catalog import CME_PROVIDER_ID, parse_cme_catalog
-from pipeline_service.parsing.silso import SILSO_PROVIDER_ID, parse_silso_daily, parse_silso_monthly
+from pipeline_service.parsing.icme_list import ICME_PROVIDER_ID, parse_icme_list
+from pipeline_service.parsing.silso import SILSO_PROVIDER_ID, parse_silso_daily, parse_silso_monthly, parse_silso_monthly_hemispheric
+from pipeline_service.parsing.wso_polar import WSO_POLAR_PROVIDER_ID, parse_wso_polar_fields
 from pipeline_service.pipelines.base import ProgressCallback
 from pipeline_service.pipelines.chunks import METADATA_SAVE_ERRORS, ingest_or_record_gap, refresh_coverage
 from pipeline_service.pipelines.report import IngestionReport
@@ -71,6 +73,11 @@ LOCAL_DATASETS: Mapping[str, LocalDataset] = MappingProxyType(
         "silso_sunspot_smoothed": LocalDataset(
             "SN_ms_tot_V2.0.csv", parse_silso_monthly, SILSO_PROVIDER_ID, "https://www.sidc.be/SILSO/INFO/snmstotcsv.php"
         ),
+        "silso_sunspot_hemispheric": LocalDataset(
+            "SN_m_hem_V2.0.csv", parse_silso_monthly_hemispheric, SILSO_PROVIDER_ID, "https://www.sidc.be/SILSO/INFO/snmhemcsv.php"
+        ),
+        "wso_polar_fields": LocalDataset("wso_polar.html", parse_wso_polar_fields, WSO_POLAR_PROVIDER_ID, "http://wso.stanford.edu/Polar.html"),
+        "icme_list": LocalDataset("icme_list.html", parse_icme_list, ICME_PROVIDER_ID, "https://izw1.caltech.edu/ACE/ASC/DATA/level3/icmetable2.htm"),
         "cme_catalog": LocalDataset(
             "cme_catalog.txt", parse_cme_catalog, CME_PROVIDER_ID, "https://cdaw.gsfc.nasa.gov/CME_list/UNIVERSAL_ver2/text_ver/univ_all.txt"
         ),

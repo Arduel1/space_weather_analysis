@@ -29,6 +29,22 @@ class SourceType(StrEnum):
     GFZ_POTSDAM = "GFZ_POTSDAM"
     LOCAL = "LOCAL"
     SWPC = "SWPC"
+    # Image sequences of providers that list their latest frames, kept as scaled files with one document per frame
+    IMAGES = "IMAGES"
+    # Space weather events with the links between them from DONKI (Database Of Notifications, Knowledge, Information) of
+    # the Community Coordinated Modeling Center of NASA
+    DONKI = "DONKI"
+    # Daily sunspot regions of NOAA (US National Oceanic and Atmospheric Administration) from the Heliophysics Event
+    # Knowledgebase (HEK) of the Lockheed Martin Solar and Astrophysics Laboratory (LMSAL)
+    HEK = "HEK"
+    # Synoptic magnetograms (maps of the solar surface field over one rotation) of GONG, the Global Oscillation Network
+    # Group, from which the coronal magnetic field is computed
+    GONG = "GONG"
+    # Positions of planets and spacecraft from the built-in planetary ephemeris of astropy and from Horizons, the ephemeris
+    # service of the Jet Propulsion Laboratory (JPL)
+    EPHEMERIS = "EPHEMERIS"
+    # Maps of the OVATION aurora model of SWPC (NOAA Space Weather Prediction Center), of which only the newest is published
+    OVATION = "OVATION"
 
 
 class CatalogEntryDict(TypedDict):
@@ -51,6 +67,8 @@ class CatalogEntryDict(TypedDict):
             0 once it is found again.
         missing_since: When a refresh first missed the dataset in the current run of misses,
             in UTC; absent while the dataset is found.
+        cadence: The time between two records as ISO 8601 duration, set on the sources of the static catalog
+            file; it sizes the fetched chunks while the dataset has no metadata record giving it.
     """
 
     type: str
@@ -62,6 +80,7 @@ class CatalogEntryDict(TypedDict):
     availability_checked_at: NotRequired[datetime]
     missing_runs: NotRequired[int]
     missing_since: NotRequired[datetime]
+    cadence: NotRequired[str]
 
 
 class MasterCatalogItem(TypedDict):

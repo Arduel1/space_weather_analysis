@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import NamedTuple, Protocol
 
@@ -10,14 +10,17 @@ from pipeline_service.chunk_status.models import ChunkStatus
 from pipeline_service.chunk_status.repository import ChunkStatusRepository
 from pipeline_service.pipelines.base import ProgressCallback
 from pipeline_service.pipelines.report import IngestionReport
+from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.coverage.repository import CoverageRepository
 from space_weather_analysis.jobs.models import ChunkGap
+from space_weather_analysis.metadata.minimal import build_minimal_metadata
+from space_weather_analysis.metadata.overlays.layering import save_with_overlays
 from space_weather_analysis.metadata.repository import MetadataRepository
-from space_weather_analysis.timeseries.documents import TIME_FIELD
+from space_weather_analysis.timeseries.documents import TIME_FIELD, TimeSeriesDocument
 from space_weather_analysis.timeseries.models import Granularity, TimeBucket
 from space_weather_analysis.timeseries.repository import TimeSeriesRepository
 from space_weather_analysis.util.error_handling import DataProcessingError, DataRetrievalError, SourceUnreachableError
-from space_weather_analysis.util.time_utils import parse_iso_duration
+from space_weather_analysis.util.time_utils import ensure_aware, parse_iso_duration
 from space_weather_analysis.util.types import TimeRange
 
 logger = logging.getLogger(__name__)
@@ -384,6 +387,196 @@ def ingest_or_record_gap[T](report: IngestionReport, dataset_id: str, start: dat
         logger.warning("Chunk %s to %s of %s not ingested: %s", start, stop, dataset_id, error)
         record_gap(report, dataset_id, start, stop, f"{type(error).__name__}: {error}")
         return None
+
+
+def resolve_time_range(start_time: datetime | None, end_time: datetime | None, lookback: timedelta) -> TimeRange:
+    """Completes the time range of a run: a missing end is now, a missing start lies the lookback before the end.
+
+    Args:
+        start_time: The start of the range (inclusive); None for the lookback before the end.
+        end_time: The end of the range (exclusive); None for now.
+        lookback: The length of a range without start.
+
+    Returns:
+        The timezone-aware start and end.
+    """
+    stop = ensure_aware(end_time) if end_time is not None else datetime.now(UTC)
+    start = ensure_aware(start_time) if start_time is not None else stop - lookback
+    return start, stop
+
+
+def require_known_datasets(datasets: Sequence[str], known: Iterable[str], kind: str) -> None:
+    """Rejects an empty dataset list and dataset IDs a pipeline does not know.
+
+    Args:
+        datasets: The requested dataset IDs.
+        known: The dataset IDs the pipeline knows.
+        kind: The kind of the datasets, named in the error message.
+
+    Raises:
+        ValueError: If no dataset is given or a dataset ID is unknown.
+    """
+    if not datasets:
+        raise ValueError(f"The {kind} pipeline needs at least one dataset.")
+    known_datasets = set(known)
+    unknown_datasets = sorted(set(datasets) - known_datasets)
+    if unknown_datasets:
+        raise ValueError(f"Unknown {kind} datasets {unknown_datasets}; known are {sorted(known_datasets)}.")
+
+
+def require_single_dataset(datasets: Sequence[str], dataset_id: str, pipeline: str) -> None:
+    """Rejects a dataset list other than the one dataset a pipeline stores.
+
+    Args:
+        datasets: The requested dataset IDs.
+        dataset_id: The one dataset of the pipeline.
+        pipeline: The name of the pipeline, named in the error message.
+
+    Raises:
+        ValueError: If the list is not exactly the dataset of the pipeline.
+    """
+    if list(datasets) != [dataset_id]:
+        raise ValueError(f"The {pipeline} pipeline stores only the dataset {dataset_id}, not {datasets}.")
+
+
+def run_single_dataset(
+    dataset_id: str,
+    gap_range: TimeRange,
+    ingest: Callable[[], str | None],
+    *,
+    what: str,
+    errors: tuple[type[Exception], ...] = CHUNK_ERRORS,
+    progress_callback: ProgressCallback | None = None,
+) -> IngestionReport:
+    """Ingests the one dataset of a pipeline as one chunk, recording a gap if it fails or stores nothing.
+
+    Args:
+        dataset_id: The dataset ID.
+        gap_range: The start and end recorded with a gap.
+        ingest: Ingests the dataset; returns the reason of a gap if it stored nothing, else None.
+        what: What the dataset holds, named in the log and the progress message.
+        errors: The failures that leave a gap instead of ending the run.
+        progress_callback: Receives the progress of the run; None to report nothing.
+
+    Returns:
+        The report with one chunk, a gap if nothing was stored.
+    """
+    report = IngestionReport(chunks_total=1)
+    start, stop = gap_range
+    try:
+        gap_reason = ingest()
+    except errors as error:
+        # The log message starts a sentence with the subject
+        logger.warning("%s not stored: %s", what[:1].upper() + what[1:], error)
+        gap_reason = f"{type(error).__name__}: {error}"
+    if gap_reason is not None:
+        record_gap(report, dataset_id, start, stop, gap_reason)
+    if progress_callback:
+        progress_callback(1.0, f"Processed the {what}")
+    return report
+
+
+def replace_all_documents(
+    timeseries: TimeSeriesRepository, collection: str, granularity: Granularity, documents: Sequence[TimeSeriesDocument]
+) -> None:
+    """Makes a collection hold exactly the given documents, creating it if needed.
+
+    Args:
+        timeseries: The repository storing the documents.
+        collection: The collection.
+        granularity: The time between the documents, set when the collection is created.
+        documents: The documents; empty removes all.
+
+    Raises:
+        pymongo.errors.PyMongoError: If the documents cannot be stored.
+    """
+    timeseries.ensure_collection(collection, granularity)
+    timeseries.replace_range(collection, datetime.min.replace(tzinfo=UTC), datetime.max.replace(tzinfo=UTC), documents)
+
+
+def run_per_dataset(
+    datasets: Sequence[str],
+    time_range: TimeRange,
+    ingest: Callable[[str], object],
+    *,
+    provider: str,
+    dataset_kind: str,
+    errors: tuple[type[Exception], ...] = CHUNK_ERRORS,
+    progress_callback: ProgressCallback | None = None,
+) -> IngestionReport:
+    """Ingests each dataset over the whole time range in one chunk, recording a failed dataset as gap.
+
+    Once the provider sent no answer, the remaining datasets of the run become gaps without a request.
+
+    Args:
+        datasets: The dataset IDs in the order of the run.
+        time_range: The start (inclusive) and end (exclusive) of the range, recorded with each gap.
+        ingest: Ingests one dataset, given its ID.
+        provider: The name of the provider, named in the log when it is unreachable.
+        dataset_kind: The kind of the datasets, named in the log and the progress messages.
+        errors: The failures of one dataset that leave a gap and let the run go on.
+        progress_callback: Receives the progress of the run; None to report nothing.
+
+    Returns:
+        The report with one chunk per dataset and the datasets that could not be ingested.
+    """
+    start, stop = time_range
+    # The log message starts a sentence with the kind
+    capitalized_kind = dataset_kind[:1].upper() + dataset_kind[1:]
+    report = IngestionReport()
+    unreachable: SourceUnreachableError | None = None
+    for dataset_index, dataset_id in enumerate(datasets):
+        report.chunks_total += 1
+        if unreachable is not None:
+            record_gap(report, dataset_id, start, stop, f"Not requested, the provider was unreachable: {unreachable}")
+            continue
+        try:
+            ingest(dataset_id)
+        except SourceUnreachableError as error:
+            logger.warning("%s unreachable, the remaining datasets of this run are not requested: %s", provider, error)
+            record_gap(report, dataset_id, start, stop, f"{type(error).__name__}: {error}")
+            unreachable = error
+        except errors as error:
+            logger.warning("%s dataset %s not ingested: %s", capitalized_kind, dataset_id, error)
+            record_gap(report, dataset_id, start, stop, f"{type(error).__name__}: {error}")
+        if progress_callback:
+            progress_callback((dataset_index + 1) / len(datasets), f"Processed {dataset_kind} dataset {dataset_id}")
+    return report
+
+
+def save_minimal_metadata(
+    metadata_repository: MetadataRepository,
+    dataset_id: str,
+    collection: str,
+    source_type: SourceType,
+    fields: Iterable[str],
+    server_url: str,
+    *,
+    refresh_after: timedelta | None = None,
+) -> None:
+    """Saves the metadata record of a dataset whose provider publishes none, built from its source and stored fields.
+
+    A failing save is logged, as the stored data documents stay valid without metadata.
+
+    Args:
+        metadata_repository: The repository storing the metadata records.
+        dataset_id: The dataset ID.
+        collection: The collection holding the data documents.
+        source_type: The source type the dataset is ingested from.
+        fields: The fields of the stored documents.
+        server_url: The location the data were read from.
+        refresh_after: Age below which a stored record is kept instead of saved again; None saves in any case.
+    """
+    now = datetime.now(UTC)
+    try:
+        if refresh_after is not None:
+            stored = metadata_repository.get(dataset_id)
+            if stored is not None and now - stored.updated_at < refresh_after:
+                return
+        record = build_minimal_metadata(dataset_id, collection, source_type, fields, server_url, now)
+        save_with_overlays(metadata_repository, [record])
+    except METADATA_SAVE_ERRORS:
+        logger.exception("Failed to save metadata of %s", dataset_id)
 
 
 def record_gap(report: IngestionReport, dataset_id: str, start: datetime, stop: datetime, reason: str) -> None:

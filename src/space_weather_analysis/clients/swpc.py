@@ -1,9 +1,7 @@
 import logging
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from types import MappingProxyType
-from typing import Any, cast
+from typing import Any
 
 import pandas as pd
 import requests
@@ -13,130 +11,27 @@ from urllib3.util.retry import Retry
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.clients.base import DataClient, FetchResult
 from space_weather_analysis.clients.download import download_json
+from space_weather_analysis.clients.swpc_products import SwpcProduct, configured_swpc_products
 from space_weather_analysis.util.error_handling import DataProcessingError
 from space_weather_analysis.util.time_utils import ensure_aware
 
 logger = logging.getLogger(__name__)
 
-# Field names of the GOES X-ray channels, by the wavelength band SWPC names in `energy`; 0.1-0.8 nm defines the flare class
-XRAY_CHANNELS: Mapping[str, str] = MappingProxyType({"0.1-0.8nm": "long", "0.05-0.4nm": "short"})
-# Lengths of the rolling GOES files SWPC offers, with the suffix of their file names
-GOES_WINDOWS: tuple[tuple[timedelta, str], ...] = (
-    (timedelta(hours=6), "6-hour"),
-    (timedelta(days=1), "1-day"),
-    (timedelta(days=3), "3-day"),
-    (timedelta(days=7), "7-day"),
-)
 # Time a file may fall short of the requested start and still be chosen: a job starts its lookback when it is queued,
 # so the start of a range as long as a file lies a moment before what the file still holds when it is fetched
 FILE_START_TOLERANCE = timedelta(minutes=10)
 
 
-def _utc_times(rows: pd.DataFrame) -> pd.Series:
-    """Parses the `time_tag` column as UTC times; SWPC leaves out the zone designator in some files, which then count as UTC."""
-    return pd.to_datetime(rows["time_tag"], utc=True, errors="coerce")
-
-
-def _channels_to_columns(rows: pd.DataFrame, channel_names: pd.Series, values: Mapping[str, str]) -> pd.DataFrame:
-    """Turns rows with one channel each into one row per time with one column per channel and value.
-
-    Args:
-        rows: The rows of the file with `time_tag` and `satellite`.
-        channel_names: The field name prefix of the channel of each row; rows without a name are left out.
-        values: The value columns of the rows to keep, mapped to the field name suffix.
-
-    Returns:
-        One row per time, sorted, with the columns `{channel}_{suffix}` and `satellite`, the satellite of the first row of the time.
-    """
-    named = rows.assign(time=_utc_times(rows), channel=channel_names).dropna(subset=["time", "channel"])
-    wide = named.pivot_table(index="time", columns="channel", values=list(values), aggfunc="first")
-    # The pivot names each column by the pair of value column and channel, which the pandas stubs type as plain labels
-    column_pairs = cast("list[tuple[str, str]]", wide.columns.tolist())
-    wide.columns = [f"{channel}_{values[value]}" for value, channel in column_pairs]
-    wide["satellite"] = named.groupby("time")["satellite"].first()
-    wide.index.name = None
-    return wide.sort_index()
-
-
-def parse_xrays(rows: pd.DataFrame) -> pd.DataFrame:
-    """Converts the rows of a GOES X-ray file into one row per minute.
-
-    Args:
-        rows: The file rows with `time_tag`, `satellite`, `flux`, `electron_contaminaton` (spelled so by SWPC) and `energy`.
-
-    Returns:
-        The columns `long_flux` and `short_flux` in W/m^2, `long_electron_contamination`, `short_electron_contamination` and `satellite`.
-    """
-    return _channels_to_columns(rows, rows["energy"].map(XRAY_CHANNELS), {"flux": "flux", "electron_contaminaton": "electron_contamination"})
-
-
-def parse_integral_protons(rows: pd.DataFrame) -> pd.DataFrame:
-    """Converts the rows of a GOES integral proton file into one row per time.
-
-    Args:
-        rows: The file rows with `time_tag`, `satellite`, `flux` and `energy` written as `>={number} MeV`.
-
-    Returns:
-        One column `p_ge{number}mev_flux` per energy threshold in pfu, and `satellite`.
-    """
-    thresholds = rows["energy"].str.extract(r"^>=(\d+) MeV$", expand=False)
-    return _channels_to_columns(rows, "p_ge" + thresholds + "mev", {"flux": "flux"})
-
-
-def parse_estimated_kp(rows: pd.DataFrame) -> pd.DataFrame:
-    """Converts the rows of the 1-minute estimated planetary K index file.
-
-    Args:
-        rows: The file rows with `time_tag`, `estimated_kp` and `kp_index`.
-
-    Returns:
-        One row per minute with `estimated_kp` (Kp estimated from the current minute, not the official Kp) and `kp_index` (its integer part).
-    """
-    frame = rows.assign(time=_utc_times(rows)).dropna(subset=["time"]).set_index("time")[["estimated_kp", "kp_index"]]
-    frame.index.name = None
-    return frame.sort_index()
-
-
-@dataclass(frozen=True)
-class SwpcProduct:
-    """A data product SWPC publishes as rolling JSON files; its descriptions are curated in the metadata files.
-
-    Attributes:
-        files: The length of each file and its path below the base URL, by ascending length.
-        parse: Converts the file rows into one row per time.
-        provider_id: The product name in the source identifier of the documents.
-    """
-
-    files: tuple[tuple[timedelta, str], ...]
-    parse: Callable[[pd.DataFrame], pd.DataFrame]
-    provider_id: str
-
-
-def _goes_files(product: str) -> tuple[tuple[timedelta, str], ...]:
-    """Lists the rolling files of a product of the primary GOES satellite."""
-    return tuple((length, f"goes/primary/{product}-{suffix}.json") for length, suffix in GOES_WINDOWS)
-
-
-# Datasets served from SWPC, by dataset ID
-SWPC_PRODUCTS: Mapping[str, SwpcProduct] = MappingProxyType(
-    {
-        "swpc_goes_xray": SwpcProduct(_goes_files("xrays"), parse_xrays, "goes-primary-xrays"),
-        "swpc_goes_protons": SwpcProduct(_goes_files("integral-protons"), parse_integral_protons, "goes-primary-integral-protons"),
-        "swpc_kp_estimated": SwpcProduct(((timedelta(hours=6), "planetary_k_index_1m.json"),), parse_estimated_kp, "planetary-k-index-1m"),
-    }
-)
-
-
 class SwpcClient(DataClient[pd.DataFrame]):
-    """Fetches the rolling JSON files of the NOAA Space Weather Prediction Center (https://services.swpc.noaa.gov/json/).
+    """Fetches the rolling JSON files of the NOAA Space Weather Prediction Center (https://services.swpc.noaa.gov/).
 
     SWPC offers no queries by time range, only files of the latest hours or days, so a range further back than the
-    longest file gets only the part the file covers.
+    longest file gets only the part the file covers. Which files make up a dataset is described in the products file.
     """
 
     source_type = SourceType.SWPC
 
-    DEFAULT_BASE_URL = "https://services.swpc.noaa.gov/json/"
+    DEFAULT_BASE_URL = "https://services.swpc.noaa.gov/"
     # Connect and read timeout in seconds
     TIMEOUT = (10.0, 30.0)
     DEFAULT_RETRY_COUNT = 2
@@ -145,6 +40,7 @@ class SwpcClient(DataClient[pd.DataFrame]):
 
     def __init__(
         self,
+        products: Mapping[str, SwpcProduct] | None = None,
         base_url: str = DEFAULT_BASE_URL,
         retry_count: int = DEFAULT_RETRY_COUNT,
         retry_backoff_factor: float = 1.0,
@@ -153,11 +49,18 @@ class SwpcClient(DataClient[pd.DataFrame]):
         """Initializes the client with a session that repeats requests failing with a server error.
 
         Args:
-            base_url: The URL of the JSON services, ending with a slash.
+            products: The products by dataset ID; None reads the products file of the settings.
+            base_url: The URL of the services, ending with a slash; the paths of the product files lie below it.
             retry_count: The number of repetitions of a request failing with a server error.
             retry_backoff_factor: The wait before the first repetition in seconds, doubled for every further one.
             clock: Returns the current time in UTC, the end of every rolling file.
+
+        Raises:
+            OSError: If the products file of the settings cannot be read.
+            tomllib.TOMLDecodeError: If the products file is no valid TOML.
+            pydantic.ValidationError: If a product is invalid.
         """
+        self.products: Mapping[str, SwpcProduct] = products if products is not None else configured_swpc_products()
         self.base_url = base_url
         self.clock = clock
         self.session = requests.Session()
@@ -169,8 +72,10 @@ class SwpcClient(DataClient[pd.DataFrame]):
     def fetch(self, dataset_id: str, start: datetime, stop: datetime) -> FetchResult[pd.DataFrame]:
         """Fetches the shortest file of a dataset that reaches back to the start, and keeps its rows inside the range.
 
+        The rows of a model run reaching ahead are kept from the start on, those after the end included.
+
         Args:
-            dataset_id: The dataset ID, a key of SWPC_PRODUCTS.
+            dataset_id: The dataset ID, a key of the products.
             start: The start of the range (inclusive), timezone-aware.
             stop: The end of the range (exclusive), timezone-aware.
 
@@ -178,14 +83,14 @@ class SwpcClient(DataClient[pd.DataFrame]):
             One row per time with a UTC DatetimeIndex; a result without data if the file holds no row in the range.
 
         Raises:
-            ValueError: If SWPC_PRODUCTS has no dataset of this ID.
+            ValueError: If the products hold no dataset of this ID.
             SourceUnreachableError: If SWPC sent no answer.
             DataRetrievalError: If the download failed.
             DataProcessingError: If the file is no list of rows with the expected fields.
         """
-        product = SWPC_PRODUCTS.get(dataset_id)
+        product = self.products.get(dataset_id)
         if product is None:
-            raise ValueError(f"Unknown SWPC dataset '{dataset_id}'; known are {sorted(SWPC_PRODUCTS)}.")
+            raise ValueError(f"Unknown SWPC dataset '{dataset_id}'; known are {sorted(self.products)}.")
         start, stop = ensure_aware(start), ensure_aware(stop)
         url = self.base_url + _covering_file(product, start, self.clock())
         logger.info("Fetching %s from SWPC: %s", dataset_id, url)
@@ -198,7 +103,7 @@ class SwpcClient(DataClient[pd.DataFrame]):
         except (KeyError, AttributeError) as error:
             raise DataProcessingError(f"SWPC file {url} lacks an expected field: {error}") from error
 
-        in_range = frame[(frame.index >= start) & (frame.index < stop)]
+        in_range = frame[(frame.index >= start) & ((frame.index < stop) | product.reaches_ahead)]
         if in_range.empty:
             return FetchResult(None, url)
         return FetchResult(in_range, url)
@@ -215,7 +120,7 @@ def _covering_file(product: SwpcProduct, start: datetime, now: datetime) -> str:
     Returns:
         The path of the file below the base URL.
     """
-    for length, path in product.files:
-        if now - length <= start + FILE_START_TOLERANCE:
-            return path
-    return product.files[-1][1]
+    for file in product.files:
+        if now - file.length <= start + FILE_START_TOLERANCE:
+            return file.path
+    return product.files[-1].path

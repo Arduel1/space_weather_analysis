@@ -39,17 +39,21 @@ class GfzIndex:
     Attributes:
         description: What the index measures.
         cadence: The time between two values, each time stamp marking the start of its interval.
+        first_day: The first day of the data publication of the index, as ISO 8601 date.
     """
 
     description: str
     cadence: timedelta
+    first_day: str
 
 
 # The indices this project fetches from GFZ. The web service offers more, but their licenses and value
-# formats are not verified for this project; the Kp index is published under CC BY 4.0.
+# formats are not verified for this project; Kp and the half-hourly Hp30 are published under CC BY 4.0, and the
+# first days are the collection start of their data publications (doi:10.5880/Kp.0001, doi:10.5880/Hpo.0002).
 GFZ_INDICES: Mapping[str, GfzIndex] = MappingProxyType(
     {
-        "Kp": GfzIndex("Planetary geomagnetic Kp index, 0 to 9 in steps of one third", timedelta(hours=3)),
+        "Kp": GfzIndex("Planetary geomagnetic Kp index, 0 to 9 in steps of one third", timedelta(hours=3), "1932-01-01"),
+        "Hp30": GfzIndex("Half-hourly planetary geomagnetic Hp30 index, open-ended above 9", timedelta(minutes=30), "1932-01-01"),
     }
 )
 
@@ -88,19 +92,21 @@ class GfzClient(DataClient[pd.DataFrame]):
 
     @staticmethod
     def get_catalog_entries() -> list[CatalogEntryDict]:
-        """Lists the Kp index as the catalog entry of GFZ.
+        """Lists every index of GFZ_INDICES as a catalog entry of GFZ.
 
         Returns:
-            The catalog entry of the Kp index, available from 1932 until today.
+            One catalog entry per index, available from its first day until today.
         """
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
         return [
             {
                 "type": SourceType.GFZ_POTSDAM,
-                "dataset_id": "Kp",
+                "dataset_id": name,
                 "source_id": "GFZ",
-                "description": "Planetary K-index (3-hourly) from GFZ Potsdam.",
-                "time_range": {"start_time": "1932-01-01", "end_time": datetime.now(UTC).strftime("%Y-%m-%d")},
+                "description": index.description,
+                "time_range": {"start_time": index.first_day, "end_time": today},
             }
+            for name, index in GFZ_INDICES.items()
         ]
 
     def fetch(self, dataset_id: str, start: datetime, stop: datetime) -> FetchResult[pd.DataFrame]:

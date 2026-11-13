@@ -16,6 +16,23 @@ _MEASUREMENT_COLUMNS = ("decimal_year", "sunspot_number", "std_dev", "num_observ
 _DAILY_COLUMNS = ("year", "month", "day", *_MEASUREMENT_COLUMNS)
 # Column order of the monthly mean and the 13-month smoothed total sunspot number files.
 _MONTHLY_COLUMNS = ("year", "month", *_MEASUREMENT_COLUMNS)
+# Column order of the monthly hemispheric sunspot number file: total, north and south number, their standard
+# deviations and numbers of observations, then the indicator.
+_HEMISPHERIC_COLUMNS = (
+    "year",
+    "month",
+    "decimal_year",
+    "sunspot_number",
+    "sunspot_number_north",
+    "sunspot_number_south",
+    "std_dev",
+    "std_dev_north",
+    "std_dev_south",
+    "num_observations",
+    "num_observations_north",
+    "num_observations_south",
+    "indicator",
+)
 # The placeholder SILSO writes for a value it does not have.
 _MISSING_VALUE = -1
 # Fields that hold placeholders: in the daily file all of them on days without a sunspot number, in the
@@ -77,6 +94,32 @@ def parse_silso_monthly(path: Path) -> pd.DataFrame:
         "std_dev": numeric["std_dev"],
         "num_observations": _to_count(numeric["num_observations"]),
     }
+    return _build_frame(path, raw_rows.loc[numeric.index], numeric, timestamps, measurements, is_placeholder)
+
+
+def parse_silso_monthly_hemispheric(path: Path) -> pd.DataFrame:
+    """Reads the monthly mean total sunspot numbers of the whole Sun, its northern and its southern hemisphere of a SILSO CSV file.
+
+    Each month is stamped at its first day 00:00 UTC; -1 placeholders become NA in their own field only.
+
+    Args:
+        path: The path of the semicolon-separated SILSO file.
+
+    Returns:
+        One row per valid month with a timezone-aware UTC DatetimeIndex, the sunspot number, standard deviation and
+        number of observations for the whole Sun and per hemisphere (suffix _north and _south), is_provisional and
+        decimal_year.
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        DataProcessingError: If the file cannot be read or holds no row with a valid date.
+    """
+    raw_rows = _read_raw_rows(path, _HEMISPHERIC_COLUMNS)
+    numeric, timestamps = _rows_with_valid_date(raw_rows)
+    # The measured fields of the whole Sun and both hemispheres; SILSO writes -1 where a value is missing
+    fields = [name for name in _HEMISPHERIC_COLUMNS if name.startswith(("sunspot_number", "std_dev", "num_observations"))]
+    is_placeholder = numeric[fields] == _MISSING_VALUE
+    measurements = {name: _to_count(numeric[name]) if name.startswith("num_observations") else numeric[name] for name in fields}
     return _build_frame(path, raw_rows.loc[numeric.index], numeric, timestamps, measurements, is_placeholder)
 
 

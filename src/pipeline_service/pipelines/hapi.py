@@ -1,7 +1,7 @@
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
@@ -24,7 +24,7 @@ from space_weather_analysis.timeseries.repository import TimeSeriesRepository
 from space_weather_analysis.util.error_handling import DataProcessingError
 from space_weather_analysis.util.hapi_parameters import parameters_too_large_for_columns
 from space_weather_analysis.util.naming import sanitize_collection_name
-from space_weather_analysis.util.time_utils import ensure_aware, parse_iso_time
+from space_weather_analysis.util.time_utils import ensure_aware, parse_iso_duration, parse_iso_time
 from space_weather_analysis.util.types import TimeRange
 
 logger = logging.getLogger(__name__)
@@ -173,7 +173,9 @@ class HapiChunkSource:
         return sanitize_collection_name(dataset_id)
 
     def chunk_unit(self, dataset_id: str) -> TimeBucket:
-        """Names the calendar cell unit of a dataset, the given unit or the one fitting the cadence in its metadata record.
+        """Names the calendar cell unit of a dataset, the given unit or the one fitting its cadence.
+
+        The cadence comes from the metadata record of the dataset, else from its catalog sources.
 
         Args:
             dataset_id: The dataset ID.
@@ -181,7 +183,25 @@ class HapiChunkSource:
         Returns:
             The cell unit.
         """
-        return self.unit or chunk_unit_for_cadence(stored_cadence(self.metadata_repository, dataset_id))
+        if self.unit is not None:
+            return self.unit
+        return chunk_unit_for_cadence(stored_cadence(self.metadata_repository, dataset_id) or self._catalog_cadence(dataset_id))
+
+    def _catalog_cadence(self, dataset_id: str) -> timedelta | None:
+        """Reads the first cadence the catalog sources of a dataset give.
+
+        Args:
+            dataset_id: The dataset ID.
+
+        Returns:
+            The cadence; None if no source gives a valid one.
+        """
+        for entry in self.client.catalog_map.get(dataset_id, []):
+            cadence_text = entry.get("cadence")
+            cadence = parse_iso_duration(cadence_text) if cadence_text else None
+            if cadence is not None:
+                return cadence
+        return None
 
     def is_stable(self, dataset_id: str, collection: str, start: datetime, stop: datetime, fetched_at: datetime) -> bool:
         """Counts fetched data as stable once the fetched range ended SETTLE_DELAY before the fetch.

@@ -124,7 +124,7 @@ def _add_catalog_entry(db: Database, server_urls: list[str], extra_fields: dict[
     MongoCatalogRepository(db).save({"dataset_id": DATASET_ID, "sources": sources})
 
 
-def _pipeline(db: Database, chunk_unit: TimeBucket = TimeBucket.DAY) -> HapiPipeline:
+def _pipeline(db: Database, chunk_unit: TimeBucket | None = TimeBucket.DAY) -> HapiPipeline:
     """Builds the HAPI pipeline with a client that asks a failing source again without waiting."""
     return HapiPipeline(
         timeseries=MongoTimeSeriesRepository(db),
@@ -372,6 +372,16 @@ def test_hapi_chunk_costs_one_info_and_one_data_request_without_files(db: Databa
 
     assert sorted(_requested_paths(httpserver)) == [f"{SERVER_PATH}/data", f"{SERVER_PATH}/info"]
     assert _files_below(cache_dir) == files_before
+
+
+@pytest.mark.integration
+def test_hapi_chunks_sized_by_catalog_cadence_before_a_metadata_record_exists(db: Database, serve_dataset: ServeDataset) -> None:
+    """Without metadata record, the cadence of the catalog source selects the chunk unit: one year per chunk for hourly data."""
+    _add_catalog_entry(db, [serve_dataset()], {"cadence": "PT1H"})
+
+    report = _pipeline(db, chunk_unit=None).run([DATASET_ID], datetime(2023, 12, 31, tzinfo=UTC), RUN_END)
+
+    assert report.chunks_total == 2
 
 
 def _stored_metadata(db: Database) -> DatasetMetadata:

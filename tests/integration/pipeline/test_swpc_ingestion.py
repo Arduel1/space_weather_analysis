@@ -10,6 +10,7 @@ from pytest_httpserver import HTTPServer
 from pipeline_service.pipelines.report import IngestionReport
 from pipeline_service.pipelines.swpc import SwpcPipeline
 from space_weather_analysis.clients.swpc import SwpcClient
+from space_weather_analysis.clients.swpc_products import load_swpc_products
 from space_weather_analysis.coverage.repository import MongoCoverageRepository
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
 from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository
@@ -20,10 +21,14 @@ StoredTimestampsAndMetadata = Callable[[str], list[tuple[datetime, dict[str, Any
 XRAY_DATASET = "swpc_goes_xray"
 PROTON_DATASET = "swpc_goes_protons"
 KP_DATASET = "swpc_kp_estimated"
-SERVER_PATH = "/json/"
+WIND_DATASET = "swpc_solar_wind_plasma"
+# The products of the project, so the tests check the products file the pipeline service reads
+PRODUCTS = load_swpc_products(Path(__file__).parents[3] / "config" / "sources" / "swpc.toml")
+SERVER_PATH = "/"
 XRAY_6_HOUR_PATH = "/json/goes/primary/xrays-6-hour.json"
 PROTON_6_HOUR_PATH = "/json/goes/primary/integral-protons-6-hour.json"
 KP_PATH = "/json/planetary_k_index_1m.json"
+WIND_PATH = "/json/rtsw/rtsw_wind_1m.json"
 GOES_TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 # SWPC writes the Kp time stamps without zone designator
 KP_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S"
@@ -79,7 +84,7 @@ def _kp_row(time: datetime, estimated_kp: float, kp_index: int, kp: str) -> dict
 
 def _client(base_url: str) -> SwpcClient:
     """Provides an SWPC client of a base URL with the fixed clock that repeats failing requests without waiting."""
-    return SwpcClient(base_url=base_url, clock=lambda: NOW, retry_backoff_factor=0)
+    return SwpcClient(PRODUCTS, base_url=base_url, clock=lambda: NOW, retry_backoff_factor=0)
 
 
 def _pipeline(db: Database, client: SwpcClient) -> SwpcPipeline:
@@ -153,6 +158,38 @@ def test_swpc_kp_time_without_zone_is_stored_as_utc(
     assert stored_data(KP_DATASET, FIRST_MINUTE) == {"estimated_kp": 2.33, "kp_index": 2}
 
 
+def _wind_row(time: datetime, source: str, active: bool, speed: float, density: float | None) -> dict[str, Any]:
+    """Provides one row of the real-time solar wind file in the layout SWPC serves, the time without zone designator."""
+    return {
+        "time_tag": time.strftime(KP_TIME_FORMAT),
+        "active": active,
+        "source": source,
+        "proton_speed": speed,
+        "proton_temperature": 50000,
+        "proton_density": density,
+        "proton_vx_gse": -speed,
+    }
+
+
+@pytest.mark.integration
+def test_swpc_solar_wind_keeps_only_the_row_of_the_active_spacecraft(db: Database, httpserver: HTTPServer, stored_data: StoredData) -> None:
+    """Of the rows of several spacecraft per minute, newest first, only the active one is stored, with its spacecraft and without null values."""
+    rows = [
+        _wind_row(FIRST_MINUTE + MINUTE, "SOLAR1", True, 412.5, None),
+        _wind_row(FIRST_MINUTE + MINUTE, "ACE", False, 405.0, 3.1),
+        _wind_row(FIRST_MINUTE, "ACE", False, 401.0, 3.0),
+        _wind_row(FIRST_MINUTE, "SOLAR1", True, 410.0, 2.5),
+    ]
+    httpserver.expect_request(WIND_PATH).respond_with_json(rows)
+
+    _ingest(db, httpserver, [WIND_DATASET])
+
+    assert (stored_data(WIND_DATASET, FIRST_MINUTE), stored_data(WIND_DATASET, FIRST_MINUTE + MINUTE)) == (
+        {"proton_speed": 410.0, "proton_density": 2.5, "proton_temperature": 50000, "spacecraft": "SOLAR1"},
+        {"proton_speed": 412.5, "proton_temperature": 50000, "spacecraft": "SOLAR1"},
+    )
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize(
     ("lookback", "expected_path"),
@@ -211,6 +248,41 @@ def test_swpc_second_run_fetches_from_the_newest_value_once_the_stored_data_reac
     _ingest(db, httpserver, [XRAY_DATASET], start=week_ago)
 
     assert [request.path for request, _ in httpserver.log] == ["/json/goes/primary/xrays-7-day.json", expected_second_path]
+
+
+ENLIL_DATASET = "swpc_enlil_earth"
+ENLIL_PATH = "/json/enlil_time_series.json"
+
+
+def _enlil_rows(first: datetime, speeds: list[float]) -> list[dict[str, Any]]:
+    """Provides the rows of a WSA-Enlil run at Earth, one per hour from the first hour on, newest first as SWPC serves them."""
+    rows = [
+        {
+            "time_tag": (first + hour * timedelta(hours=1)).strftime(KP_TIME_FORMAT),
+            "v_r": speed,
+            "earth_particles_per_cm3": 4.0,
+            "temperature": 9e4,
+            "polarity": 1.0,
+            "cloud": None,
+        }
+        for hour, speed in enumerate(speeds)
+    ]
+    return rows[::-1]
+
+
+@pytest.mark.integration
+def test_swpc_model_run_stores_the_values_after_now_and_a_newer_run_replaces_them(db: Database, httpserver: HTTPServer) -> None:
+    """A model run reaching days ahead is stored as a whole, and the next run replaces its values after now as well."""
+    first_hour = NOW - timedelta(hours=2)
+    httpserver.expect_request(ENLIL_PATH).respond_with_json(_enlil_rows(first_hour, [400.0, 410.0, 420.0, 430.0, 440.0]))
+    _ingest(db, httpserver, [ENLIL_DATASET])
+    httpserver.clear()
+    httpserver.expect_request(ENLIL_PATH).respond_with_json(_enlil_rows(first_hour, [500.0, 510.0, 520.0, 530.0, 540.0]))
+
+    _ingest(db, httpserver, [ENLIL_DATASET])
+
+    stored = sorted((document["timestamp"], document["data"]["speed"]) for document in db[ENLIL_DATASET].find())
+    assert [speed for _, speed in stored] == [500.0, 510.0, 520.0, 530.0, 540.0]
 
 
 # Curated metadata of the X-ray dataset, written into the curated directory of a test
@@ -273,13 +345,13 @@ def test_swpc_run_saves_the_metadata_record_once(db: Database, httpserver: HTTPS
 
 
 # Address on which no server listens, so every connection is refused at once
-UNREACHABLE_URL = "http://127.0.0.1:1/json/"
+UNREACHABLE_URL = "http://127.0.0.1:1/"
 
 
 @pytest.mark.integration
 def test_swpc_unreachable_server_leaves_remaining_datasets_unrequested(db: Database) -> None:
     """After a refused connection the first dataset is a gap of the unreachable source and the next one a gap without request."""
-    client = SwpcClient(base_url=UNREACHABLE_URL, clock=lambda: NOW, retry_count=0, retry_backoff_factor=0)
+    client = SwpcClient(PRODUCTS, base_url=UNREACHABLE_URL, clock=lambda: NOW, retry_count=0, retry_backoff_factor=0)
 
     report = _pipeline(db, client).run([XRAY_DATASET, KP_DATASET], NOW - timedelta(hours=2), NOW)
 

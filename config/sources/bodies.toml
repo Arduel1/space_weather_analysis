@@ -1,0 +1,62 @@
+# Planets and spacecraft whose daily positions are stored, named as DONKI names them in CME arrivals; planets come from
+# the astropy ephemeris, spacecraft from JPL Horizons (IDs listed at https://ssd.jpl.nasa.gov/horizons/app.html).
+
+[body.Mercury]
+kind = "planet"
+ephemeris_id = "mercury"
+
+[body.Venus]
+kind = "planet"
+ephemeris_id = "venus"
+
+[body.Earth]
+kind = "planet"
+ephemeris_id = "earth"
+
+[body.Mars]
+kind = "planet"
+ephemeris_id = "mars"
+
+[body.Jupiter]
+kind = "planet"
+ephemeris_id = "jupiter"
+
+[body."STEREO A"]
+kind = "spacecraft"
+ephemeris_id = "-234"
+
+[body."Parker Solar Probe"]
+kind = "spacecraft"
+ephemeris_id = "-96"
+
+[body."Solar Orbiter"]
+kind = "spacecraft"
+ephemeris_id = "-144"
+
+[body.BepiColombo]
+kind = "spacecraft"
+ephemeris_id = "-121"
+
+[body.Psyche]
+kind = "spacecraft"
+ephemeris_id = "-255"
+
+[body.Lucy]
+kind = "spacecraft"
+ephemeris_id = "-49"
+
+[body."Europa Clipper"]
+kind = "spacecraft"
+ephemeris_id = "-159"
+
+[body.Juice]
+kind = "spacecraft"
+ephemeris_id = "-28"
+
+[body.Juno]
+kind = "spacecraft"
+ephemeris_id = "-61"
+
+[body.OSIRIS-APEX]
+kind = "spacecraft"
+ephemeris_id = "-64"

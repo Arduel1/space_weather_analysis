@@ -1,0 +1,122 @@
+# Products of the NOAA Space Weather Prediction Center (SWPC), one table per dataset ID; the file paths lie below
+# https://services.swpc.noaa.gov/. Descriptions, units and license are curated in config/metadata/swpc.toml.
+
+# GOES X-ray flux and flares
+
+[product.swpc_goes_xray]
+provider_id = "goes-primary-xrays"
+files = [
+    { length = "PT6H", path = "json/goes/primary/xrays-6-hour.json" },
+    { length = "P1D", path = "json/goes/primary/xrays-1-day.json" },
+    { length = "P3D", path = "json/goes/primary/xrays-3-day.json" },
+    { length = "P7D", path = "json/goes/primary/xrays-7-day.json" },
+]
+# `electron_contaminaton` is spelled so by SWPC
+fields = { flux = "flux", electron_contaminaton = "electron_contamination" }
+# 0.1-0.8 nm defines the flare class
+channel = { field = "energy", names = { "0.1-0.8nm" = "long", "0.05-0.4nm" = "short" }, shared = ["satellite"] }
+
+# GOES X-ray flares of the last week, one row per flare at the time of its peak
+[product.swpc_xray_flares]
+provider_id = "goes-primary-xray-flares"
+files = [{ length = "P7D", path = "json/goes/primary/xray-flares-7-day.json" }]
+time_field = "max_time"
+fields = { max_class = "max_class", max_xrlong = "max_xrlong", begin_time = "begin_time", end_time = "end_time", satellite = "satellite" }
+
+# GOES protons
+
+[product.swpc_goes_protons]
+provider_id = "goes-primary-integral-protons"
+files = [
+    { length = "PT6H", path = "json/goes/primary/integral-protons-6-hour.json" },
+    { length = "P1D", path = "json/goes/primary/integral-protons-1-day.json" },
+    { length = "P3D", path = "json/goes/primary/integral-protons-3-day.json" },
+    { length = "P7D", path = "json/goes/primary/integral-protons-7-day.json" },
+]
+fields = { flux = "flux" }
+channel = { field = "energy", pattern = '^>=(\d+) MeV$', template = "p_ge{}mev", shared = ["satellite"] }
+
+# GOES electrons
+
+[product.swpc_goes_electrons]
+provider_id = "goes-primary-integral-electrons"
+files = [
+    { length = "PT6H", path = "json/goes/primary/integral-electrons-6-hour.json" },
+    { length = "P1D", path = "json/goes/primary/integral-electrons-1-day.json" },
+    { length = "P3D", path = "json/goes/primary/integral-electrons-3-day.json" },
+    { length = "P7D", path = "json/goes/primary/integral-electrons-7-day.json" },
+]
+fields = { flux = "flux" }
+channel = { field = "energy", pattern = '^>=(\d+) MeV$', template = "e_ge{}mev", shared = ["satellite"] }
+
+# F10.7 solar radio flux
+
+[product.swpc_f107]
+provider_id = "10cm-flux-30-day"
+files = [{ length = "P30D", path = "products/10cm-flux-30-day.json" }]
+fields = { flux = "f107" }
+
+# Solar regions
+
+# Sunspot regions of the last 30 days as NOAA numbers them, one row per region and day of observation; the
+# location is heliographic (latitude, longitude from the central meridian) at the time of the daily report
+[product.swpc_solar_regions]
+provider_id = "solar-regions"
+files = [{ length = "P30D", path = "json/solar_regions.json" }]
+time_field = "observed_date"
+records_per_time = true
+fields = { region = "region", latitude = "latitude", longitude = "longitude", location = "location", carrington_longitude = "carrington_longitude", area = "area", spot_class = "spot_class", mag_class = "mag_class", number_spots = "number_spots", c_xray_events = "c_xray_events", m_xray_events = "m_xray_events", x_xray_events = "x_xray_events" }
+
+# Solar wind plasma and magnetic field at L1
+
+# Real-time solar wind: each minute has one row per spacecraft, of which `active` marks the one SWPC uses
+[product.swpc_solar_wind_plasma]
+provider_id = "rtsw-wind-1m"
+files = [{ length = "P1D", path = "json/rtsw/rtsw_wind_1m.json" }]
+filter = { active = true }
+fields = { proton_speed = "proton_speed", proton_density = "proton_density", proton_temperature = "proton_temperature", source = "spacecraft" }
+
+[product.swpc_solar_wind_mag]
+provider_id = "rtsw-mag-1m"
+files = [{ length = "P1D", path = "json/rtsw/rtsw_mag_1m.json" }]
+filter = { active = true }
+fields = { bt = "bt", bx_gsm = "bx_gsm", by_gsm = "by_gsm", bz_gsm = "bz_gsm", source = "spacecraft" }
+
+# STEREO A beacon
+
+# Real-time solar wind measured by STEREO A, which orbits the Sun near 1 AU at a growing angle to Earth; the lead or lag
+# time says how many days after Earth (negative) or before it (positive) a stream turning with the Sun passes STEREO A.
+# Plasma and magnetic field come in rows of different minutes, the plasma about every ten minutes. The proton channels
+# are rates of the beacon telemetry, for which SWPC states no unit.
+[product.swpc_stereo_a]
+provider_id = "stereo-a-1m"
+files = [{ length = "P30D", path = "json/stereo/stereo_a_1m.json" }]
+time_field = "timestamp"
+fields = { speed_KPS = "speed", density_cm3 = "density", Bt_nT = "bt", lead_lag_time_days = "lead_lag_days", "high_energy_protons_13-21_MeV" = "protons_13_21mev", "low_energy_protons_623-2224_keV" = "protons_623_2224kev" }
+
+# WSA-Enlil
+
+# The solar wind at Earth as the WSA-Enlil model of SWPC computes it, from two days before its run time to five days
+# after; v_r is the speed away from the Sun, polarity the sign of the field direction (away positive) and cloud marks
+# where material of a CME lies in the model
+[product.swpc_enlil_earth]
+provider_id = "enlil-time-series"
+files = [{ length = "P7D", path = "json/enlil_time_series.json" }]
+reaches_ahead = true
+fields = { v_r = "speed", earth_particles_per_cm3 = "density", temperature = "temperature", polarity = "polarity", cloud = "cloud" }
+
+# Kp
+
+[product.swpc_kp_estimated]
+provider_id = "planetary-k-index-1m"
+files = [{ length = "PT6H", path = "json/planetary_k_index_1m.json" }]
+fields = { estimated_kp = "estimated_kp", kp_index = "kp_index" }
+
+# Alerts
+
+# Alerts, watches and warnings of SWPC as the forecasters write them
+[product.swpc_alerts]
+provider_id = "alerts"
+files = [{ length = "P7D", path = "products/alerts.json" }]
+time_field = "issue_datetime"
+fields = { product_id = "product_id", message = "message" }
