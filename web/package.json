@@ -4,7 +4,7 @@
   "description": "Third-party libraries of the static web frontend, copied into vendor/ by build-vendor.sh",
   "license": "MIT",
   "devDependencies": {
-    "plotly.js-dist-min": "4.1.2",
+    "plotly.js-dist-min": "4.2.0",
     "three": "0.186.1"
   }
 }
