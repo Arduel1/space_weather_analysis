@@ -1,0 +1,7 @@
+version: 2
+updates:
+  # three.js and Plotly of the web frontend
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly

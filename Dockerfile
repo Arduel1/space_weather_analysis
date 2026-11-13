@@ -1,3 +1,16 @@
+# Third-party files of the web frontend, installed from the npm lockfile and copied into web/vendor
+FROM node:22.11.0-alpine AS vendor
+
+WORKDIR /web
+
+RUN --mount=type=cache,target=/root/.npm \
+    --mount=type=bind,source=web/package.json,target=package.json \
+    --mount=type=bind,source=web/package-lock.json,target=package-lock.json \
+    npm ci --ignore-scripts --no-audit --no-fund
+
+COPY web/build-vendor.sh ./
+RUN sh build-vendor.sh
+
 FROM python:3.12-slim
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.5 /uv /uvx /bin/
@@ -22,6 +35,7 @@ COPY src ./src
 COPY data ./data
 COPY config ./config
 COPY web ./web
+COPY --from=vendor /web/vendor ./web/vendor
 
 ENV PATH="/app/.venv/bin:$PATH"
 

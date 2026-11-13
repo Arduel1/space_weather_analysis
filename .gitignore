@@ -3,6 +3,9 @@
 # only the project's own HAPI server list is tracked.
 data/*
 !data/hapi_config/
+# Third-party files of the web frontend: installed by npm and copied by web/build-vendor.sh
+web/node_modules/
+web/vendor/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

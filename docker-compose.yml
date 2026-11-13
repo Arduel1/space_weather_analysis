@@ -72,7 +72,13 @@ services:
     ports:
       - "${DASHBOARD_HOST_PORT:-8502}:8000"
     volumes:
-      - ./config:/app/config:ro # Feed file with the dashboard table, read on every write
+      - ./config:/app/config:ro # Feed file and dashboard pages, read on every write
+      - ./data:/app/data:ro # Stored frames of the image sequences, copied into the site
+    environment:
+      # The data directory is mounted read-only, so the caches of SPASE (Space Physics Archive Search and Extract) terms
+      # live in the container
+      - SPASE_DICTIONARY_CACHE_PATH=/tmp/spase_dictionary.json
+      - SPASE_RESOURCE_CACHE_PATH=/tmp/spase_resources.json
     command: ["python", "-m", "site_export.main", "--web", "web", "--output", "/tmp/site", "--serve", "8000"]
     networks:
       - space-weather-net

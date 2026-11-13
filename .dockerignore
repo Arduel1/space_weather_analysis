@@ -22,3 +22,7 @@ htmlcov
 notebooks
 tests
 docs
+
+# Built in the vendor stage of the Dockerfile
+web/node_modules
+web/vendor
