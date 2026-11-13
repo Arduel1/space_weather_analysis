@@ -19,53 +19,70 @@ Static demo of the dashboard, rebuilt every hour from the providers' data: <http
 
 ## Overview
 
-Space-weather data is distributed across several providers, formats, and APIs: NASA's CDAWeb, GFZ Potsdam, NOAA SWPC, HAPI servers, and plain CSV/text catalogs. This project collects these heterogeneous time-series sources into a single MongoDB store and serves them through an interactive web dashboard.
+Space-weather data is distributed across many providers, formats, and APIs. This project collects these heterogeneous time-series sources into a single MongoDB store and shows them in an interactive web dashboard.
 
 The data model follows the physical chain of space weather: phenomena originate at the Sun, propagate through the heliosphere, and drive activity in Earth's magnetosphere. The system is designed to run as a containerized, always-on service.
 
 ## Features
 
-- Ingestion of time-series data from NASA CDAWeb, GFZ, NOAA SWPC, HAPI servers, and local files through one pipeline with a separate adapter per source type.
+- Ingestion from NASA CDAWeb, CCMC DONKI, GFZ, NOAA SWPC (products, image sequences and OVATION aurora maps), NSO GONG, the LMSAL Heliophysics Event Knowledgebase (HEK), JPL Horizons, Helioviewer, HAPI (Heliophysics Application Programming Interface) servers, and local files through one pipeline with a separate adapter per source type.
 - Feeds, configured in `config/feeds.toml`, keep selected datasets current: each feed is loaded on start and fetched again at its interval, down to once a minute for live data.
-- Incremental loading: data is fetched in calendar chunks sized by the cadence of the dataset, chunks whose data is stable are skipped, recent and provisional data is fetched again, and only changed documents are written.
-- One processing lane per source type, so a slow or unreachable provider does not hold up the others; an unreachable provider is detected and its remaining requests are skipped.
+- Incremental loading: data is fetched in calendar chunks sized by the cadence of the dataset, stable chunks are skipped, recent and provisional data is fetched again, and only changed documents are written.
+- One processing lane per source type, so a slow or unreachable provider does not hold up the others.
 - A master catalog of the available datasets and descriptive metadata for each dataset, maintained in the background from the metadata services of the providers and complemented by curated metadata that names the page every value was taken from.
-- A web dashboard built from configurable pages and panels (values with NOAA scale levels, time series, tables, feed status), which shows units, sources, licenses, data freshness, gaps, and the valid range of each field. The same site runs locally on the live data and publicly as the hourly demo.
+- A web dashboard of configurable pages and panels, the same site locally on the live data and publicly as the hourly demo:
+  - Overview: status tiles with NOAA scale levels and the rank of the newest value in the past week or year (the solar wind speed also as travel time to Earth, Kp also as the latitude the aurora reaches), solar, coronagraph and aurora images of the last day, the last day from the Sun to the ground on one time axis (flares, solar wind, southward field shaded, Dst, Kp), linked DONKI events of the last 30 days, SWPC alerts and the status of every feed
+  - Sun: six extreme ultraviolet wavelengths and both coronagraphs, the NOAA sunspot regions on SDO HMI and AIA images with the coronal holes found in each AIA image, a close look at the newest flare, the coronal magnetic field of the PFSS (potential field source surface) model from the hourly GONG magnetograms as a turnable 3D Sun playing the last day and as a map, and a butterfly diagram since 1996 with the sunspot numbers of both hemispheres, the polar fields (WSO), F10.7 and CMEs
+  - Sun to Earth: the inner solar system from above with planets and spacecraft, field lines bent by the measured solar wind and the CMEs of the last weeks flying out (drag-based model) with the arrivals WSA-Enlil expects and the shocks measured; WSA-Enlil at Earth five days ahead against the measured solar wind; the solar wind at STEREO A and Earth; the magnetic connection of flares to Earth and STEREO A with the protons measured there
+  - Earth: the aurora of the last day on a turnable Earth from the OVATION maps with the night-side edge of the oval against the rule of thumb from Kp, two weeks of Kp, Hp30, Dst and SYM-H, radiation belt electrons beside the solar wind speed, and the ionosphere (D-RAP radio absorption, GloTEC electron content)
+  - Connections, from the data since 1996: every CME of the CDAW catalog and every intense storm below the sunspot cycle, storm hours per month, average Kp by the direction of the solar wind field for slow, medium and fast wind, and all intense storms laid over each other at their lowest Dst (superposed epoch)
+  - one replay bar per page moving the image sequences and the charts of the last days together, and an info view per panel built from the metadata of its datasets
 - A dataset explorer and a downloader that queues a fetch job for a dataset not yet stored (Streamlit).
-- A Docker Compose stack that runs the metadata worker, pipeline service, web dashboard, Streamlit app, database, and database admin UI together.
+- A Docker Compose stack that runs all components together.
 
 ## Architecture
 
 The system is a modular monolith: a shared core library (`space_weather_analysis`) plus four separately-runnable components. All components share one codebase and one Docker image and communicate through MongoDB rather than over the network.
 
-- Metadata Worker: a long-running background process that builds and maintains the master catalog and the dataset metadata. It repeats all metadata requests (HAPI metadata mirror, CDAWeb dataset list, per-dataset master files and SPASE records, dataset availability) on a schedule, one request at a time with a random pause per provider host, keeping the last good state when a provider is unreachable. It never deletes catalog entries, it only counts sources a provider no longer lists.
-- Pipeline Service: keeps the feeds of `config/feeds.toml` current and processes the fetch jobs of the frontend. A scheduler queues one job per feed on start and whenever its interval has passed; a job runner works off the jobs of each source type in its own lane. The pipelines fetch in calendar chunks, record which chunks are stable, write only changed documents, and save the dataset metadata with the curated metadata of `config/metadata/` laid over it.
-- Web dashboard: `site_export` writes the pages and panels configured in `config/feeds.toml` as JSON documents and, next to the static web frontend in `web/`, serves them; locally it writes them again every minute, the demo workflow every hour.
-- Frontend: the Streamlit app with a dataset explorer and a downloader that queues fetch jobs.
-- MongoDB: the shared data store, holding the master catalog, the metadata of each dataset, one time series collection per dataset, the stored coverage and chunk status of each dataset, and the job queue. `mongo-express` provides a web admin UI.
+- Metadata Worker: a long-running background process that builds and maintains the master catalog and the dataset metadata. It repeats all metadata requests (HAPI metadata mirror, CDAWeb dataset list, per-dataset master files and SPASE (Space Physics Archive Search and Extract) records, dataset availability) on a schedule, one request at a time per provider host, keeping the last good state when a provider is unreachable.
+- Pipeline Service: keeps the feeds of `config/feeds.toml` current and processes the fetch jobs of the Streamlit app. A scheduler queues one job per feed on start and whenever its interval has passed; a job runner works off the jobs of each source type in its own lane. The dataset metadata is saved with the curated metadata of `config/metadata/` laid over it.
+- Web dashboard: `site_export` writes the pages of `config/dashboard/` as JSON documents and serves them next to the static web frontend in `web/`; locally it writes them again every minute, the demo workflow every hour.
+- Streamlit app: a dataset explorer and a downloader that queues fetch jobs.
+- MongoDB: the shared data store, holding the master catalog, the metadata of each dataset and the raw provider metadata it is built from, one time series collection per dataset, the stored coverage and the chunk status of each dataset, the job queue and the task queue of the metadata worker. `mongo-express` provides a web admin UI.
 
 ![Architecture diagram: external data sources feed the ingestion components, which write to MongoDB collections read by the consumers](docs/architecture.drawio.svg)
 
-Solid arrows show data flow; dashed arrows show the job queue between the frontend and the pipeline service. The files in `config/` give the feeds and the curated metadata; the web dashboard reads its pages and panels from `config/feeds.toml`; the diagram does not show the web dashboard yet. The diagram is an editable draw.io file and can be opened directly in draw.io.
-
-The shared `space_weather_analysis` library (clients, configuration, database connection, logging, utilities) is used in-process by all components, keeping domain logic independent of MongoDB, HTTP, and Streamlit.
+Arrows point in the direction the data flows; double arrows mark collections a component reads and writes, with each label next to the arrowhead it describes. Dashed arrows show the job queue between the Streamlit app and the pipeline service. The diagram is an editable draw.io file.
 
 ## Data Sources and Licenses
 
-The MIT License of this repository covers the source code only. This repository contains no third-party data: all data the project uses is obtained directly from its providers and remains under their terms. Several sources permit non-commercial use only. Check the linked terms before reusing any data, including data displayed by a deployed instance of the dashboard. The terms below were reviewed in October 2026.
+The MIT License of this repository covers the source code only. The repository contains no third-party data and no copied third-party code: all data is obtained directly from its providers and remains under their terms, and all libraries are installed from their package registries. Several sources permit non-commercial use only. Check the linked terms before reusing any data, including data displayed by a deployed instance of the dashboard. The terms below were reviewed in October and November 2026.
 
 ### Local data files
 
-The following files are not part of this repository. They are downloaded from their providers and stored locally in `data/`.
+The following files are not part of this repository. The pipeline service downloads them into `data/`.
 
 | File | Provider | How to obtain | License / terms |
 | --- | --- | --- | --- |
 | `data/SN_d_tot_V2.0.csv` | WDC-SILSO, Royal Observatory of Belgium | [Download](https://www.sidc.be/SILSO/INFO/sndtotcsv.php) | [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) |
 | `data/SN_m_tot_V2.0.csv` | WDC-SILSO, Royal Observatory of Belgium | [Download](https://www.sidc.be/SILSO/INFO/snmtotcsv.php) | [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) |
 | `data/SN_ms_tot_V2.0.csv` | WDC-SILSO, Royal Observatory of Belgium | [Download](https://www.sidc.be/SILSO/INFO/snmstotcsv.php) | [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) |
+| `data/SN_m_hem_V2.0.csv` | WDC-SILSO, Royal Observatory of Belgium | [Download](https://www.sidc.be/SILSO/INFO/snmhemcsv.php) | [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) |
+| `data/wso_polar.html` | Wilcox Solar Observatory, Stanford University | [Download](http://wso.stanford.edu/Polar.html) | No terms stated; acknowledgement as customary |
+| `data/icme_list.html` | Ian Richardson and Hilary Cane (NASA GSFC, University of Tasmania) | [Download](https://izw1.caltech.edu/ACE/ASC/DATA/level3/icmetable2.htm) | No terms stated; the list asks to include its DOI ([10.7910/DVN/C2MHTH](https://doi.org/10.7910/DVN/C2MHTH)) |
 | `data/cme_catalog.txt` | CDAW Data Center (NASA, The Catholic University of America, Naval Research Laboratory) | [Download](https://cdaw.gsfc.nasa.gov/CME_list/UNIVERSAL_ver2/text_ver/univ_all.txt) | No formal license; [acknowledgement requested](https://cdaw.gsfc.nasa.gov/CME_list/) |
 
 Details on each file: [docs/local-data.md](docs/local-data.md).
+
+### Web frontend libraries
+
+The web frontend loads these files from its own host. They are installed when the Docker image is built (see [Local development](#local-development) for a build outside Docker).
+
+| Library or data | Version | Source | License / terms |
+| --- | --- | --- | --- |
+| three.js | 0.186.1 | npm package `three` | [MIT](https://github.com/mrdoob/three.js/blob/dev/LICENSE) |
+| Plotly.js | 4.1.2 | npm package `plotly.js-dist-min` | [MIT](https://github.com/plotly/plotly.js/blob/master/LICENSE) |
+| Natural Earth coastlines (`ne_110m_coastline.geojson`) | 5.1.2 | [natural-earth-vector](https://github.com/nvkelso/natural-earth-vector) | Public domain ([terms of use](https://www.naturalearthdata.com/about/terms-of-use/)) |
 
 ### Data retrieved at runtime
 
@@ -73,8 +90,16 @@ Details on each file: [docs/local-data.md](docs/local-data.md).
 | --- | --- | --- | --- |
 | NASA SPDF (CDAWeb, SSCWeb) | Heliophysics mission data and spacecraft orbits | CDAS web services (cdasws), HAPI | Public domain (CC0), citation requested ([data use policy](https://spdf.gsfc.nasa.gov/data_use_policy.html)) |
 | NASA CCMC (iSWA) | Space weather products | HAPI | NASA open data policy, acknowledgement requested ([publication policy](https://ccmc.gsfc.nasa.gov/publication-policy)) |
-| GFZ Helmholtz Centre for Geosciences | Kp index | GFZ web service | [CC BY 4.0](https://kp.gfz.de/en/) |
-| NOAA Space Weather Prediction Center (SWPC) | Real-time GOES X-ray and proton flux, estimated Kp | [SWPC JSON services](https://services.swpc.noaa.gov/json/) | Public domain (U.S. government work) |
+| NASA CCMC (DONKI) | Space weather events and the links between them | [DONKI API](https://ccmc.gsfc.nasa.gov/tools/DONKI/) | Provided as is; event studies with the knowledge of the forecasters and CCMC ([rules of the road](https://ccmc.gsfc.nasa.gov/tools/DONKI/)), acknowledgement requested ([publication policy](https://ccmc.gsfc.nasa.gov/publication-policy)) |
+| NSF National Solar Observatory (GONG) | Synoptic magnetograms, from which the coronal magnetic field is computed | [GONG synoptic maps](https://gong2.nso.edu/oQR/zqs/) | Acknowledgement required ([NSO data use policy](https://nso.edu/data/)) |
+| Helioviewer Project (ESA/NASA) | SDO AIA images rendered at a time, scale and region | [Helioviewer API](https://api.helioviewer.org/docs/v2/) | No terms stated; the SDO images have no copyright, credit requested ([SDO data rules](https://sdo.gsfc.nasa.gov/data/rules.php)) |
+| NASA/JPL Solar System Dynamics (Horizons) | Daily positions of spacecraft; planets come from the astropy built-in ephemeris | [Horizons API](https://ssd-api.jpl.nasa.gov/doc/horizons.html) via sunpy | Public domain, citation recommended ([SSD FAQ](https://ssd.jpl.nasa.gov/faq.html)) |
+| LMSAL Heliophysics Event Knowledgebase | Daily NOAA sunspot regions since 1996 | [HEK search](https://www.lmsal.com/hek/) | No terms stated; the region reports are NOAA SWPC data |
+| GFZ Helmholtz Centre for Geosciences | Kp and Hp30 index | GFZ web service | [CC BY 4.0](https://kp.gfz.de/en/) |
+| NOAA Space Weather Prediction Center (SWPC) | Real-time GOES X-ray, proton and electron flux, GOES X-ray flares, alerts, watches and warnings, sunspot regions, estimated Kp, real-time solar wind at L1 and at STEREO A, the WSA-Enlil solar wind at Earth; the products are described in `config/sources/swpc.toml` | [SWPC data services](https://services.swpc.noaa.gov/) | Public domain (U.S. government work) |
+| NOAA SWPC image sequences | GOES SUVI solar images, SDO HMI continuum images, SOHO LASCO C2/C3 coronagraph images, OVATION aurora images and maps, WSA-Enlil model images, D-RAP and GloTEC ionosphere maps; described in `config/sources/images.toml` | [SWPC frame lists](https://services.swpc.noaa.gov/products/animations/) | SUVI and OVATION: public domain (U.S. government work); SDO: no copyright, credit requested ([SDO data rules](https://sdo.gsfc.nasa.gov/data/rules.php)); LASCO: free for non-commercial use with acknowledgement ([SOHO copyright notice](https://soho.nascom.nasa.gov/data/summary/copyright.html)) |
+| National Research Council Canada (via SWPC) | F10.7 solar radio flux | [SWPC data services](https://services.swpc.noaa.gov/) | No terms stated; acknowledgement requested ([SWPC F10.7 page](https://www.swpc.noaa.gov/phenomena/f107-cm-radio-emissions)) |
+| WDC for Geomagnetism, Kyoto | Dst, SYM-H and ASY-H indices | [Kyoto HAPI server](https://wdc.kugi.kyoto-u.ac.jp/hapi/) | Acknowledgement and data DOI required, no commercial use of the indices ([rules](https://wdc.kugi.kyoto-u.ac.jp/wdc/Sec3.html)) |
 | WDC for Geomagnetism, Edinburgh (BGS) | Ground magnetometer data | HAPI | Free for scientific use; commercial use requires contacting the data supplier ([usage](https://wdc.bgs.ac.uk/usage)) |
 | INTERMAGNET (via BGS GIN) | Observatory magnetometer data | HAPI | CC BY-NC 4.0 unless otherwise noted; commercial use and bulk redistribution require written permission ([conditions](https://intermagnet.org/data_conditions.html)) |
 | SuperMAG (JHU/APL) | Ground magnetometer data and indices | HAPI | Fair use under the SuperMAG rules of the road; data, plots, and derived data products must not be redistributed; acknowledgement required ([rules of the road](https://supermag.jhuapl.edu/info/?page=rulesoftheroad)) |
@@ -106,9 +131,11 @@ Data provided by the European Space Agency (ESA). For Cluster data, we acknowled
 </details>
 
 <details>
-<summary>GFZ Kp index</summary>
+<summary>GFZ Kp and Hp30 index</summary>
 
 Matzka, J., Stolle, C., Yamazaki, Y., Bronkalla, O. and Morschhauser, A. (2021). The geomagnetic Kp index and derived indices of geomagnetic activity. Space Weather, <https://doi.org/10.1029/2020SW002641>. Data: Matzka, J., Bronkalla, O., Tornow, K., Elger, K. and Stolle, C. (2021). Geomagnetic Kp index. V. 1.0. GFZ Data Services, <https://doi.org/10.5880/Kp.0001>
+
+Hp30: Matzka, J., Bronkalla, O., Kervalishvili, G., Rauberg, J. and Yamazaki, Y. (2022). Geomagnetic Hpo index. V. 2.0. GFZ Data Services, <https://doi.org/10.5880/Hpo.0002>; Yamazaki, Y., Matzka, J., Stolle, C., Kervalishvili, G., Rauberg, J., Bronkalla, O., Morschhauser, A., Bruinsma, S., Shprits, Y. Y. and Jackson, D. R. (2022). Geomagnetic Activity Index Hpo. Geophysical Research Letters, 49(10), <https://doi.org/10.1029/2022GL098860>
 
 </details>
 
@@ -120,9 +147,34 @@ This project relies on data collected at magnetic observatories. We thank the na
 </details>
 
 <details>
+<summary>LMSAL Heliophysics Event Knowledgebase</summary>
+
+Hurlburt, N. et al. (2012), Heliophysics Event Knowledgebase for the Solar Dynamics Observatory (SDO) and Beyond, Solar Physics 275, 67, <https://doi.org/10.1007/s11207-010-9624-2>
+
+</details>
+
+<details>
 <summary>NASA CCMC</summary>
 
 We acknowledge the Community Coordinated Modeling Center (CCMC) at Goddard Space Flight Center for the use of iSWA, <https://ccmc.gsfc.nasa.gov/tools/iSWA/>
+
+We acknowledge the Community Coordinated Modeling Center (CCMC) at Goddard Space Flight Center for the use of the DONKI, <https://ccmc.gsfc.nasa.gov/tools/DONKI/>.
+
+</details>
+
+<details>
+<summary>NASA/JPL Solar System Dynamics (Horizons)</summary>
+
+NASA/JPL Solar System Dynamics, Horizons On-Line Ephemeris System, <https://ssd.jpl.nasa.gov> (citation recommended in the [SSD FAQ](https://ssd.jpl.nasa.gov/faq.html))
+
+</details>
+
+<details>
+<summary>NASA SDO</summary>
+
+Courtesy of NASA/SDO and the AIA, EVE, and HMI science teams. (requested in the [SDO data rules](https://sdo.gsfc.nasa.gov/data/rules.php))
+
+Coronal holes are found in each AIA 193 A image as the areas darker than a share of the median disk brightness, the threshold method of Rotter et al. (2012), <https://doi.org/10.1007/s11207-012-0101-y>.
 
 </details>
 
@@ -134,9 +186,32 @@ NASA Space Physics Data Facility (SPDF), <https://doi.org/10.17616/R3P301>. Indi
 </details>
 
 <details>
+<summary>National Research Council Canada (F10.7)</summary>
+
+"These F10.7 measurements are provided courtesy of the National Research Council Canada in partnership with the Natural Resources Canada." (requested on the [SWPC F10.7 page](https://www.swpc.noaa.gov/phenomena/f107-cm-radio-emissions))
+
+</details>
+
+<details>
 <summary>NOAA SWPC</summary>
 
 Data provided by the NOAA Space Weather Prediction Center, <https://www.spaceweather.gov/>.
+
+</details>
+
+<details>
+<summary>NSF National Solar Observatory (GONG)</summary>
+
+This work utilizes data from the U.S. National Science Foundation (NSF) Global Oscillation Network Group (GONG), built and operated by the NSF National Solar Observatory (NSO) Integrated Synoptic Program (NISP). NSO is managed by the Association of Universities for Research in Astronomy, Inc. (AURA), and funded under a cooperative agreement with the NSF. GONG is partially supported by the National Oceanic and Atmospheric Administration (NOAA). The GONG network of instruments is hosted by the Big Bear Solar Observatory, High Altitude Observatory, Learmonth Solar Observatory, Udaipur Solar Observatory, Instituto de Astrofísica de Canarias, and Cerro Tololo Inter-American Observatory. (required by the [NSO data use policy](https://nso.edu/data/))
+
+The coronal magnetic field is computed with the PFSS model (Altschuler and Newkirk 1969, <https://doi.org/10.1007/BF00145734>; Schatten, Wilcox and Ness 1969, <https://doi.org/10.1007/BF00146478>) using sunkit-magex, the successor of pfsspy (Stansby, Yeates and Badman 2020, <https://doi.org/10.21105/joss.02732>).
+
+</details>
+
+<details>
+<summary>Richardson and Cane ICME list</summary>
+
+Richardson and Cane list of near-Earth ICMEs, doi:10.7910/DVN/C2MHTH; Cane and Richardson (2003), doi:10.1029/2002JA009817; Richardson and Cane (2010), doi:10.1007/s11207-010-9568-6.
 
 </details>
 
@@ -151,6 +226,13 @@ Source: WDC-SILSO, Royal Observatory of Belgium, Brussels, <https://doi.org/10.2
 <summary>SOHO/LASCO CME catalog</summary>
 
 "This CME catalog is generated and maintained at the CDAW Data Center by NASA and The Catholic University of America in cooperation with the Naval Research Laboratory. SOHO is a project of international cooperation between ESA and NASA." References: Yashiro et al. (2004), <https://doi.org/10.1029/2003JA010282>; Gopalswamy et al. (2009), <https://doi.org/10.1007/s11038-008-9282-7>
+
+</details>
+
+<details>
+<summary>SOHO/LASCO images</summary>
+
+"Courtesy of SOHO/LASCO consortium. SOHO is a project of international cooperation between ESA and NASA." (requested in the [SOHO copyright notice](https://soho.nascom.nasa.gov/data/summary/copyright.html))
 
 </details>
 
@@ -232,25 +314,42 @@ We acknowledge the WDC for Geomagnetism (Edinburgh) and the institutes that supp
 
 </details>
 
+<details>
+<summary>WDC for Geomagnetism, Kyoto</summary>
+
+- "The Dst index used in this paper/presentation was provided by the WDC for Geomagnetism, Kyoto (<https://wdc.kugi.kyoto-u.ac.jp/wdc/Sec3.html>)." World Data Center for Geomagnetism, Kyoto, M. Nose, T. Iyemori, M. Sugiura, T. Kamei, A. Matsuoka, S. Imajo, and T. Kotani (2015), Geomagnetic Dst index, doi: 10.17593/14515-74000
+- "The ASY/SYM indices used in this paper/presentation were provided by the WDC for Geomagnetism, Kyoto (<https://wdc.kugi.kyoto-u.ac.jp/wdc/Sec3.html>)." World Data Center for Geomagnetism, Kyoto, S. Imajo, A. Matsuoka, H. Toh, and T. Iyemori (2022), Mid-latitude Geomagnetic Indices ASY and SYM (ASY/SYM Indices), doi: 10.14989/267216
+
+</details>
+
+<details>
+<summary>Wilcox Solar Observatory</summary>
+
+Wilcox Solar Observatory data used in this study were obtained via the web site <http://wso.stanford.edu>, courtesy of J.T. Hoeksema.
+
+</details>
+
 ## Tech Stack
 
 - Language: Python 3.12
 - Dependency management: uv (with lockfile)
-- Configuration: pydantic-settings (environment variables) and TOML files (feeds, dashboard panels, curated metadata)
+- Configuration: pydantic-settings (environment variables) and TOML files in `config/`
 - Storage: MongoDB time series collections, browsed via mongo-express
-- Frontend: static web frontend (HTML, JavaScript, Plotly.js) for the dashboard; Streamlit and Plotly for the explorer
-- Data handling: pandas, NumPy, xarray; cdasws, cdflib and netCDF4 for CDAWeb; hapiclient for HAPI servers
+- Web dashboard: static HTML and JavaScript modules with Plotly.js and three.js
+- Data handling: pandas, NumPy, xarray, astropy, sunpy; cdasws, cdflib and netCDF4 for CDAWeb; hapiclient for HAPI servers; sunkit-magex for the PFSS model
+- Explorer: Streamlit and Plotly
 - Containerization: Docker and Docker Compose
 - Quality tooling: pytest with testcontainers, Ruff (lint and format), mypy
 
 ## Getting Started
 
-The full stack runs in Docker. uv is only required for local development, tests, and notebooks.
+The full stack runs in Docker. uv and Node.js are only required for local development.
 
 ### Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) with the Docker Compose plugin
-- [uv](https://docs.astral.sh/uv/) (for development only)
+- [uv](https://docs.astral.sh/uv/) (development only)
+- [Node.js](https://nodejs.org/) with npm (development only, to serve `web/` outside Docker)
 
 ### Run the stack
 
@@ -260,24 +359,13 @@ The full stack runs in Docker. uv is only required for local development, tests,
    cp example.env .env
    ```
 
-2. Review `config/feeds.toml`: its feeds decide which datasets the pipeline service keeps current, and its `dashboard` table which panels the dashboard shows.
+2. Review the configuration: `config/feeds.toml` decides which datasets the pipeline service keeps current, `config/dashboard/` which pages and panels the dashboard shows.
 
-3. The pipeline service downloads the local data files into `data/` itself when they are missing or older than a day (see [Data Sources and Licenses](#data-sources-and-licenses) for their terms). To fetch them by hand instead:
-
-   ```bash
-   curl -o data/SN_d_tot_V2.0.csv https://www.sidc.be/SILSO/INFO/sndtotcsv.php
-   curl -o data/SN_m_tot_V2.0.csv https://www.sidc.be/SILSO/INFO/snmtotcsv.php
-   curl -o data/SN_ms_tot_V2.0.csv https://www.sidc.be/SILSO/INFO/snmstotcsv.php
-   curl -o data/cme_catalog.txt https://cdaw.gsfc.nasa.gov/CME_list/UNIVERSAL_ver2/text_ver/univ_all.txt
-   ```
-
-4. Build and start all services:
+3. Build and start all services:
 
    ```bash
    docker compose up --build -d
    ```
-
-   This starts six services:
 
    | Service | Purpose | Exposed at |
    | --- | --- | --- |
@@ -285,91 +373,69 @@ The full stack runs in Docker. uv is only required for local development, tests,
    | `frontend` | Streamlit dataset explorer and downloader | <http://localhost:8501> |
    | `mongo-express` | MongoDB web admin UI | <http://localhost:8081> |
    | `mongo` | MongoDB database | `localhost:27017` |
-   | `pipeline-service` | ETL / data pipeline | (no public port) |
+   | `pipeline-service` | Ingestion of feeds and fetch jobs | (no public port) |
    | `metadata-worker` | Catalog and metadata maintenance | (no public port) |
 
-   The ports shown are the defaults; the published ports can be changed in `.env` (see `example.env`).
+   The published ports can be changed in `.env` (see `example.env`).
 
-5. Open the dashboard at [http://localhost:8502](http://localhost:8502). On a fresh database the metadata worker needs a few minutes to build the catalog; feeds whose datasets are not catalogued yet wait for it.
+4. Open the dashboard at <http://localhost:8502>. On a fresh database the metadata worker needs a few minutes to build the catalog; feeds whose datasets are not catalogued yet wait for it. The pipeline service downloads the local data files into `data/` itself.
 
-6. Stop the stack:
-
-   ```bash
-   docker compose down
-   ```
-
-   Add `-v` to also remove the database volume.
+5. Stop the stack with `docker compose down`; add `-v` to also remove the database volume.
 
 ### Local development
 
 ```bash
-# Install all dependencies, including dev tools
-uv sync
-
-# Run the test suite
-uv run pytest
-
-# Lint and format
+uv sync                          # install all dependencies, including dev tools
+uv run pytest                    # unit tests
+uv run pytest -m integration     # integration tests, start a throwaway MongoDB via Docker
 uv run ruff check src tests
 uv run ruff format src tests
-
-# Type-check (src and tests, as configured in pyproject.toml)
-uv run mypy
+uv run mypy                      # src and tests, as configured in pyproject.toml
 ```
 
-`pytest` runs the unit tests; tests marked `integration` need Docker, start a throwaway MongoDB themselves (no running stack or credentials needed) and are run with `uv run pytest -m integration`.
+To serve `web/` outside Docker, install its libraries into `web/vendor/` first:
 
-Test coverage can be inspected with `uv run pytest --cov=src --cov-report=term-missing`.
+```bash
+cd web
+npm ci --ignore-scripts
+sh build-vendor.sh
+```
 
-Jupyter notebooks for exploratory analysis live in `notebooks/` and can be run with `uv run jupyter lab`.
-
-Tools started outside Docker, such as the notebooks, can load the variables from `.env` with `uv run --env-file .env <command>`. Variables already set in the environment take precedence over the file, so `MONGO_HOST=localhost uv run --env-file .env jupyter lab` reaches the MongoDB published on the host (add `MONGO_PORT=<published port>` if the port was changed).
+Jupyter notebooks for exploratory analysis live in `notebooks/` (`uv run jupyter lab`). Tools started outside Docker can load `.env` with `uv run --env-file .env {command}`; variables already set take precedence, so `MONGO_HOST=localhost uv run --env-file .env jupyter lab` reaches the MongoDB published on the host.
 
 ## Project Structure
 
 ```text
 .
 ├── .github/workflows/demo.yml  # Hourly build of the static dashboard demo on GitHub Pages
-├── docker-compose.yml          # Six-service stack definition
-├── Dockerfile                  # Shared image for all Python services
-├── pyproject.toml              # Project metadata, dependencies, tool config
-├── uv.lock                     # Locked dependency versions
-├── example.env                 # Template for required environment variables
-├── config/                     # feeds.toml: feeds that keep datasets current, and the dashboard panels
-│   └── metadata/               # Curated metadata per provider, with the pages each value was taken from
+├── docker-compose.yml
+├── Dockerfile                  # Shared image for all components
+├── pyproject.toml, uv.lock     # Python dependencies and tool configuration
+├── example.env                 # Template for the environment variables
+├── config/
+│   ├── feeds.toml              # Feeds that keep datasets current
+│   ├── dashboard/              # One file per dashboard page, page order in pages.toml
+│   ├── metadata/               # Curated metadata per provider
+│   └── sources/                # SWPC products, image sequences, planets and spacecraft, static catalog items
 ├── data/                       # Local data files (not in the repository) and HAPI server list
-├── docs/                       # Architecture diagram (editable draw.io SVG) and local data notes
-├── notebooks/                  # Jupyter notebooks for exploratory analysis
-├── web/                        # Static web frontend of the dashboard (HTML, JavaScript, Plotly.js), drawing the exported JSON documents
+├── docs/                       # Architecture diagram and notes on the local data files
+├── notebooks/                  # Jupyter notebooks
+├── web/                        # Static web frontend of the dashboard
+│   ├── js/                     # ES modules, entry point main.js
+│   └── build-vendor.sh         # Writes the frontend libraries into vendor/ (not in the repository)
 ├── src/
-│   ├── space_weather_analysis/ # Shared core library used by all components
-│   │   ├── catalog/            # Master catalog of the datasets and their sources
-│   │   ├── clients/            # Provider clients: HAPI, CDAWeb, GFZ, SWPC
-│   │   ├── metadata/           # Dataset metadata: builders per source, overlays of further sources, curated metadata
-│   │   ├── timeseries/         # Time series documents and their storage in MongoDB time series collections
-│   │   ├── coverage/           # Stored time ranges of each dataset
-│   │   ├── jobs/               # Job queue shared by frontend and pipeline service
-│   │   ├── scales/             # NOAA space weather scales and flare classes
-│   │   ├── dashboard/          # Dashboard configuration, panel types, labels, freshness, valid ranges and panel JSON documents
-│   │   └── config/, database/, logging/, util/
+│   ├── space_weather_analysis/ # Shared core library
+│   │   ├── catalog/, metadata/ # Master catalog and dataset metadata (metadata/spase/: SPASE records and dictionary)
+│   │   ├── clients/            # Provider clients
+│   │   ├── timeseries/, coverage/, jobs/
+│   │   ├── solar/, heliosphere/, geospace/  # Physics: solar images and magnetic field, CME propagation, aurora
+│   │   ├── dashboard/          # Dashboard configuration and panel documents (panels/: one module per panel type)
+│   │   └── config/, database/, logging/, scales/, util/
 │   ├── catalog_collector/      # Metadata worker (metadata_worker.py)
-│   │   ├── data_catalog/       # Master catalog: GFZ entries and availability refresh
-│   │   ├── metadata_catalog/   # Dataset metadata: HAPI, CDAS, master file and SPASE metadata refresh
-│   │   ├── cdaweb/             # CDAWeb access: dataset list (CDAS web services) and master files
-│   │   ├── spase/              # SPASE records of the datasets (spase-metadata.org)
-│   │   ├── hapi_mirror/        # HAPI metadata mirror files and the server lookup shared by its refreshes
-│   │   ├── scheduling/         # Task queue and worker for recurring metadata requests
-│   │   └── worker_tasks/       # Task kinds the metadata worker runs, with their intervals
-│   ├── pipeline_service/       # Ingestion service (main.py) and job runner (jobs/runner.py)
-│   │   ├── feeds/              # Feed file model and the scheduler queuing feed jobs
-│   │   ├── chunk_status/       # Status of each fetched chunk, which decides when it is fetched again
-│   │   ├── pipelines/          # One pipeline per source type, the shared chunk loop and the pipeline factory
-│   │   └── parsing/            # Conversion of delivered data and local files into frames
-│   ├── site_export/            # Web dashboard site: JSON documents next to the web frontend, written once or served (main.py)
-│   └── streamlit_app/          # Streamlit app (main.py)
-│       ├── pages/              # Dataset explorer and downloader pages
-│       └── figures/, plots/    # Plot builders of the explorer
-└── tests/                      # Unit tests (tests/unit) and integration tests (tests/integration)
+│   ├── pipeline_service/       # Pipeline service (main.py): feeds, jobs, pipelines per source type, parsing
+│   ├── site_export/            # Writes and serves the dashboard documents (main.py)
+│   └── streamlit_app/          # Streamlit explorer (main.py)
+└── tests/                      # tests/unit and tests/integration
 ```
 
 ## Background
