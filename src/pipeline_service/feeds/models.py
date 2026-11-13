@@ -1,7 +1,7 @@
 import pathlib
 import tomllib
 from datetime import datetime
-from typing import Any, Self
+from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -58,17 +58,15 @@ class Feed(BaseModel):
 
 
 class FeedFile(BaseModel):
-    """The content of the feed configuration file, a TOML array of tables named `feed` and the table `dashboard`.
+    """The content of the feed configuration file, a TOML array of tables named `feed`.
 
     Attributes:
         feed: The feeds in the order of the file.
-        dashboard: What the dashboard shows of the feeds; read and validated by the frontend.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     feed: list[Feed] = Field(default_factory=list)
-    dashboard: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _unique_names(self) -> Self:

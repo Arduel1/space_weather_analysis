@@ -5,6 +5,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel
 
+from space_weather_analysis.dashboard.freshness import DatasetFreshness, dataset_freshness
+from space_weather_analysis.dashboard.labels import dataset_title
 from space_weather_analysis.dashboard.panels.base import PAYLOAD, PanelConfig, PanelContext, PanelPayload
 from space_weather_analysis.dashboard.reading import DashboardReader
 from space_weather_analysis.jobs.models import FeedJobSummary, JobStatus
@@ -14,26 +16,28 @@ from space_weather_analysis.util.time_utils import IsoDuration, SecondsDuration
 OVERDUE_FACTOR = 3
 # Readable causes of missing chunks and failures, by the start of the reason the pipelines record
 _CAUSES = {
-    "SourceUnreachableError": "source unreachable",
-    "Not requested, the provider was unreachable": "source unreachable",
-    "DataRetrievalError": "request failed",
-    "ResourceNotFoundError": "not found at the source",
-    "DataProcessingError": "unreadable data",
+    "SourceUnreachableError": "provider did not answer",
+    "Not requested, the provider was unreachable": "provider did not answer",
+    "ResourceNotFoundError": "data not available at the provider",
+    "DataRetrievalError": "provider refused the request",
+    "DataProcessingError": "provider data in an unexpected form",
 }
+# Cause of any other reason, a fault of this site whose details stay in the logs instead of the dashboard
+UNKNOWN_CAUSE = "processing error on this site"
 
 
 class FeedsPanel(PanelConfig):
-    """A readable status of every configured feed, built from its jobs instead of the logs.
+    """A readable status of every fetched dataset, built from the jobs of its feed instead of the logs.
 
     Attributes:
-        window: The span the outcomes of the jobs are counted in, ending now.
+        window: The span the jobs are read in, ending now.
     """
 
     window: IsoDuration = timedelta(days=1)
 
 
 class FeedState(StrEnum):
-    """The state of a feed by its newest job."""
+    """The state of a feed, or of one of its datasets, by its newest job."""
 
     PENDING = "pending"
     RUNNING = "running"
@@ -69,11 +73,11 @@ def feed_state(summary: FeedJobSummary, interval: timedelta | None, now: datetim
 
 
 def _cause(reason: str) -> str:
-    """Turns a recorded reason into a readable cause, the reason itself if no cause is known for it."""
+    """Turns a recorded reason into a readable cause; UNKNOWN_CAUSE for a reason of no known kind."""
     for start, cause in _CAUSES.items():
         if reason.startswith(start):
             return cause
-    return reason.split(":")[0]
+    return UNKNOWN_CAUSE
 
 
 def _causes_text(reasons: Iterable[str]) -> str:
@@ -82,93 +86,107 @@ def _causes_text(reasons: Iterable[str]) -> str:
     return ", ".join(f"{count} {cause}" for cause, count in counts.most_common())
 
 
-def feed_problem(summary: FeedJobSummary) -> str:
-    """Names what went wrong in the newest job of a feed: the causes of failure or missing chunks, or the error of a broken job.
+def dataset_state(summary: FeedJobSummary, state: FeedState, dataset: str) -> FeedState:
+    """Rates one dataset of a feed: a feed with missing chunks counts as gaps only for the datasets that miss chunks.
 
     Args:
         summary: The job summary of the feed.
+        state: The state of the feed.
+        dataset: The dataset ID.
 
     Returns:
-        A line starting with "Failed:" or "Missing chunks:"; empty if nothing went wrong.
+        The state of the dataset.
+    """
+    if state != FeedState.GAPS:
+        return state
+    return FeedState.GAPS if any(gap.dataset_id == dataset for gap in summary.latest.missing_chunks) else FeedState.OK
+
+
+def dataset_problem(summary: FeedJobSummary, dataset: str) -> str:
+    """Names what went wrong for one dataset in the newest job of its feed: the causes of its missing chunks or the error of a broken job.
+
+    Args:
+        summary: The job summary of the feed.
+        dataset: The dataset ID.
+
+    Returns:
+        A line starting with "Failed:" or "Missing parts:"; empty if nothing went wrong for the dataset.
     """
     latest = summary.latest
-    if latest.status == JobStatus.FAILED and latest.missing_chunks:
-        return f"Failed: {_causes_text(gap.reason for gap in latest.missing_chunks)}"
-    if latest.status == JobStatus.FAILED and latest.error:
-        # Without missing chunks the job was rejected or broke, and its error text says why in words
-        return f"Failed: {latest.error}"
-    if latest.missing_chunks:
-        return f"Missing chunks: {_causes_text(gap.reason for gap in latest.missing_chunks)}"
-    return ""
+    reasons = [gap.reason for gap in latest.missing_chunks if gap.dataset_id == dataset]
+    if latest.status == JobStatus.FAILED:
+        # Without missing chunks the job broke; its error text is named by its kind only
+        return f"Failed: {_causes_text(reasons)}" if reasons else f"Failed: {_cause(latest.error or '')}"
+    return f"Missing parts: {_causes_text(reasons)}" if reasons else ""
 
 
-class FeedStatus(BaseModel):
-    """The status of one feed in a feeds payload.
+class DatasetStatus(BaseModel):
+    """The status of one dataset in the data updates payload.
 
     Attributes:
-        feed: The name of the feed.
-        state: The state by its newest job.
-        last_run: When the newest job was created.
-        interval: The interval of the feed; None for a feed queued only on start.
-        runs: The jobs created within the window.
-        completed: The jobs of the window that ended without missing chunks.
-        with_gaps: The jobs of the window that ended with missing chunks.
-        failed: The jobs of the window that failed.
-        problem: What went wrong in the newest job; empty if nothing.
+        dataset: The dataset ID.
+        title: The title of the dataset; the dataset ID for a dataset without title.
+        state: The state of the dataset in the newest fetch of its feed.
+        problem: What went wrong for the dataset in the newest fetch; empty if nothing.
+        last_run: When the newest fetch was started.
+        interval: The time between two fetches; None for data fetched once at start.
+        freshness: How current the stored data are; None without stored data.
     """
 
     model_config = PAYLOAD
 
-    feed: str
+    dataset: str
+    title: str
     state: FeedState
+    problem: str
     last_run: datetime
     interval: SecondsDuration | None
-    runs: int
-    completed: int
-    with_gaps: int
-    failed: int
-    problem: str
+    freshness: DatasetFreshness | None
 
 
 class FeedsPayload(PanelPayload):
-    """The JSON document of the feed status panel.
+    """The JSON document of the data updates panel.
 
     Attributes:
         title: The heading.
-        window: The span the outcomes are counted in, ending at the export.
-        feeds: The status of every feed with jobs, sorted by feed name.
+        overdue_factor: The number of intervals without a new fetch after which data count as overdue.
+        datasets: The status of every dataset of a feed with jobs, in the order of the feeds and their datasets.
     """
 
     title: str
-    window: SecondsDuration
-    feeds: list[FeedStatus]
+    overdue_factor: int = OVERDUE_FACTOR
+    datasets: list[DatasetStatus]
 
 
 def build_feeds(panel: FeedsPanel, reader: DashboardReader, context: PanelContext) -> FeedsPayload:
-    """Builds the JSON document of the feed status panel from the jobs of the feeds.
+    """Builds the JSON document of the data updates panel: one line per dataset, rated by the newest fetch of its feed.
 
     Args:
         panel: The panel settings.
-        reader: The source of the job summaries.
-        context: The context of the export, with its time and the interval of each feed.
+        reader: The source of the job summaries, the newest documents and the metadata.
+        context: The context of the export, with its time and the interval and datasets of each feed.
 
     Returns:
         The payload.
     """
-    feeds = []
+    statuses: dict[str, DatasetStatus] = {}
     for summary in reader.feed_summaries(context.now - panel.window):
         interval = context.feed_schedule.get(summary.feed)
-        feeds.append(
-            FeedStatus(
-                feed=summary.feed,
-                state=feed_state(summary, interval, context.now),
+        state = feed_state(summary, interval, context.now)
+        for dataset in context.feed_datasets.get(summary.feed, ()):
+            # A dataset of several feeds is rated by the first feed listing it
+            if dataset in statuses:
+                continue
+            metadata = reader.metadata(dataset)
+            latest = reader.latest(dataset, ())
+            freshness = None if latest is None else dataset_freshness(dataset, latest[0], metadata, context.feed_intervals.get(dataset))
+            statuses[dataset] = DatasetStatus(
+                dataset=dataset,
+                title=dataset_title(metadata) or dataset,
+                state=dataset_state(summary, state, dataset),
+                problem=dataset_problem(summary, dataset),
                 last_run=summary.latest.created_at,
                 interval=interval,
-                runs=summary.runs,
-                completed=summary.completed,
-                with_gaps=summary.with_gaps,
-                failed=summary.failed,
-                problem=feed_problem(summary),
+                freshness=freshness,
             )
-        )
-    return FeedsPayload(type=panel.type, title=panel.title or "Feeds", window=panel.window, feeds=feeds)
+    return FeedsPayload(type=panel.type, title=panel.title or "Data updates", datasets=list(statuses.values()))

@@ -1,0 +1,163 @@
+# Overview: the chain from the Sun to the ground at a glance
+title = "Overview"
+
+[[panel]]
+type = "value"
+title = "Sun: X-ray flare class"
+row = 1
+dataset = "swpc_goes_xray"
+field = "long_flux"
+format = "flare_class"
+scale = "noaa_r"
+sparkline = "PT24H"
+baseline = { dataset = "swpc_goes_xray", field = "long_flux" }
+color = "--theme-sun"
+baseline_history = "P7D"
+
+[[panel]]
+type = "value"
+title = "Radiation: protons >=10 MeV"
+row = 1
+dataset = "swpc_goes_protons"
+field = "p_ge10mev_flux"
+format = "{:.2g}"
+unit = "pfu"
+scale = "noaa_s"
+sparkline = "PT24H"
+baseline = { dataset = "swpc_goes_protons", field = "p_ge10mev_flux" }
+color = "--theme-particles"
+baseline_history = "P7D"
+
+[[panel]]
+type = "value"
+title = "Solar wind at L1: speed"
+row = 1
+dataset = "swpc_solar_wind_plasma"
+field = "proton_speed"
+format = "{:.0f}"
+sparkline = "PT24H"
+baseline = { dataset = "OMNI2_H0_MRG1HR", field = "V1800" }
+color = "--theme-wind"
+re_express = ["l1_travel_time", "sun_earth_travel_time"]
+
+[[panel]]
+type = "value"
+title = "Solar wind at L1: Bz"
+row = 1
+dataset = "swpc_solar_wind_mag"
+field = "bz_gsm"
+format = "{:.1f}"
+sparkline = "PT24H"
+baseline = { dataset = "OMNI2_H0_MRG1HR", field = "BZ_GSM1800" }
+color = "--theme-field"
+
+[[panel]]
+type = "value"
+title = "Earth: Kp (estimated)"
+row = 1
+dataset = "swpc_kp_estimated"
+field = "estimated_kp"
+format = "{:.2f}"
+scale = "noaa_g"
+sparkline = "PT24H"
+baseline = { dataset = "Kp", field = "Kp" }
+color = "--theme-storm"
+re_express = ["aurora_oval_edge"]
+
+[[panel]]
+type = "value"
+title = "Earth: Dst"
+row = 1
+dataset = "hour_dst"
+field = "dstValue"
+format = "{:.0f}"
+sparkline = "P2D"
+baseline = { dataset = "OMNI2_H0_MRG1HR", field = "DST1800" }
+color = "--theme-storm"
+
+[[panel]]
+type = "images"
+title = "The Sun (extreme ultraviolet, GOES SUVI)"
+row = 2
+variants = [
+    { dataset = "swpc_suvi_094", label = "94 A" },
+    { dataset = "swpc_suvi_131", label = "131 A" },
+    { dataset = "swpc_suvi_171", label = "171 A" },
+    { dataset = "swpc_suvi_195", label = "195 A" },
+    { dataset = "swpc_suvi_284", label = "284 A" },
+    { dataset = "swpc_suvi_304", label = "304 A" },
+]
+selected = 3
+history = "P1D"
+
+[[panel]]
+type = "images"
+title = "The corona (SOHO LASCO)"
+row = 2
+variants = [{ dataset = "swpc_lasco_c2", label = "LASCO C2" }, { dataset = "swpc_lasco_c3", label = "LASCO C3" }]
+selected = 1
+history = "P1D"
+
+[[panel]]
+type = "images"
+title = "The aurora (OVATION model)"
+row = 2
+variants = [{ dataset = "swpc_ovation_north", label = "Northern hemisphere" }, { dataset = "swpc_ovation_south", label = "Southern hemisphere" }]
+history = "P1D"
+
+[[panel]]
+type = "stack"
+title = "From the Sun to the ground, last day"
+row = 3
+view = "P1D"
+history = "P1D"
+rows = [
+    { title = "X-ray flux of the Sun with flare peaks", y_axis = "log", y_range = [1e-8, 1e-3], y_title = "Flare class", class_ticks = "flare_class", series = [
+        { dataset = "swpc_goes_xray", field = "long_flux", label = "X-ray 0.1-0.8 nm", color = "--theme-sun" },
+        { dataset = "swpc_xray_flares", field = "max_xrlong", style = "markers", label_field = "max_class", label = "Flare peaks", color = "--theme-sun" },
+    ] },
+    { title = "Solar wind speed at L1", series = [{ dataset = "swpc_solar_wind_plasma", field = "proton_speed", label = "Speed", color = "--theme-wind" }] },
+    { title = "Interplanetary magnetic field: Bz (south shaded) and Bt", y_title = "nT", series = [
+        { dataset = "swpc_solar_wind_mag", field = "bt", envelope = true, label = "Bt (plus and minus)", color = "--theme-field" },
+        { dataset = "swpc_solar_wind_mag", field = "bz_gsm", shade_negative = true, label = "Bz GSM", color = "--theme-field" },
+    ] },
+    { title = "Dst (more negative = stronger storm)", series = [{ dataset = "hour_dst", field = "dstValue", label = "Dst", color = "--theme-storm" }] },
+    # GFZ Kp up to its newest value, then the minute nowcast of SWPC as 3-hour maximum, hatched as estimate
+    { title = "Kp: GFZ, then estimated by SWPC (hatched)", y_range = [0, 9.5], scale = "noaa_g", series = [
+        { dataset = "Kp", field = "Kp", style = "bars", color_by_scale = true, label = "Kp (GFZ)" },
+        { dataset = "swpc_kp_estimated", field = "estimated_kp", style = "bars", color_by_scale = true, resample = "PT3H", stat = "max", continues = true, hatched = true, label = "Kp estimated (SWPC)" },
+    ] },
+]
+
+# Events as DONKI forecasters log and link them; the lanes follow the way from the Sun to the Earth, each named by
+# its SPASE phenomenon term (a high speed stream is the SPASE SolarWindExtreme of unusually fast solar wind)
+[[panel]]
+type = "chains"
+title = "Linked events from the Sun to the Earth, last 30 days"
+row = 4
+dataset = "donki_events"
+history = "P30D"
+lanes = [
+    { event_type = "FLR", term = "SolarFlare", color = "--theme-sun" },
+    { event_type = "CME", term = "CoronalMassEjection", color = "--theme-cme" },
+    { event_type = "HSS", term = "SolarWindExtreme", color = "--theme-wind" },
+    { event_type = "SEP", term = "EnergeticSolarParticleEvent", color = "--theme-particles" },
+    { event_type = "IPS", term = "InterplanetaryShock", color = "--theme-storm" },
+    { event_type = "GST", term = "GeomagneticStorm", color = "--theme-storm" },
+]
+
+[[panel]]
+type = "messages"
+title = "SWPC alerts and warnings"
+row = 5
+width = 2
+dataset = "swpc_alerts"
+text_field = "message"
+title_field = "product_id"
+history = "P7D"
+
+[[panel]]
+type = "feeds"
+title = "Data updates"
+row = 5
+window = "P1D"

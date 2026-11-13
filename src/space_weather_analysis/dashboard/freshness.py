@@ -30,9 +30,6 @@ _SEVERITY = {Freshness.STATIC: 0, Freshness.LIVE: 1, Freshness.DELAYED: 2, Fresh
 def expected_age(interval: timedelta | None, metadata: Metadata) -> timedelta | None:
     """Returns how old the newest value may be in normal operation.
 
-    A feed fetches every interval, a value appears at most one cadence after the previous one, and a time stamp at
-    the start of its measurement interval lies one more cadence back when the value is published.
-
     Args:
         interval: The interval of the feed loading the dataset; None for a feed loaded only on start.
         metadata: The metadata record of the dataset, with cadence and time stamp location if known.
@@ -42,6 +39,8 @@ def expected_age(interval: timedelta | None, metadata: Metadata) -> timedelta | 
     """
     if interval is None:
         return None
+    # A feed fetches every interval, a value appears at most one cadence after the previous one, and a time stamp at the
+    # start of its measurement interval lies one more cadence back when the value is published
     time_info = metadata.get("time", {})
     cadence = parse_iso_duration(time_info.get("cadence") or "") or timedelta(0)
     begin_stamp = cadence if time_info.get("timestamp_location") == TimestampLocation.BEGIN else timedelta(0)
@@ -70,18 +69,6 @@ def freshness(newest: datetime, now: datetime, expected: timedelta | None) -> Fr
 def worst(states: list[Freshness]) -> Freshness | None:
     """Returns the worst of several states; None for no state."""
     return max(states, key=_SEVERITY.__getitem__, default=None)
-
-
-def age_text(age: timedelta) -> str:
-    """Writes an age in its largest whole unit: seconds below a minute, minutes below an hour, hours below two days, else days."""
-    seconds = max(int(age.total_seconds()), 0)
-    if seconds < 60:
-        return f"{seconds} s"
-    if seconds < 3600:
-        return f"{seconds // 60} min"
-    if seconds < 2 * 86400:
-        return f"{seconds // 3600} h"
-    return f"{seconds // 86400} d"
 
 
 class DatasetFreshness(BaseModel):

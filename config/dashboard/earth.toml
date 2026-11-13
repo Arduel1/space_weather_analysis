@@ -1,0 +1,62 @@
+# Earth: where the solar wind arrives: the aurora, the magnetic storm, the radiation belts and the ionosphere
+title = "Earth"
+
+# The aurora on a turnable Earth from the OVATION maps of the last day, with how far towards the equator it reaches
+[[panel]]
+type = "aurora"
+title = "Aurora (OVATION model)"
+row = 1
+dataset = "swpc_ovation_grid"
+kp = [{ dataset = "Kp", field = "Kp" }, { dataset = "swpc_kp_estimated", field = "estimated_kp" }]
+history = "P1D"
+
+[[panel]]
+type = "stack"
+title = "Geomagnetic activity, last two weeks"
+row = 2
+width = 2
+view = "P14D"
+history = "P14D"
+rows = [
+    { title = "Kp and the half-hourly Hp30", scale = "noaa_g", series = [
+        { dataset = "Kp", field = "Kp", style = "bars", color_by_scale = true, label = "Kp (GFZ)" },
+        { dataset = "swpc_kp_estimated", field = "estimated_kp", label = "Kp estimated (SWPC)", color = "--theme-storm" },
+        { dataset = "Hp30", field = "Hp30", label = "Hp30 (GFZ)", color = "--theme-storm", dash = "dot" },
+    ] },
+    { title = "Dst and SYM-H (more negative = stronger storm)", thresholds = [
+        { value = -250, label = "super storm", color = "#d03b3b" },
+        { value = -100, label = "intense storm", color = "#ec835a" },
+        { value = -50, label = "moderate storm", color = "#fab219" },
+    ], series = [
+        { dataset = "hour_dst", field = "dstValue", label = "Dst", color = "--theme-storm" },
+        { dataset = "min_asysym", field = "symHValue", label = "SYM-H", color = "--theme-storm", dash = "dot" },
+    ] },
+]
+
+# Electrons of the outer radiation belt charge satellites; they rise one to three days after fast solar wind
+[[panel]]
+type = "stack"
+title = "Radiation belt electrons and solar wind speed"
+row = 2
+view = "P14D"
+history = "P14D"
+rows = [
+    { title = "Electrons >=2 MeV (GOES)", y_axis = "log", y_range = [1, 1e6], thresholds = [{ value = 1000, label = "Alert", color = "#ec835a" }], series = [
+        { dataset = "swpc_goes_electrons", field = "e_ge2mev_flux", label = "Electrons >=2 MeV", color = "--theme-particles" },
+    ] },
+    { title = "Solar wind speed at L1, hourly median", y_title = "km/s", series = [
+        { dataset = "swpc_solar_wind_plasma", field = "proton_speed", label = "Speed", resample = "PT1H", stat = "median", color = "--theme-wind" },
+    ] },
+]
+
+# The ionosphere: radio waves lost in its lowest layer, and the electrons that delay satellite navigation
+[[panel]]
+type = "images"
+title = "Ionosphere: HF radio absorption (D-RAP) and electron content anomaly (GloTEC)"
+row = 3
+variants = [
+    { dataset = "swpc_drap_global", label = "HF radio absorption (D-RAP)" },
+    { dataset = "swpc_glotec_anomaly", label = "Electron content against usual (GloTEC)" },
+]
+history = "P1D"
+columns = 2

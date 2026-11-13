@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 
 from space_weather_analysis.scales.noaa import (
+    FLARE_CLASS_BASES_W_M2,
+    FLARE_CLASS_LETTERS,
     G_THRESHOLDS_KP,
     LEVEL_NAMES,
     R_THRESHOLDS_W_M2,
@@ -78,7 +80,9 @@ def threshold_scale(levels: Sequence[Level]) -> Scale:
     values = np.array([level.value for level in levels], dtype=float)
 
     def classify(series: pd.Series) -> pd.Series:
+        """Counts the level values each value reaches; NA for values that are no finite number."""
         numbers = pd.to_numeric(series, errors="coerce").to_numpy(dtype=float, na_value=np.nan)
+        # searchsorted with side right counts the level values at or below each value
         return pd.Series(np.searchsorted(values, numbers, side="right"), index=series.index, dtype="Int64").mask(~np.isfinite(numbers))
 
     return Scale(tuple(levels), classify)
@@ -102,9 +106,20 @@ SCALES: Mapping[str, Scale] = MappingProxyType(
 )
 
 
+# Class tick sets a chart area can name, by name: the value each class starts at and its name. The flare classes
+# follow the 0.1-0.8 nm X-ray flux the classes are defined by.
+CLASS_TICKS: Mapping[str, tuple[tuple[float, str], ...]] = MappingProxyType(
+    {"flare_class": tuple((float(value), str(letter)) for value, letter in zip(FLARE_CLASS_BASES_W_M2, FLARE_CLASS_LETTERS, strict=True))}
+)
+
+
+# Text written in place of a value that cannot be shown
+NOT_AVAILABLE = "n/a"
+
+
 def _flare_class_text(value: float) -> str:
-    """Names the GOES flare class of a 0.1-0.8 nm X-ray flux in W/m^2, n/a for a non-positive flux."""
-    return flare_class(pd.Series([value], dtype=float)).iloc[0] or "n/a"
+    """Names the GOES flare class of a 0.1-0.8 nm X-ray flux in W/m^2, NOT_AVAILABLE for a non-positive flux."""
+    return flare_class(pd.Series([value], dtype=float)).iloc[0] or NOT_AVAILABLE
 
 
 # Formats a panel can name instead of a Python format string, by name

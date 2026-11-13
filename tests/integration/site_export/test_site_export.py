@@ -16,21 +16,24 @@ FEEDS = """
 name = "live"
 datasets = ["synthetic_flux"]
 interval = "PT1M"
+"""
+PAGE = """
+title = "Live"
 
-[[dashboard.panel]]
+[[panel]]
 type = "value"
 row = 1
 dataset = "synthetic_flux"
 field = "flux"
 
-[[dashboard.panel]]
-type = "timeseries"
+[[panel]]
+type = "stack"
 row = 1
 view = "PT1H"
 history = "PT1H"
-series = [{ dataset = "synthetic_flux", field = "flux" }]
+rows = [{ series = [{ dataset = "synthetic_flux", field = "flux" }] }]
 
-[[dashboard.panel]]
+[[panel]]
 type = "feeds"
 row = 2
 """
@@ -52,13 +55,17 @@ def test_export_writes_the_layout_and_one_document_per_panel(
     monkeypatch.setenv("MONGO_DB_NAME", mongo_settings.db_name)
     feeds_file = tmp_path / "feeds.toml"
     feeds_file.write_text(FEEDS, encoding="utf-8")
+    dashboard_dir = tmp_path / "dashboard"
+    dashboard_dir.mkdir()
+    (dashboard_dir / "pages.toml").write_text('pages = ["live"]\n', encoding="utf-8")
+    (dashboard_dir / "live.toml").write_text(PAGE, encoding="utf-8")
     output = tmp_path / "site"
 
     web = tmp_path / "web"
     web.mkdir()
     (web / "index.html").write_text("<!doctype html>", encoding="utf-8")
 
-    main(["--output", str(output), "--web", str(web), "--feeds-file", str(feeds_file)])
+    main(["--output", str(output), "--web", str(web), "--feeds-file", str(feeds_file), "--dashboard-dir", str(dashboard_dir)])
 
     layout = json.loads((output / "data" / "dashboard.json").read_text(encoding="utf-8"))
     panel_ids = [entry["id"] for page in layout["pages"] for row in page["rows"] for entry in row]

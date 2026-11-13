@@ -2,7 +2,7 @@ from typing import Any
 
 import pytest
 
-from space_weather_analysis.dashboard.labels import attribution, dataset_title, field_label, field_unit, sources_line
+from space_weather_analysis.dashboard.labels import attribution, dataset_title, field_label, field_unit
 
 FULL_RECORD: dict[str, Any] = {
     "title": "GOES X-ray flux",
@@ -50,11 +50,3 @@ def test_labels_prefer_configuration_then_metadata_then_field_name(
 def test_attribution_names_provider_and_terms(metadata: dict[str, Any], expected: str) -> None:
     """The attribution names the provider, else the server host, else the source type, followed by license and DOI."""
     assert attribution(metadata) == expected
-
-
-def test_sources_line_names_each_attribution_once_in_order() -> None:
-    """The source line lists each distinct attribution once, in the order of the records."""
-    first = {"source": {"type": "SWPC", "provider": "First provider"}}
-    second = {"source": {"type": "SWPC", "provider": "Second provider"}}
-
-    assert sources_line([first, second, first, {}]) == "Source: First provider; Second provider; no metadata"

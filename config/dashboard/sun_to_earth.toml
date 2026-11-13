@@ -1,0 +1,78 @@
+# Sun to Earth: what leaves the Sun, where it flies, whom it meets and how the solar wind connects Sun and Earth
+title = "Sun to Earth"
+
+# The inner solar system from above with the CMEs of the last weeks flying out, and their distance from the Sun over
+# time; the field lines bend with the wind measured at Earth and at STEREO A
+[[panel]]
+type = "heliosphere"
+title = "CMEs through the solar system"
+row = 1
+positions = "body_positions"
+events = "donki_events"
+winds = { Earth = { dataset = "swpc_solar_wind_plasma", field = "proton_speed" }, "STEREO A" = { dataset = "swpc_stereo_a", field = "speed" } }
+history = "P29D"
+ahead = "P5D"
+
+[[panel]]
+type = "images"
+title = "WSA-Enlil solar wind model (NOAA SWPC)"
+row = 2
+width = 1.3
+variants = [{ dataset = "swpc_enlil", label = "Newest run" }]
+history = "P8D"
+follows_replay = false
+
+[[panel]]
+type = "stack"
+title = "WSA-Enlil at Earth and the measured solar wind"
+row = 2
+view = "P2D"
+ahead = "P5D"
+history = "P7D"
+rows = [
+    { title = "Speed", y_title = "km/s", series = [
+        { dataset = "swpc_enlil_earth", field = "speed", label = "Model", color = "--theme-wind", dash = "dash" },
+        { dataset = "swpc_solar_wind_plasma", field = "proton_speed", label = "Measured at L1", color = "--theme-wind" },
+    ] },
+    { title = "Density", y_title = "cm^-3", series = [
+        { dataset = "swpc_enlil_earth", field = "density", label = "Model", color = "--theme-wind", dash = "dash" },
+        { dataset = "swpc_solar_wind_plasma", field = "proton_density", label = "Measured at L1", color = "--theme-wind" },
+    ] },
+]
+
+# Streams from coronal holes turn with the Sun, so the same stream passes Earth and STEREO A days apart
+[[panel]]
+type = "stack"
+title = "Solar wind at STEREO A and Earth, shifted by the solar rotation"
+row = 4
+view = "P30D"
+history = "P30D"
+rows = [
+    { title = "As measured, hourly medians", y_title = "km/s", series = [
+        { dataset = "swpc_solar_wind_plasma", field = "proton_speed", label = "Earth (L1)", resample = "PT1H", stat = "median", color = "--theme-wind" },
+        { dataset = "swpc_stereo_a", field = "speed", label = "STEREO A", color = "--theme-stereo", resample = "PT1H", stat = "median" },
+    ] },
+    { title = "STEREO A shifted by the SWPC lead/lag time", y_title = "km/s", series = [
+        { dataset = "swpc_solar_wind_plasma", field = "proton_speed", label = "Earth (L1)", resample = "PT1H", stat = "median", color = "--theme-wind" },
+        { dataset = "swpc_stereo_a", field = "speed", label = "STEREO A, moved", color = "--theme-stereo", shift_field = "lead_lag_days", resample = "PT1H", stat = "median" },
+    ] },
+]
+
+# Particles follow the field line, so flares near its foot on the Sun send energetic protons to the observer at its end
+[[panel]]
+type = "magnetic_connection"
+title = "Magnetic connection of flares to Earth and STEREO A, with protons"
+row = 3
+events = "donki_events"
+positions = "body_positions"
+history = "P14D"
+observers = [
+    { body = "Earth", wind = { dataset = "swpc_solar_wind_plasma", field = "proton_speed" }, particles = [
+        { dataset = "swpc_goes_protons", field = "p_ge10mev_flux", label = ">=10 MeV" },
+        { dataset = "swpc_goes_protons", field = "p_ge1mev_flux", label = ">=1 MeV" },
+    ] },
+    { body = "STEREO A", wind = { dataset = "swpc_stereo_a", field = "speed" }, particles = [
+        { dataset = "swpc_stereo_a", field = "protons_13_21mev", label = "13-21 MeV" },
+        { dataset = "swpc_stereo_a", field = "protons_623_2224kev", label = "0.6-2.2 MeV" },
+    ] },
+]

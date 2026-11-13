@@ -1,8 +1,5 @@
-# Feeds the pipeline service keeps loaded: on every start and then every `interval` (ISO 8601 duration) it queues
-# one job per feed that has no open job; a feed without interval is queued only on start.
-# Each feed takes a time range of either `lookback` (ISO 8601 duration up to now) or `start` and optional `end`
-# (UTC times, `end` defaults to now); a feed without range lets its pipeline choose.
-# `source_type` names the pipeline; without it the job runner looks the datasets up in the master catalog.
+# Feeds the pipeline service queues on start and then every `interval` (ISO 8601 duration), each over a `lookback` up to
+# now or from `start` (UTC); a feed without `source_type` takes the pipeline of its datasets in the master catalog.
 
 # GOES X-ray and proton flux of the last 90 days from the iSWA HAPI server, the history behind the live feed
 [[feed]]
@@ -11,14 +8,48 @@ datasets = ["goesp_xray_flux_P1M", "goesp_part_flux_P5M"]
 lookback = "P90D"
 interval = "PT1H"
 
-# Live GOES X-ray and proton flux of NOAA SWPC, whose rolling files are a few minutes behind the measurement
-# The 7-day lookback is the longest file SWPC offers; after the first run each run fetches from the newest stored value on
+# Live GOES X-ray, proton and electron flux of NOAA SWPC, whose rolling files are a few minutes behind the measurement.
+# The 7-day lookback is the longest file SWPC offers; after the first run each run fetches from the newest stored value
+# on.
 [[feed]]
 name = "swpc_goes"
-datasets = ["swpc_goes_xray", "swpc_goes_protons"]
+datasets = ["swpc_goes_xray", "swpc_goes_protons", "swpc_goes_electrons"]
 source_type = "SWPC"
 lookback = "P7D"
 interval = "PT1M"
+
+# Real-time solar wind of SWPC from the spacecraft at L1 (the Lagrange point 1.5 million km sunward of Earth); its
+# rolling files hold the last day
+[[feed]]
+name = "swpc_solar_wind"
+datasets = ["swpc_solar_wind_plasma", "swpc_solar_wind_mag"]
+source_type = "SWPC"
+lookback = "P1D"
+interval = "PT1M"
+
+# Daily F10.7 solar radio flux, whose SWPC file holds the last 30 days
+[[feed]]
+name = "swpc_f107"
+datasets = ["swpc_f107"]
+source_type = "SWPC"
+lookback = "P30D"
+interval = "PT1H"
+
+# Solar wind measured by STEREO A, whose beacon data reach SWPC some hours late; the file holds the last 30 days
+[[feed]]
+name = "swpc_stereo_a"
+datasets = ["swpc_stereo_a"]
+source_type = "SWPC"
+lookback = "P30D"
+interval = "PT30M"
+
+# The solar wind at Earth of the newest WSA-Enlil run of SWPC, which runs a few times a day
+[[feed]]
+name = "swpc_enlil"
+datasets = ["swpc_enlil_earth"]
+source_type = "SWPC"
+lookback = "P7D"
+interval = "PT1H"
 
 # Kp estimated by SWPC every minute, a nowcast until GFZ publishes the official Kp
 [[feed]]
@@ -27,6 +58,100 @@ datasets = ["swpc_kp_estimated"]
 source_type = "SWPC"
 lookback = "P7D"
 interval = "PT1M"
+
+# Image sequences of the Sun, the corona and the aurora; the frame lists of SWPC hold the last day
+[[feed]]
+name = "images"
+datasets = [
+    "swpc_suvi_094", "swpc_suvi_131", "swpc_suvi_171", "swpc_suvi_195", "swpc_suvi_284", "swpc_suvi_304",
+    "swpc_lasco_c2", "swpc_lasco_c3", "swpc_ovation_north", "swpc_ovation_south", "sdo_hmi_continuum", "sdo_aia_193",
+    "sdo_aia_flare_zoom", "swpc_enlil", "swpc_drap_global", "swpc_glotec_anomaly",
+]
+source_type = "IMAGES"
+lookback = "P1D"
+interval = "PT10M"
+
+# Sunspot regions of the daily SWPC report; the file holds the last 30 days
+[[feed]]
+name = "swpc_regions"
+datasets = ["swpc_solar_regions"]
+source_type = "SWPC"
+lookback = "P30D"
+interval = "PT1H"
+
+# Flares and alerts of SWPC, whose files hold the last week
+[[feed]]
+name = "swpc_events"
+datasets = ["swpc_xray_flares", "swpc_alerts"]
+source_type = "SWPC"
+lookback = "P7D"
+interval = "PT10M"
+
+# Space weather events of DONKI with the links forecasters set between them; events are added, revised and linked
+# days later, so every run fetches the whole lookback again (six event types, one request each)
+[[feed]]
+name = "donki"
+datasets = ["donki_events"]
+source_type = "DONKI"
+lookback = "P30D"
+interval = "PT1H"
+
+# Daily positions of the planets and of the spacecraft DONKI names as targets of CMEs, a month back and ten days ahead
+[[feed]]
+name = "positions"
+datasets = ["body_positions"]
+source_type = "EPHEMERIS"
+lookback = "P30D"
+interval = "PT6H"
+
+# Daily NOAA sunspot regions from the HEK since 1996, the start of solar cycle 23, for the butterfly diagram
+[[feed]]
+name = "hek_regions"
+datasets = ["hek_noaa_regions"]
+source_type = "HEK"
+start = 1996-01-01T00:00:00Z
+interval = "PT6H"
+
+# The coronal magnetic field computed with the PFSS model from the newest GONG synoptic map, which GONG updates hourly;
+# each hourly model is kept for a day, so that the field can be played over the day
+[[feed]]
+name = "gong_pfss"
+datasets = ["gong_pfss"]
+source_type = "GONG"
+interval = "PT1H"
+
+# OMNI hourly solar wind, magnetic field and indices since 1996 (the start of the CME catalog), the history the
+# relationship views and the comparisons with the past are computed from; OMNI lags weeks behind real time
+[[feed]]
+name = "omni"
+datasets = ["OMNI2_H0_MRG1HR"]
+source_type = "HAPI"
+start = 1996-01-01T00:00:00Z
+interval = "PT6H"
+
+# Hourly Dst index of the WDC for Geomagnetism, Kyoto
+[[feed]]
+name = "kyoto_dst"
+datasets = ["hour_dst"]
+source_type = "HAPI"
+lookback = "P60D"
+interval = "PT1H"
+
+# 1-minute SYM-H and ASY-H of the WDC for Geomagnetism, Kyoto, whose provisional data end some days before now
+[[feed]]
+name = "kyoto_sym"
+datasets = ["min_asysym"]
+source_type = "HAPI"
+lookback = "P30D"
+interval = "PT3H"
+
+# Maps of the OVATION aurora model of SWPC, which publishes only the newest one every few minutes; a day of maps is
+# collected run by run
+[[feed]]
+name = "ovation_grid"
+datasets = ["swpc_ovation_grid"]
+source_type = "OVATION"
+interval = "PT20M"
 
 # Kp index of GFZ Potsdam
 [[feed]]
@@ -38,151 +163,16 @@ start = 2020-01-01T00:00:00Z
 # One value per 3 hours; hourly fetches take up new and revised preliminary values soon after GFZ publishes them
 interval = "PT1H"
 
+# Half-hourly Hp30 index of GFZ Potsdam, which GFZ updates every half hour
+[[feed]]
+name = "hp30"
+datasets = ["Hp30"]
+source_type = "GFZ_POTSDAM"
+lookback = "P30D"
+interval = "PT30M"
+
 # Local files, which hold their whole dataset and are not in the master catalog
 [[feed]]
 name = "local"
-datasets = ["silso_sunspot_daily", "silso_sunspot_monthly", "silso_sunspot_smoothed", "cme_catalog"]
+datasets = ["silso_sunspot_daily", "silso_sunspot_monthly", "silso_sunspot_smoothed", "silso_sunspot_hemispheric", "wso_polar_fields", "cme_catalog", "icme_list"]
 source_type = "LOCAL"
-
-# What the dashboard shows of the feeds: pages shown as tabs in file order, and a list of panels, each naming
-# its `page` and drawn there row by row and in file order within a row; without pages all panels share one page.
-# Every `dataset` must belong to a feed above, so the shown data stays current; switching a panel to another
-# source means naming another dataset and field. Each panel has a `type` (value, timeseries, table), a `row`
-# from 1 at the top and a relative `width`; the other keys depend on the type. A time series shows its `view`
-# up to now and loads its `history`, reachable by panning while live updates are paused. A `scale` names a
-# registered scale (noaa_g, noaa_s, noaa_r); own levels are given as `thresholds` instead. `valid_min` and
-# `valid_max` add bounds of valid values to those of the metadata; a chart offers to hide invalid values only where any are known.
-
-[[dashboard.page]]
-title = "Overview"
-
-[[dashboard.page]]
-title = "Sun"
-
-[[dashboard.page]]
-title = "Sun to Earth"
-
-[[dashboard.page]]
-title = "Earth"
-
-[[dashboard.panel]]
-type = "value"
-page = "Overview"
-title = "Kp index (estimated)"
-row = 1
-dataset = "swpc_kp_estimated"
-field = "estimated_kp"
-format = "{:.2f}"
-scale = "noaa_g"
-
-[[dashboard.panel]]
-type = "value"
-page = "Overview"
-title = "X-ray flare class"
-row = 1
-dataset = "swpc_goes_xray"
-field = "long_flux"
-format = "flare_class"
-scale = "noaa_r"
-
-[[dashboard.panel]]
-type = "value"
-page = "Overview"
-title = "Protons >=10 MeV"
-row = 1
-dataset = "swpc_goes_protons"
-field = "p_ge10mev_flux"
-format = "{:.2e}"
-unit = "pfu"
-scale = "noaa_s"
-
-[[dashboard.panel]]
-type = "value"
-page = "Overview"
-title = "Sunspot number"
-row = 1
-dataset = "silso_sunspot_daily"
-field = "sunspot_number"
-format = "{:.0f}"
-
-[[dashboard.panel]]
-type = "timeseries"
-page = "Earth"
-title = "Kp index"
-row = 1
-view = "PT24H"
-history = "P1Y"
-y_range = [0, 9.5]
-y_title = "Kp (0-9)"
-scale = "noaa_g"
-series = [
-    { dataset = "Kp", field = "Kp", label = "Kp (GFZ)", style = "bars" },
-    { dataset = "swpc_kp_estimated", field = "estimated_kp", label = "Estimated Kp (SWPC)", color = "#0068C9" },
-]
-
-[[dashboard.panel]]
-type = "timeseries"
-page = "Sun"
-title = "GOES X-ray flux"
-row = 1
-view = "PT24H"
-history = "P7D"
-y_axis = "log"
-y_range = [1e-9, 1e-2]
-y_title = "Flux (W/m²)"
-scale = "noaa_r"
-series = [
-    { dataset = "swpc_goes_xray", field = "long_flux", label = "Long 0.1-0.8 nm", color = "#27AE60" },
-    { dataset = "swpc_goes_xray", field = "short_flux", label = "Short 0.05-0.4 nm", color = "#0068C9" },
-]
-
-[[dashboard.panel]]
-type = "timeseries"
-page = "Sun to Earth"
-title = "GOES proton flux >=10 MeV"
-row = 1
-view = "PT24H"
-history = "P7D"
-y_axis = "log"
-y_range = [0.1, 3e5]
-y_title = "Flux (pfu)"
-scale = "noaa_s"
-series = [{ dataset = "swpc_goes_protons", field = "p_ge10mev_flux", label = "Protons >=10 MeV", color = "#FF4B4B" }]
-
-# About three 11-year solar cycles
-[[dashboard.panel]]
-type = "timeseries"
-page = "Sun"
-title = "Sunspot number"
-row = 1
-view = "P35Y"
-history = "P35Y"
-series = [
-    { dataset = "silso_sunspot_monthly", field = "sunspot_number", label = "Monthly mean", color = "rgba(255, 165, 0, 0.7)" },
-    { dataset = "silso_sunspot_smoothed", field = "sunspot_number", label = "13-month smoothed", color = "#FF4B4B" },
-]
-
-[[dashboard.panel]]
-type = "table"
-page = "Sun to Earth"
-title = "Recent CMEs"
-row = 1
-dataset = "cme_catalog"
-history = "P90D"
-count = 20
-columns = [
-    { field = "linear_speed", label = "Speed (km/s)" },
-    { field = "width", label = "Angular width (deg)" },
-    { field = "central_pa", label = "Central position angle (deg)" },
-    { field = "is_halo", label = "Halo" },
-    { field = "kinetic_energy", label = "Kinetic energy (erg)" },
-    { field = "remarks", label = "Remarks" },
-]
-
-# Readable status of every feed, from its jobs instead of the logs
-[[dashboard.panel]]
-type = "feeds"
-page = "Overview"
-title = "Feed status"
-row = 2
-window = "P1D"

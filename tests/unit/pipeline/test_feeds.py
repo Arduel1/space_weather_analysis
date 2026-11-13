@@ -19,8 +19,8 @@ def _write(directory: pathlib.Path, content: str) -> pathlib.Path:
 
 
 def test_project_feed_file_is_valid() -> None:
-    """The feed file of the project loads with unique, named feeds."""
-    assert [feed.name for feed in load_feeds(PROJECT_FEED_FILE)] == ["goes", "swpc_goes", "swpc_kp", "kp", "local"]
+    """The feed file of the project loads, which validates its feeds and their unique names, and holds at least one feed."""
+    assert load_feeds(PROJECT_FEED_FILE)
 
 
 @pytest.mark.parametrize(

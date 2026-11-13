@@ -1,0 +1,66 @@
+# Connections: how the phenomena of the other pages link up, from almost three solar cycles of data
+title = "Connections"
+
+# Every CME of the CDAW catalog as a bubble below the solar cycle, and every intense storm found in the hourly Dst;
+# storms are stretches with Dst below -100 nT, the intense storms of Gonzalez et al. (1994), and stretches less than
+# 3 days apart count as one storm
+[[panel]]
+type = "solarcycle"
+title = "Solar cycle, CMEs and intense storms since 1996"
+row = 1
+sunspots = { dataset = "silso_sunspot_monthly", field = "sunspot_number" }
+smoothed = { dataset = "silso_sunspot_smoothed", field = "sunspot_number" }
+events = { dataset = "cme_catalog", y = "kinetic_energy", size = "width", flag = "is_halo", flag_label = "Halo CME (around the whole Sun, possibly towards Earth)", other_label = "Other CME", y_label = "kinetic energy", size_label = "angular width" }
+sunspot_label = "Sunspot number"
+earth = { dataset = "icme_list", field = "cme_times", label = "CME that reached Earth" }
+storms = { dataset = "OMNI2_H0_MRG1HR", field = "DST1800", threshold = -100, label = "Lowest Dst" }
+labelled = 5
+history = "P31Y"
+
+# How often storms come in each month of the year: the share of all hours with Kp of at least 5, the level of a G1 storm
+[[panel]]
+type = "grouped"
+title = "Storm hours per month"
+row = 2
+dataset = "OMNI2_H0_MRG1HR"
+history = "P31Y"
+x = { time_part = "month", edges = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5, 12.5], label = "Month" }
+z = { field = "KP1800", factor = 0.1 }
+statistic = "share_above"
+threshold = 5
+style = "bars"
+y_label = "Hours with a storm (Kp of at least 5), %"
+color = "--theme-storm"
+caption = "Share of hours with Kp of at least 5 (G1) in each month. Maxima near the equinoxes (20 March, 22 September): Russell and McPherron (1973), doi:10.1029/JA078i001p00092."
+
+# Average Kp for each north-south direction of the magnetic field of the solar wind, for slow, medium and fast wind
+[[panel]]
+type = "grouped"
+title = "Kp by Bz and solar wind speed"
+row = 2
+dataset = "OMNI2_H0_MRG1HR"
+history = "P31Y"
+x = { field = "BZ_GSM1800", edges = [-30, -15, -10, -6, -3, -1, 1, 3, 6, 10, 30], label = "Bz (nT), negative = southward" }
+bands = { field = "V1800", edges = [0, 400, 550, 3000] }
+band_labels = ["Slow wind (below 400 km/s)", "Medium wind (400 to 550 km/s)", "Fast wind (above 550 km/s)"]
+z = { field = "KP1800", factor = 0.1 }
+style = "lines"
+y_label = "Average Kp"
+# Ordered speed bands take the validated ordinal ramp, weak to strong
+band_colors = ["--ordinal-1", "--ordinal-2", "--ordinal-3"]
+caption = "Mean Kp per Bz bin for three speed ranges of the solar wind; negative Bz points south. A southward field couples the solar wind to the magnetosphere: Dungey (1961), doi:10.1103/PhysRevLett.6.47."
+
+# Storms as in the cycle view above, all laid over each other at their lowest Dst
+[[panel]]
+type = "epoch"
+title = "Intense storms aligned at their lowest Dst"
+row = 3
+history = "P31Y"
+events = { dataset = "OMNI2_H0_MRG1HR", field = "DST1800", threshold = -100, label = "Dst" }
+before = "P1D"
+after = "P3D"
+rows = [
+    { dataset = "OMNI2_H0_MRG1HR", field = "BZ_GSM1800", label = "Bz of the solar wind (negative = southward)", color = "--theme-field" },
+    { dataset = "OMNI2_H0_MRG1HR", field = "DST1800", label = "Dst (more negative = stronger storm)", color = "--theme-storm" },
+]
+caption = "Intense storms (Dst below -100 nT, Gonzalez et al. 1994, doi:10.1029/93JA02867) aligned at their lowest Dst (hour 0)."

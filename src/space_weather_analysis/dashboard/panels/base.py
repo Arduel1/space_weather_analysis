@@ -1,3 +1,4 @@
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -5,6 +6,7 @@ from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from space_weather_analysis.dashboard.about import DatasetAbout
 from space_weather_analysis.dashboard.scales import FORMATTERS, SCALES, Level, Scale, threshold_scale
 from space_weather_analysis.util.naming import sanitize_collection_name
 from space_weather_analysis.util.time_utils import IsoDuration
@@ -18,6 +20,19 @@ def collection_of(dataset: str) -> str:
     return sanitize_collection_name(dataset)
 
 
+def text_or_empty(value: object) -> str:
+    """Returns a stored text value; an empty text for missing values and non-text values."""
+    return value if isinstance(value, str) else ""
+
+
+def finite_number(value: object) -> float | None:
+    """Returns a stored finite number as float; None for missing values, text, booleans, NaN and infinity."""
+    # bool is a subclass of int but no measurement
+    if isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value):
+        return float(value)
+    return None
+
+
 class PanelConfig(BaseModel):
     """The settings every panel shares; each panel type adds its own.
 
@@ -27,6 +42,7 @@ class PanelConfig(BaseModel):
         title: The heading of the panel.
         row: The dashboard row of the panel, from 1 at the top; panels of a row share it in the order of the file.
         width: The width of the panel relative to the other panels of its row.
+        below: Draws the panel below the previous panel of its row, in the same column, whose width it shares.
     """
 
     model_config = CLOSED
@@ -36,6 +52,7 @@ class PanelConfig(BaseModel):
     title: str = ""
     row: int = Field(ge=1)
     width: float = Field(default=1.0, gt=0)
+    below: bool = False
 
     def datasets(self) -> set[str]:
         """Lists the dataset of every `dataset` key of the panel settings."""
@@ -43,18 +60,43 @@ class PanelConfig(BaseModel):
         _collect_datasets(self.model_dump(), found)
         return found
 
+    def shown_fields(self) -> dict[str, list[str]]:
+        """Lists the fields the panel shows by dataset, from every table of its settings naming a `dataset` and a `field`.
+
+        Returns:
+            The fields of each dataset in the order of the settings, each once.
+        """
+        found: dict[str, list[str]] = {}
+        _collect_fields(self.model_dump(), found)
+        return found
+
 
 def _collect_datasets(table: Any, found: set[str]) -> None:
     """Adds the value of every `dataset` key of a nested table, its subtables and lists to a set."""
     if isinstance(table, dict):
         for key, value in table.items():
+            # A derived series names no dataset of its own, only the datasets of its inputs
             if key == "dataset" and isinstance(value, str):
-                found.add(value)
+                if value:
+                    found.add(value)
             else:
                 _collect_datasets(value, found)
     elif isinstance(table, list):
         for item in table:
             _collect_datasets(item, found)
+
+
+def _collect_fields(table: Any, found: dict[str, list[str]]) -> None:
+    """Adds the field of every nested table naming a `dataset` and a `field` to the fields of that dataset."""
+    if isinstance(table, dict):
+        dataset, field = table.get("dataset"), table.get("field")
+        if isinstance(dataset, str) and isinstance(field, str) and dataset and field and field not in found.setdefault(dataset, []):
+            found[dataset].append(field)
+        for value in table.values():
+            _collect_fields(value, found)
+    elif isinstance(table, list):
+        for item in table:
+            _collect_fields(item, found)
 
 
 class ThresholdConfig(BaseModel):
@@ -153,12 +195,14 @@ class TimeWindow(BaseModel):
     Attributes:
         view: The span shown, ending now and moving with the time on every update.
         history: The span of loaded data, ending with the newest stored document, reachable by panning; at least the view.
+        ahead: The span shown after now besides the view, for model values of the coming days; none by default.
     """
 
     model_config = CLOSED
 
     view: IsoDuration
     history: IsoDuration
+    ahead: IsoDuration = timedelta(0)
 
     @model_validator(mode="after")
     def _history_covers_view(self) -> Self:
@@ -176,11 +220,13 @@ class PanelContext:
         now: The time of the drawing.
         feed_intervals: The interval of the feed loading each dataset, by dataset ID; None for a feed loaded only on start.
         feed_schedule: The interval of each feed, by feed name; None for a feed loaded only on start.
+        feed_datasets: The datasets of each feed, by feed name.
     """
 
     now: datetime
     feed_intervals: Mapping[str, timedelta | None]
     feed_schedule: Mapping[str, timedelta | None] = field(default_factory=dict)
+    feed_datasets: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 # Payloads are frozen, as they are only built and then serialized
@@ -192,8 +238,14 @@ class PanelPayload(BaseModel):
 
     Attributes:
         type: The panel type, a key of the panel type registry.
+        about: What the metadata records say about the datasets and fields of the panel, for its info view.
     """
 
     model_config = PAYLOAD
 
     type: str
+    about: list[DatasetAbout] = Field(default_factory=list)
+
+    def media_files(self) -> list[tuple[str, str]]:
+        """Lists the media files the payload refers to as pairs of dataset ID and file name; none for most panel types."""
+        return []

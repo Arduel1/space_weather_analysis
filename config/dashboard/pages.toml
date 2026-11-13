@@ -1,0 +1,3 @@
+# Tabs of the web dashboard in this order, each the page file `{name}.toml` of this directory; a page draws its panels
+# row by row and in file order within a row, and every dataset a panel shows must belong to a feed of config/feeds.toml.
+pages = ["overview", "sun", "sun_to_earth", "earth", "connections"]
