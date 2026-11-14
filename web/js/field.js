@@ -363,7 +363,7 @@ export function renderFieldLines(panel, payload) {
   turn.type = "button";
   const time = element("span", "caption");
   bar.append(play, turn, time, element("span", "caption", "Drag to turn it by hand, scroll to zoom."));
-  const caption = linkedCaption("PFSS model (Schatten et al. 1969, doi:10.1007/BF00146478; Altschuler and Newkirk 1969, doi:10.1007/BF00145734) of the hourly GONG magnetograms, open above 2.5 solar radii. Surface: radial field, or the AIA 193 A image on the side SDO saw. Diamonds: flares, crosses: CMEs within 3 hours of the model.");
+  const caption = linkedCaption("PFSS model (Schatten et al. 1969, doi:10.1007/BF00146478; Altschuler and Newkirk 1969, doi:10.1007/BF00145734) of the hourly GONG magnetograms, or of the daily SDO/HMI synoptic map while GONG is not available, open above 2.5 solar radii. Surface: radial field, or the AIA 193 A image on the side SDO saw. Diamonds: flares, crosses: CMEs within 3 hours of the model.");
   // The surface shows the field or the image of the corona nearest the model, kept as choice of the viewer
   const surfaceKey = `${state.drawingPanel.id}:surface`;
   const imageTimes = payload.surface_images.map((image) => Date.parse(image.time));
@@ -383,7 +383,8 @@ export function renderFieldLines(panel, payload) {
       const image = imageAt(modelTimes[index]);
       viewer.draw(model, payload.regions, payload.coronal_holes, eventsNear(payload.events, modelTimes[index]), image);
       // The image time without its date: utcText gives `{date} {hours}:{minutes}`, the date 10 characters and a space
-      time.textContent = `Model of ${utcText(model.map_time)} UTC${image === null ? "" : `, AIA ${utcText(image.time).slice(11)}`}`;
+      // The magnetogram is named from the model file, so a model of the fallback map is told apart from the GONG ones
+      time.textContent = `Model of ${utcText(model.map_time)} UTC${model.magnetogram ? ` from ${model.magnetogram}` : ""}${image === null ? "" : `, AIA ${utcText(image.time).slice(11)}`}`;
     });
   };
   // A redraw of the page stops the turn, so that the button starts as Turn

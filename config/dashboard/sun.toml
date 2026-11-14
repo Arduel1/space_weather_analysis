@@ -45,7 +45,7 @@ follows_replay = false
 # PFSS (potential field source surface) model: closed loops and open field lines that carry the solar wind outwards
 [[panel]]
 type = "fieldlines"
-title = "Coronal magnetic field (PFSS model of GONG magnetograms)"
+title = "Coronal magnetic field (PFSS model of synoptic magnetograms)"
 row = 2
 width = 1.5
 dataset = "gong_pfss"

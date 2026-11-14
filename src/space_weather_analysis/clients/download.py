@@ -1,6 +1,8 @@
 import json
 import pathlib
 import tempfile
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from http import HTTPStatus
 from typing import Any
 
@@ -107,6 +109,40 @@ def download_json_streamed(session: requests.Session, url: str, timeout: tuple[f
             return json.load(download)
         except ValueError as e:
             raise DataProcessingError(f"{what} {url} is no JSON: {e}") from e
+
+
+def last_modified(session: requests.Session, url: str, timeout: tuple[float, float], what: str) -> datetime:
+    """Reads when a provider file last changed from the Last-Modified header of a HEAD request, without downloading it.
+
+    Args:
+        session: The HTTP session for the request.
+        url: The location of the file.
+        timeout: The connect and read timeout in seconds.
+        what: What the file is, named in the error messages.
+
+    Returns:
+        The time of the last change, timezone-aware in UTC.
+
+    Raises:
+        ResourceNotFoundError: If the provider answers that the file does not exist (HTTP 404).
+        SourceUnreachableError: If the provider sent no answer.
+        DataRetrievalError: If the request fails, the status is no other 2xx or the answer names no time of change.
+    """
+    try:
+        response = session.head(url, timeout=timeout, allow_redirects=True)
+    except (requests.ConnectionError, requests.Timeout) as e:
+        raise SourceUnreachableError(f"{what} {url} is unreachable: {e}") from e
+    except requests.RequestException as e:
+        raise DataRetrievalError(f"{what} {url} could not be checked: {e}") from e
+    _raise_for_status(response, url, what)
+    header = response.headers.get("Last-Modified")
+    if header is None:
+        raise DataRetrievalError(f"{what} {url} names no time of its last change")
+    # The header is an HTTP date such as "Fri, 13 Nov 2026 17:49:04 GMT", which always stands for UTC
+    try:
+        return parsedate_to_datetime(header).astimezone(UTC)
+    except (TypeError, ValueError) as e:
+        raise DataRetrievalError(f"{what} {url} names an unreadable time of change {header!r}") from e
 
 
 def download_file(session: requests.Session, url: str, target: pathlib.Path, timeout: tuple[float, float], what: str) -> None:

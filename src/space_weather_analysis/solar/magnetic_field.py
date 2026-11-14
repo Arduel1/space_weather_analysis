@@ -1,4 +1,3 @@
-import pathlib
 from datetime import datetime
 
 import astropy.constants as const
@@ -12,6 +11,7 @@ from sunkit_magex.pfss import tracing
 from sunpy.coordinates import sun
 
 from space_weather_analysis.solar.geometry import thinned_line
+from space_weather_analysis.solar.synoptic_maps import Magnetogram
 
 # The PFSS model (potential field source surface) takes the coronal field as free of currents between the photosphere
 # and a sphere, the source surface, beyond which the solar wind has drawn all field lines out radially. Radial grid
@@ -97,6 +97,7 @@ class FieldModel(BaseModel):
             current sheet.
         open_field: Per cell of a coarser grid, the polarity of the open field starting there, 0 where the field is closed.
         reference: The publications of the model and of the software.
+        magnetogram: The instrument whose synoptic magnetogram the model is computed from.
     """
 
     model_config = FROZEN
@@ -109,6 +110,7 @@ class FieldModel(BaseModel):
     source_surface_field: SurfaceMap
     open_field: SurfaceMap
     reference: str
+    magnetogram: Magnetogram
 
 
 def _binned(values: np.ndarray, factor: int) -> np.ndarray:
@@ -178,20 +180,19 @@ def _open_field_map(tracer: tracing.PerformanceTracer, output: pfss.Output) -> S
     return SurfaceMap(longitudes=map_longitudes.tolist(), latitudes=map_latitudes.tolist(), values=polarities.tolist())
 
 
-def compute_field(map_path: pathlib.Path) -> FieldModel:
-    """Computes the PFSS model of the coronal magnetic field from a GONG synoptic magnetogram.
+def compute_field(synoptic: sunpy.map.GenericMap, magnetogram: Magnetogram) -> FieldModel:
+    """Computes the PFSS model of the coronal magnetic field from a synoptic magnetogram.
 
     Args:
-        map_path: The FITS file of the synoptic map.
+        synoptic: The complete synoptic map of the radial field in Carrington coordinates and sine latitude.
+        magnetogram: The instrument the map comes from.
 
     Returns:
         The model with traced field lines and maps.
 
     Raises:
-        OSError: If the map cannot be read.
         ValueError: If the map is no synoptic map the model accepts.
     """
-    synoptic = sunpy.map.Map(map_path)
     # Solves for the potential field between the photosphere and the source surface
     model_input = pfss.Input(synoptic, RADIAL_POINTS, SOURCE_SURFACE_RADIUS)
     output = pfss.pfss(model_input)
@@ -208,4 +209,5 @@ def compute_field(map_path: pathlib.Path) -> FieldModel:
         source_surface_field=_surface_map(np.asarray(output.source_surface_br.data, dtype=float)),
         open_field=open_field,
         reference=PFSS_REFERENCE,
+        magnetogram=magnetogram,
     )

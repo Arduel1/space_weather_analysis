@@ -1,13 +1,13 @@
-# Curated metadata of the PFSS (potential field source surface) models of the coronal magnetic field, computed from
-# the zero-point corrected synoptic magnetograms of the NSF Global Oscillation Network Group (GONG).
+# Curated metadata of the PFSS (potential field source surface) models of the coronal magnetic field, computed from the
+# synoptic magnetograms of GONG or, where GONG does not answer, of SDO/HMI.
 
 [dataset.gong_pfss]
-title = "Coronal magnetic field (PFSS model of GONG synoptic magnetograms)"
-provider = "NSF National Solar Observatory, Global Oscillation Network Group (GONG)"
+title = "Coronal magnetic field (PFSS model of GONG or SDO/HMI synoptic magnetograms)"
+provider = "NSF National Solar Observatory, Global Oscillation Network Group (GONG); NASA SDO/HMI via the Stanford JSOC where GONG does not answer"
 resource_url = "https://gong.nso.edu/data/magmap/"
 
 [dataset.gong_pfss.citation]
-acknowledgement = "This work utilizes data from the U.S. National Science Foundation (NSF) Global Oscillation Network Group (GONG), built and operated by the NSF National Solar Observatory (NSO) Integrated Synoptic Program (NISP). NSO is managed by the Association of Universities for Research in Astronomy, Inc. (AURA), and funded under a cooperative agreement with the NSF. GONG is partially supported by the National Oceanic and Atmospheric Administration (NOAA). The GONG network of instruments is hosted by the Big Bear Solar Observatory, High Altitude Observatory, Learmonth Solar Observatory, Udaipur Solar Observatory, Instituto de Astrofísica de Canarias, and Cerro Tololo Inter-American Observatory."
+acknowledgement = "This work utilizes data from the U.S. National Science Foundation (NSF) Global Oscillation Network Group (GONG), built and operated by the NSF National Solar Observatory (NSO) Integrated Synoptic Program (NISP). NSO is managed by the Association of Universities for Research in Astronomy, Inc. (AURA), and funded under a cooperative agreement with the NSF. GONG is partially supported by the National Oceanic and Atmospheric Administration (NOAA). The GONG network of instruments is hosted by the Big Bear Solar Observatory, High Altitude Observatory, Learmonth Solar Observatory, Udaipur Solar Observatory, Instituto de Astrofísica de Canarias, and Cerro Tololo Inter-American Observatory. HMI data courtesy of NASA/SDO and the HMI science team."
 rules_of_use = "https://nso.edu/data/"
 
 [[dataset.gong_pfss.reference]]
@@ -19,3 +19,13 @@ covers = "NSO data use policy, complete acknowledgement for GONG data"
 url = "https://gong2.nso.edu/oQR/zqs/"
 retrieved = 2026-11-08
 covers = "zero-point corrected synoptic magnetograms, one directory per month and day, maps updated hourly"
+
+[[dataset.gong_pfss.reference]]
+url = "https://jsoc1.stanford.edu/data/hmi/synoptic/"
+retrieved = 2026-11-14
+covers = "HMI synoptic maps: near-real-time map of the running Carrington rotation, polar-filled maps of completed rotations"
+
+[[dataset.gong_pfss.reference]]
+url = "https://sdo.gsfc.nasa.gov/data/rules.php"
+retrieved = 2026-11-14
+covers = "SDO data rules, acknowledgement for HMI data"

@@ -18,10 +18,12 @@ from pipeline_service.pipelines.report import IngestionReport
 from pipeline_service.pipelines.timestamped_files import MEDIA_KEEP, name_times, remove_files_before, timestamped_name
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.clients.gong import GONG_PAGE_URL, download_map, recent_maps
+from space_weather_analysis.clients.hmi import HMI_SYNOPTIC_URL, latest_maps
 from space_weather_analysis.clients.image_sequences import FRAME_FILE_FIELD
 from space_weather_analysis.coverage.repository import CoverageRepository
 from space_weather_analysis.metadata.repository import MetadataRepository
 from space_weather_analysis.solar.magnetic_field import compute_field
+from space_weather_analysis.solar.synoptic_maps import Magnetogram, gong_synoptic_map, hmi_synoptic_map
 from space_weather_analysis.timeseries.documents import TimeSeriesDocument, frame_to_documents, source_identifier
 from space_weather_analysis.timeseries.models import Granularity
 from space_weather_analysis.timeseries.repository import TimeSeriesRepository
@@ -51,10 +53,11 @@ def model_file_name(time: datetime) -> str:
 
 
 class PfssPipeline:
-    """Computes the PFSS models of the coronal magnetic field from the GONG synoptic maps of the last day, one file each.
+    """Computes the PFSS models of the coronal magnetic field from synoptic magnetograms, one file each.
 
-    Each run lists the maps of the last day, computes the models not stored yet, newest first and at most MODELS_PER_RUN,
-    and removes models and maps older than MEDIA_KEEP.
+    Each run lists the GONG maps of the last day and computes the models not stored yet, newest first and at most
+    MODELS_PER_RUN. Without GONG maps, as on hosts the GONG server does not answer, it models the daily updated HMI map
+    instead. Models and maps older than MEDIA_KEEP are removed, except the newest model, which the dashboard shows.
     """
 
     def __init__(
@@ -116,36 +119,78 @@ class PfssPipeline:
         )
 
     def _store_models(self, now: datetime) -> None:
-        """Computes the missing models of the last day, removes the old ones and writes one document per stored model.
+        """Computes the missing models, removes the old ones and writes one document per stored model.
 
         Raises:
-            DataRetrievalError: If no map lies in the last day and no model is stored, or a map cannot be downloaded.
+            SourceUnreachableError: If neither GONG nor JSOC sent an answer.
+            DataRetrievalError: If no map can be found or downloaded.
             OSError: If a map cannot be read or a model file cannot be written.
             ValueError: If a map is no synoptic map the model accepts.
             pymongo.errors.PyMongoError: If the documents cannot be stored.
         """
         directory = self.media_dir / PFSS_DATASET
-        missing = [(url, time) for url, time in recent_maps(self.session, now, MODEL_SPAN) if not (directory / model_file_name(time)).exists()]
-        # Without new maps the stored models still count as success; only no map and no model at all is a gap
-        if not missing and not any(directory.glob(f"*{MODEL_EXTENSION}")):
-            raise DataRetrievalError("No GONG synoptic map in the last day.")
-        # The maps are listed newest first, so a run fills in the newest models before older ones
-        for url, map_time in missing[:MODELS_PER_RUN]:
-            path = directory / model_file_name(map_time)
-            model = compute_field(download_map(self.session, url, self.map_dir))
-            directory.mkdir(parents=True, exist_ok=True)
-            write_text_atomic(path, model.model_dump_json())
-            logger.info("Computed the PFSS model of the GONG map of %s: %d field lines", map_time, len(model.lines))
+        try:
+            gong_maps = recent_maps(self.session, now, MODEL_SPAN)
+        except DataRetrievalError as error:
+            logger.warning("GONG maps not available, the model uses the HMI synoptic map: %s", error)
+            gong_maps = []
+        if gong_maps:
+            self._store_gong_models(directory, gong_maps)
+            source_url = GONG_PAGE_URL
+        else:
+            self._store_hmi_model(directory, now)
+            source_url = HMI_SYNOPTIC_URL
         self._prune(directory, now - MEDIA_KEEP)
         collection = sanitize_collection_name(PFSS_DATASET)
         replace_all_documents(self.timeseries, collection, PFSS_GRANULARITY, self._documents(directory))
         refresh_coverage(self.coverage_repository, PFSS_DATASET, collection)
-        self._save_metadata(collection)
+        self._save_metadata(collection, source_url)
+
+    def _store_gong_models(self, directory: pathlib.Path, gong_maps: list[tuple[str, datetime]]) -> None:
+        """Computes the models of the GONG maps not modelled yet, newest first and at most MODELS_PER_RUN.
+
+        Raises:
+            DataRetrievalError: If a map cannot be downloaded.
+            OSError: If a map cannot be read or a model file cannot be written.
+            ValueError: If a map is no synoptic map the model accepts.
+        """
+        missing = [(url, time) for url, time in gong_maps if not (directory / model_file_name(time)).exists()]
+        # The maps are listed newest first, so a run fills in the newest models before older ones
+        for url, map_time in missing[:MODELS_PER_RUN]:
+            model = compute_field(gong_synoptic_map(download_map(self.session, url, self.map_dir)), Magnetogram.GONG)
+            self._write_model(directory, map_time, model.model_dump_json())
+            logger.info("Computed the PFSS model of the GONG map of %s: %d field lines", map_time, len(model.lines))
+
+    def _store_hmi_model(self, directory: pathlib.Path, now: datetime) -> None:
+        """Computes the model of the newest HMI map unless it is modelled already.
+
+        Raises:
+            SourceUnreachableError: If JSOC sent no answer.
+            DataRetrievalError: If no map can be found or downloaded.
+            OSError: If a map cannot be read or the model file cannot be written.
+            ValueError: If the maps do not share their grid or the model does not accept the map.
+        """
+        current, final, updated = latest_maps(self.session, now, self.map_dir)
+        if (directory / model_file_name(updated)).exists():
+            return
+        model = compute_field(hmi_synoptic_map(current, final, updated), Magnetogram.HMI)
+        self._write_model(directory, updated, model.model_dump_json())
+        logger.info("Computed the PFSS model of the HMI map of %s: %d field lines", updated, len(model.lines))
+
+    @staticmethod
+    def _write_model(directory: pathlib.Path, map_time: datetime, content: str) -> None:
+        """Stores a model file named by the time of its map."""
+        directory.mkdir(parents=True, exist_ok=True)
+        write_text_atomic(directory / model_file_name(map_time), content)
 
     def _prune(self, directory: pathlib.Path, cutoff: datetime) -> None:
-        """Deletes the stored models and downloaded maps older than the cutoff."""
-        remove_files_before(directory, MODEL_EXTENSION, cutoff)
-        for path in self.map_dir.glob("*.fits.gz"):
+        """Deletes the stored models and downloaded maps older than the cutoff, but never the newest model."""
+        model_times = name_times(sorted(path.name for path in directory.glob(f"*{MODEL_EXTENSION}")), MODEL_EXTENSION)
+        # A daily HMI map may be older than the cutoff; its model stays until a newer one replaces it
+        newest = model_times.max().to_pydatetime() if len(model_times) else cutoff
+        remove_files_before(directory, MODEL_EXTENSION, min(cutoff, newest))
+        # GONG maps are gzipped FITS files, HMI maps plain ones
+        for path in [*self.map_dir.glob("*.fits.gz"), *self.map_dir.glob("*.fits")]:
             if datetime.fromtimestamp(path.stat().st_mtime, UTC) < cutoff:
                 path.unlink()
 
@@ -156,6 +201,6 @@ class PfssPipeline:
             pd.DataFrame({FRAME_FILE_FIELD: names}, index=name_times(names, MODEL_EXTENSION)), source_identifier(SourceType.GONG, PFSS_DATASET)
         )
 
-    def _save_metadata(self, collection: str) -> None:
-        """Saves the metadata record of the dataset; a failing save is logged, as the documents stay valid without it."""
-        save_minimal_metadata(self.metadata_repository, PFSS_DATASET, collection, SourceType.GONG, [FRAME_FILE_FIELD], GONG_PAGE_URL)
+    def _save_metadata(self, collection: str, source_url: str) -> None:
+        """Saves the metadata record of the dataset naming the source of this run; a failing save is logged."""
+        save_minimal_metadata(self.metadata_repository, PFSS_DATASET, collection, SourceType.GONG, [FRAME_FILE_FIELD], source_url)

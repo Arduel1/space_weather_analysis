@@ -112,8 +112,8 @@ source_type = "HEK"
 start = 1996-01-01T00:00:00Z
 interval = "PT6H"
 
-# The coronal magnetic field computed with the PFSS model from the newest GONG synoptic map, which GONG updates hourly;
-# each hourly model is kept for a day, so that the field can be played over the day
+# The coronal magnetic field computed with the PFSS model from the newest GONG synoptic map, which GONG updates hourly,
+# or from the daily SDO/HMI map where GONG does not answer; the models of a day are kept, so that the field can be played
 [[feed]]
 name = "gong_pfss"
 datasets = ["gong_pfss"]
