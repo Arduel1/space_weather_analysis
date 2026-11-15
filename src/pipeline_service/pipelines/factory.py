@@ -1,7 +1,6 @@
 import pathlib
 from typing import assert_never
 
-from cdasws import CdasWs
 from pymongo.database import Database
 
 from pipeline_service.chunk_status.repository import ChunkStatusRepository, MongoChunkStatusRepository
@@ -19,6 +18,7 @@ from pipeline_service.pipelines.pfss import PfssPipeline
 from pipeline_service.pipelines.swpc import SwpcPipeline
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
+from space_weather_analysis.clients.cdaweb import new_cdas_session
 from space_weather_analysis.clients.gfz import GfzClient
 from space_weather_analysis.clients.swpc import SwpcClient
 from space_weather_analysis.coverage.repository import CoverageRepository, MongoCoverageRepository
@@ -47,8 +47,7 @@ class PipelineFactory:
         self.metadata_repository: MetadataRepository = MongoMetadataRepository(db)
         self.coverage_repository: CoverageRepository = MongoCoverageRepository(db)
         self.chunk_status: ChunkStatusRepository = MongoChunkStatusRepository(db)
-        # Without response cache, so every run reads the current data
-        self.cdas = CdasWs(disable_cache=True)
+        self.cdas = new_cdas_session()
         self.gfz_client = GfzClient()
         self.swpc_client = SwpcClient()
 

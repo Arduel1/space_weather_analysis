@@ -1,5 +1,6 @@
 import json
 import pathlib
+import threading
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -8,10 +9,11 @@ from pytest_httpserver import HTTPServer
 from werkzeug import Request, Response
 
 from pipeline_service.chunk_status.repository import MongoChunkStatusRepository
-from pipeline_service.jobs.runner import CATALOG_RETRY_DELAY, CATALOG_WAIT_LIMIT, JobRunner
-from pipeline_service.pipelines.base import Pipeline
+from pipeline_service.jobs.runner import CATALOG_RETRY_DELAY, CATALOG_WAIT_LIMIT, JobRunner, LaneBlockedError
+from pipeline_service.pipelines.base import Pipeline, ProgressCallback
 from pipeline_service.pipelines.factory import PipelineFactory
 from pipeline_service.pipelines.gfz import GfzPipeline
+from pipeline_service.pipelines.report import IngestionReport
 from space_weather_analysis.catalog.models import SourceType, TimeRangeDict
 from space_weather_analysis.catalog.repository import MongoCatalogRepository
 from space_weather_analysis.clients.gfz import GfzClient
@@ -224,3 +226,48 @@ def test_run_until_idle_runs_every_due_job_and_returns(db: Database, tmp_path: p
 
     statuses = [job.status if job is not None else None for job in (repository.get(known_id), repository.get(uncatalogued_id))]
     assert statuses == [JobStatus.COMPLETED, JobStatus.FAILED]
+
+
+class BlockingPipeline:
+    """Pipeline whose run blocks until released, like a request that never ends."""
+
+    def __init__(self) -> None:
+        """Starts unreleased."""
+        self.entered = threading.Event()
+        self.released = threading.Event()
+
+    def run(
+        self, datasets: list[str], start_time: datetime | None, end_time: datetime | None, progress_callback: ProgressCallback | None = None
+    ) -> IngestionReport:
+        """Signals that the run started and waits until released."""
+        self.entered.set()
+        self.released.wait(timeout=10)
+        return IngestionReport()
+
+
+@pytest.mark.integration
+def test_stale_job_fails_and_only_a_lane_still_inside_it_stops_the_runner(db: Database, tmp_path: pathlib.Path) -> None:
+    """A stale job outside any lane just ends FAILED; a stale job its lane is still running also raises LaneBlockedError."""
+    repository = MongoJobRepository(db)
+    pipeline = BlockingPipeline()
+    # The clock is advanced by hand past the stale job limit after each claim
+    current_time = [datetime.now(UTC)]
+    runner = JobRunner(db, tmp_path, pipeline_for=lambda source_type: pipeline, clock=lambda: current_time[0])
+    orphan_id = repository.create([INDEX], DAY_ONE, DAY_TWO, source_type=SourceType.GFZ_POTSDAM)
+    repository.claim_next_pending(current_time[0])
+    current_time[0] += timedelta(hours=1)
+
+    runner.fail_stale_jobs()
+
+    blocked_id = repository.create([INDEX], DAY_ONE, DAY_TWO, source_type=SourceType.GFZ_POTSDAM)
+    lane = threading.Thread(target=runner.process_next_job, args=(SourceType.GFZ_POTSDAM,))
+    lane.start()
+    assert pipeline.entered.wait(timeout=10)
+    current_time[0] += timedelta(hours=1)
+    with pytest.raises(LaneBlockedError):
+        runner.fail_stale_jobs()
+    pipeline.released.set()
+    lane.join()
+    statuses = [job.status if job else None for job in (repository.get(orphan_id), repository.get(blocked_id))]
+    # The released lane stores the end of its job, as a late finish does
+    assert statuses == [JobStatus.FAILED, JobStatus.COMPLETED]

@@ -20,6 +20,18 @@ CDAS_ENDPOINT = "https://cdaweb.gsfc.nasa.gov/WS/cdasr/1/dataviews/sp_phys/"
 # CDAS answers HTTP 404 for a time range that holds no data of the requested variables.
 CDAS_NO_DATA_STATUS = HTTPStatus.NOT_FOUND
 
+# Seconds CDAS may stay silent while connecting or answering; cdasws waits without limit by default
+CDAS_TIMEOUT_SECONDS = 120
+
+
+def new_cdas_session() -> CdasWs:
+    """Creates a CDAS web service client with a request timeout and without response cache, so every run reads the current data.
+
+    Returns:
+        The CDAS web service client.
+    """
+    return CdasWs(timeout=CDAS_TIMEOUT_SECONDS, disable_cache=True)
+
 
 class CdawebClient(DataClient[xr.Dataset]):
     """Fetches CDAWeb data from the CDAS web services.
@@ -34,10 +46,10 @@ class CdawebClient(DataClient[xr.Dataset]):
         """Initializes the client.
 
         Args:
-            cdas: The CDAS web service client; a new one without response cache if None.
+            cdas: The CDAS web service client; a new one from new_cdas_session if None.
             variables_for: Names the variables to request for a dataset, or None to request the variables CDAS lists.
         """
-        self.cdas = cdas if cdas is not None else CdasWs(disable_cache=True)
+        self.cdas = cdas if cdas is not None else new_cdas_session()
         self.variables_for = variables_for
         self._listed_variables: dict[str, Sequence[str]] = {}
 

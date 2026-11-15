@@ -1,8 +1,10 @@
 import json
 import os
 import pathlib
+import socket
 import tempfile
-from collections.abc import Callable
+import threading
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import Any, cast
@@ -17,7 +19,7 @@ from pipeline_service.pipelines.hapi import HapiPipeline
 from pipeline_service.pipelines.report import IngestionReport
 from space_weather_analysis.catalog.models import CatalogEntryDict
 from space_weather_analysis.catalog.repository import MongoCatalogRepository
-from space_weather_analysis.clients.hapi import HapiClient
+from space_weather_analysis.clients.hapi import HAPI_TIMEOUT_SECONDS, HapiClient
 from space_weather_analysis.coverage.repository import MongoCoverageRepository
 from space_weather_analysis.metadata.models import DatasetMetadata, MetadataSourceKind
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
@@ -124,15 +126,15 @@ def _add_catalog_entry(db: Database, server_urls: list[str], extra_fields: dict[
     MongoCatalogRepository(db).save({"dataset_id": DATASET_ID, "sources": sources})
 
 
-def _pipeline(db: Database, chunk_unit: TimeBucket | None = TimeBucket.DAY) -> HapiPipeline:
-    """Builds the HAPI pipeline with a client that asks a failing source again without waiting."""
+def _pipeline(db: Database, chunk_unit: TimeBucket | None = TimeBucket.DAY, timeout: float = HAPI_TIMEOUT_SECONDS) -> HapiPipeline:
+    """Builds the HAPI pipeline with a client that asks a failing source again without waiting and waits for answers up to the timeout."""
     return HapiPipeline(
         timeseries=MongoTimeSeriesRepository(db),
         catalog_repository=MongoCatalogRepository(db),
         metadata_repository=MongoMetadataRepository(db),
         coverage_repository=MongoCoverageRepository(db),
         chunk_status=MongoChunkStatusRepository(db),
-        client_factory=partial(HapiClient, retry_backoff_factor=0),
+        client_factory=partial(HapiClient, retry_backoff_factor=0, timeout=timeout),
         chunk_unit=chunk_unit,
     )
 
@@ -312,6 +314,81 @@ def test_hapi_unreachable_sources_leave_remaining_chunks_unrequested(db: Databas
     report = _pipeline(db, chunk_unit=TimeBucket.HOUR).run([DATASET_ID], RUN_START, RUN_START + timedelta(hours=2))
 
     assert [gap.reason.split(":")[0] for gap in report.gaps] == ["SourceUnreachableError", "Not requested, the provider was unreachable"]
+
+
+class StallingHapiServer:
+    """Local HAPI server answering /info with the dataset info, whose answers of one endpoint stop after the headers."""
+
+    def __init__(self) -> None:
+        """Starts listening on a free local port; the /data answers stall until another endpoint is set."""
+        self.stalled_endpoint = "data"
+        self.listener = socket.create_server(("127.0.0.1", 0))
+        self.listener.settimeout(0.1)
+        self.url = f"http://127.0.0.1:{self.listener.getsockname()[1]}/hapi"
+        self.open_connections: list[socket.socket] = []
+        self.stopped = threading.Event()
+        self.thread = threading.Thread(target=self._serve, daemon=True)
+        self.thread.start()
+
+    def _serve(self) -> None:
+        """Answers every connection until stopped; a stalled answer announces a body that never follows."""
+        while not self.stopped.is_set():
+            try:
+                connection, _ = self.listener.accept()
+            except TimeoutError:
+                continue
+            connection.settimeout(5)
+            # The request line reads "GET /hapi/{endpoint}?{query} HTTP/1.1"
+            path = connection.recv(65536).decode().split(" ")[1]
+            endpoint = path.split("?")[0].rsplit("/", 1)[-1]
+            if endpoint == self.stalled_endpoint:
+                connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n")
+                # Kept open, so the client waits for the announced body
+                self.open_connections.append(connection)
+                continue
+            body = json.dumps(XRAY_INFO).encode()
+            connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s" % (len(body), body))
+            connection.close()
+
+    def stop(self) -> None:
+        """Stops answering and closes every connection."""
+        self.stopped.set()
+        self.thread.join()
+        for connection in self.open_connections:
+            connection.close()
+        self.listener.close()
+
+
+@pytest.fixture
+def stalling_server() -> Iterator[StallingHapiServer]:
+    """Local HAPI server whose answers of one endpoint stop after the headers."""
+    server = StallingHapiServer()
+    yield server
+    server.stop()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("stalled_endpoint", "expected_error"),
+    [
+        pytest.param("info", "DataRetrievalError", id="info"),
+        pytest.param("data", "SourceUnreachableError", id="data"),
+    ],
+)
+def test_hapi_answer_that_stops_arriving_leaves_a_gap_after_the_timeout(
+    db: Database, stalling_server: StallingHapiServer, stalled_endpoint: str, expected_error: str
+) -> None:
+    """An answer whose body stops after the headers leaves the chunk as gap instead of waiting forever or counting as no data.
+
+    hapiclient reports an /info body it could not read only as unreadable JSON, so that case is a failed request
+    rather than an unreachable provider.
+    """
+    stalling_server.stalled_endpoint = stalled_endpoint
+    _add_catalog_entry(db, [stalling_server.url])
+
+    report = _pipeline(db, timeout=0.2).run([DATASET_ID], RUN_START, RUN_END)
+
+    assert [gap.reason.split(":")[0] for gap in report.gaps] == [expected_error]
 
 
 @pytest.mark.integration

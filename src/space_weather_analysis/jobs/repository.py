@@ -1,14 +1,18 @@
+import logging
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from bson.objectid import ObjectId
+from pydantic import ValidationError
 from pymongo import ASCENDING, ReturnDocument
 from pymongo.database import Database
 
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.jobs.models import ChunkGap, FeedJobSummary, FinalJobStatus, Job, JobParameters, JobStatus
+
+logger = logging.getLogger(__name__)
 
 
 class JobRepository(ABC):
@@ -76,6 +80,8 @@ class JobRepository(ABC):
     def claim_next_pending(self, now: datetime | None = None, source_types: Sequence[SourceType | None] | None = None) -> Job | None:
         """Atomically marks the oldest pending job whose retry time has come as running, so no other worker takes it.
 
+        A job whose stored form cannot be read is ended as FAILED and the next due job is claimed instead.
+
         Args:
             now: The current time; the system time if None.
             source_types: The source types of the jobs to consider, None standing for jobs without source type; every job if None.
@@ -110,6 +116,18 @@ class JobRepository(ABC):
 
         Returns:
             The number of requeued jobs.
+        """
+
+    @abstractmethod
+    def fail_stale_running(self, now: datetime, limit: timedelta) -> list[Job]:
+        """Ends every running job as FAILED that has neither started nor reported progress within a time limit.
+
+        Args:
+            now: The current time.
+            limit: The longest time a running job may go without starting or reporting progress.
+
+        Returns:
+            The failed jobs as they were before.
         """
 
     @abstractmethod
@@ -264,6 +282,8 @@ class MongoJobRepository(JobRepository):
     def claim_next_pending(self, now: datetime | None = None, source_types: Sequence[SourceType | None] | None = None) -> Job | None:
         """Atomically marks the oldest pending job whose retry time has come as running, so no other worker takes it.
 
+        A job document that does not match the job schema is ended as FAILED and the next due job is claimed instead.
+
         Args:
             now: The current time; the system time if None.
             source_types: The source types of the jobs to consider, None standing for jobs without source type; every job if None.
@@ -277,14 +297,34 @@ class MongoJobRepository(JobRepository):
         if source_types is not None:
             # None in $in also matches documents without the field
             due["source_type"] = {"$in": list(source_types)}
-        # ObjectIds grow with their creation time, so the smallest `_id` is the oldest job
-        document = self.collection.find_one_and_update(
-            due,
-            {"$set": {"status": JobStatus.RUNNING, "started_at": claimed_at}},
-            sort=[("_id", ASCENDING)],
-            return_document=ReturnDocument.AFTER,
-        )
-        return Job.from_document(document) if document else None
+        while True:
+            # ObjectIds grow with their creation time, so the smallest `_id` is the oldest job
+            document = self.collection.find_one_and_update(
+                due,
+                {"$set": {"status": JobStatus.RUNNING, "started_at": claimed_at}},
+                sort=[("_id", ASCENDING)],
+                return_document=ReturnDocument.AFTER,
+            )
+            if document is None:
+                return None
+            try:
+                return Job.from_document(document)
+            except ValidationError as error:
+                self._fail_unreadable(document, error)
+
+    def _fail_unreadable(self, document: Mapping[str, Any], error: ValidationError) -> None:
+        """Ends a claimed job document that does not match the job schema as FAILED, naming the fields that do not match.
+
+        Args:
+            document: The claimed job document.
+            error: The error of reading the document as a job.
+        """
+        logger.warning("Job %s cannot be read and is failed: %s", document["_id"], error)
+        invalid_fields = [".".join(map(str, detail["loc"])) for detail in error.errors()]
+        message = f"The job document does not match the job schema in: {', '.join(invalid_fields)}"
+        # The stored `_id` of a document written by hand need not be an ObjectId, so it is matched as stored
+        update = {"status": JobStatus.FAILED, "completed_at": datetime.now(UTC), "error": message}
+        self.collection.update_one({"_id": document["_id"]}, {"$set": update})
 
     def requeue(self, job_id: str, retry_at: datetime, message: str) -> None:
         """Puts a claimed job back into the queue until its retry time.
@@ -322,6 +362,31 @@ class MongoJobRepository(JobRepository):
         """
         update = {"$set": {"status": JobStatus.PENDING, "message": "Requeued after an interrupted run"}, "$unset": {"started_at": ""}}
         return self.collection.update_many({"status": JobStatus.RUNNING}, update).modified_count
+
+    def fail_stale_running(self, now: datetime, limit: timedelta) -> list[Job]:
+        """Ends every running job as FAILED that has neither started nor reported progress within a time limit.
+
+        Args:
+            now: The current time, also stored as the end of the failed jobs.
+            limit: The longest time a running job may go without starting or reporting progress.
+
+        Returns:
+            The failed jobs as they were before.
+        """
+        cutoff = now - limit
+        # A job claimed again after a requeue keeps the progress time of its earlier run, so both times must lie before the cutoff
+        stale = {
+            "status": JobStatus.RUNNING,
+            "started_at": {"$lt": cutoff},
+            "$or": [{"updated_at": {"$exists": False}}, {"updated_at": {"$lt": cutoff}}],
+        }
+        update = {"$set": {"status": JobStatus.FAILED, "completed_at": now, "error": f"No progress for {limit}"}}
+
+        def fail_if_still_stale(document: Mapping[str, Any]) -> bool:
+            """Fails a found job unless it reported progress since the search, and tells whether it failed."""
+            return self.collection.update_one({"_id": document["_id"], **stale}, update).modified_count == 1
+
+        return [Job.from_document(document) for document in self.collection.find(stale) if fail_if_still_stale(document)]
 
     def update_progress(self, job_id: str, progress: float, message: str) -> None:
         """Records the progress of a running job.

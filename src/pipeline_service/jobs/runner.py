@@ -29,6 +29,14 @@ CATALOG_WAIT_LIMIT = timedelta(hours=1)
 # The wait before a job for a dataset not yet in the catalog is tried again.
 CATALOG_RETRY_DELAY = timedelta(minutes=1)
 
+# Every pipeline reports progress after each chunk or dataset, which takes minutes at most, so a job silent for this
+# long hangs.
+STALE_JOB_LIMIT = timedelta(minutes=30)
+
+
+class LaneBlockedError(RuntimeError):
+    """A lane thread is still inside a job without progress; a thread cannot be stopped from outside, only the process can end."""
+
 
 class JobRunner:
     """Runs the pipelines for the download jobs stored in MongoDB by the frontend and the startup configuration.
@@ -40,10 +48,12 @@ class JobRunner:
     A job ends COMPLETED when at least one of its chunks was ingested or none needed ingesting; the chunks
     that failed are stored with it as missing chunks. It ends FAILED for an invalid request, when every
     chunk failed, or on an unexpected error. A job naming a dataset the catalog does not hold yet waits in the
-    queue and is tried again until the catalog wait limit has passed since its creation.
+    queue and is tried again until the catalog wait limit has passed since its creation. A running job without
+    progress for the stale job limit ends FAILED, so its feed gets a new job.
     """
 
     POLLING_INTERVAL_SECONDS = 10
+    WATCHDOG_INTERVAL_SECONDS = 60
 
     def __init__(
         self,
@@ -52,6 +62,7 @@ class JobRunner:
         pipeline_for: Callable[[SourceType], Pipeline] | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         catalog_wait_limit: timedelta = CATALOG_WAIT_LIMIT,
+        stale_job_limit: timedelta = STALE_JOB_LIMIT,
     ) -> None:
         """Initializes the job runner.
 
@@ -61,22 +72,53 @@ class JobRunner:
             pipeline_for: Builds the pipeline of a source type; the PipelineFactory with its defaults if None.
             clock: Returns the current time in UTC.
             catalog_wait_limit: How long a job naming a dataset the catalog does not hold waits before it fails.
+            stale_job_limit: How long a running job may go without progress before it fails.
         """
         self.db = db
         self.clock = clock
         self.catalog_wait_limit = catalog_wait_limit
+        self.stale_job_limit = stale_job_limit
+        # The ID of the job each lane is running; the lanes write it, the watchdog reads it
+        self._running_jobs: dict[SourceType, str] = {}
+        self._running_jobs_lock = threading.Lock()
         self.job_repository: JobRepository = MongoJobRepository(db)
         self.catalog_repository: CatalogRepository = MongoCatalogRepository(db)
         self.pipeline_for = pipeline_for if pipeline_for is not None else PipelineFactory(self.db, data_dir).get_pipeline
 
     def run_daemon(self) -> None:
-        """Runs one lane thread per source type and assigns jobs without source type in this thread, until the process ends."""
+        """Runs one lane thread per source type and a thread assigning jobs without source type, and watches for stale jobs here.
+
+        Raises:
+            LaneBlockedError: If a lane is still inside a job that failed for lack of progress.
+        """
         logger.info("Job runner daemon started.")
+        # Daemon threads end with the process, as the lanes never return
         for source_type in SourceType:
-            # Daemon threads end with the process, as the lanes never return
             lane = threading.Thread(target=self._poll, args=(partial(self.process_next_job, source_type),), name=f"lane-{source_type}", daemon=True)
             lane.start()
-        self._poll(self.dispatch_next_job)
+        threading.Thread(target=self._poll, args=(self.dispatch_next_job,), name="dispatcher", daemon=True).start()
+        while True:
+            time.sleep(self.WATCHDOG_INTERVAL_SECONDS)
+            self.fail_stale_jobs()
+
+    def fail_stale_jobs(self) -> None:
+        """Fails the running jobs without progress for the stale job limit, so their feeds get new jobs.
+
+        Raises:
+            LaneBlockedError: If a lane of this runner is still inside one of the failed jobs.
+        """
+        try:
+            failed_jobs = self.job_repository.fail_stale_running(self.clock(), self.stale_job_limit)
+        except PyMongoError:
+            logger.exception("Checking for jobs without progress failed on a database error")
+            return
+        for job in failed_jobs:
+            logger.error("Job %s of feed %s failed: no progress for %s", job.id, job.feed, self.stale_job_limit)
+        failed_ids = {job.id for job in failed_jobs}
+        with self._running_jobs_lock:
+            blocked_lanes = [source_type for source_type, job_id in self._running_jobs.items() if job_id in failed_ids]
+        if blocked_lanes:
+            raise LaneBlockedError(f"The lanes {blocked_lanes} are still inside jobs without progress for {self.stale_job_limit}.")
 
     def run_until_idle(self) -> None:
         """Runs the due jobs one after the other, handing out jobs without source type first, until no job is due.
@@ -100,7 +142,11 @@ class JobRunner:
             try:
                 took_job = take_next_job()
             except PyMongoError:
-                logger.exception("Claiming or finishing a job failed")
+                logger.exception("Claiming or finishing a job failed on a database error")
+                took_job = False
+            except Exception:
+                # A lane that ends stops its source type for good while the process keeps running; the traceback shows the cause
+                logger.exception("Unexpected error while claiming or finishing a job, a programming error")
                 took_job = False
             if not took_job:
                 time.sleep(self.POLLING_INTERVAL_SECONDS)
@@ -120,7 +166,13 @@ class JobRunner:
         job = self.job_repository.claim_next_pending(self.clock(), source_types=[source_type])
         if job is None:
             return False
-        self._process_job(job, source_type)
+        with self._running_jobs_lock:
+            self._running_jobs[source_type] = job.id
+        try:
+            self._process_job(job, source_type)
+        finally:
+            with self._running_jobs_lock:
+                del self._running_jobs[source_type]
         return True
 
     def dispatch_next_job(self) -> bool:

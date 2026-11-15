@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pymongo.database import Database
@@ -60,6 +60,42 @@ def test_claim_next_pending_takes_only_jobs_of_the_given_source_types(db: Databa
     claimed_untyped = repository.claim_next_pending(source_types=[None])
 
     assert (claimed_hapi and claimed_hapi.id, claimed_gfz, claimed_untyped and claimed_untyped.id) == (hapi_id, None, untyped_id)
+
+
+@pytest.mark.integration
+def test_claim_next_pending_fails_an_unreadable_job_and_takes_the_next(db: Database) -> None:
+    """A pending job document without creation time ends FAILED naming the field, and the claim returns the next due job."""
+    repository = MongoJobRepository(db)
+    db[MongoJobRepository.COLLECTION].insert_one({"_id": "written-by-hand", "status": "PENDING", "parameters": {"datasets": ["synthetic/one"]}})
+    valid_id = repository.create(["synthetic/two"], START, END)
+
+    claimed = repository.claim_next_pending()
+
+    unreadable = db[MongoJobRepository.COLLECTION].find_one({"_id": "written-by-hand"})
+    assert claimed is not None and claimed.id == valid_id
+    assert unreadable is not None
+    assert (unreadable["status"], unreadable["error"]) == ("FAILED", "The job document does not match the job schema in: created_at")
+    assert unreadable["completed_at"] is not None
+
+
+@pytest.mark.integration
+def test_fail_stale_running_fails_only_jobs_silent_beyond_the_limit(db: Database) -> None:
+    """A running job started before the limit ends FAILED; one started within it or one reporting progress keeps running."""
+    repository = MongoJobRepository(db)
+    now = datetime.now(UTC)
+    limit = timedelta(minutes=30)
+    silent_id, recent_id, progressing_id = (repository.create([f"synthetic/{name}"], START, END) for name in ("silent", "recent", "progressing"))
+    for started_ago in (timedelta(minutes=31), timedelta(minutes=29), timedelta(minutes=31)):
+        repository.claim_next_pending(now - started_ago)
+    repository.update_progress(progressing_id, 0.5, "chunk 1/2 done")
+
+    failed = repository.fail_stale_running(now, limit)
+
+    statuses = [job.status if job else None for job in (repository.get(silent_id), repository.get(recent_id), repository.get(progressing_id))]
+    stored_silent = repository.get(silent_id)
+    assert [job.id for job in failed] == [silent_id]
+    assert statuses == [JobStatus.FAILED, JobStatus.RUNNING, JobStatus.RUNNING]
+    assert stored_silent is not None and stored_silent.error == "No progress for 0:30:00"
 
 
 @pytest.mark.integration

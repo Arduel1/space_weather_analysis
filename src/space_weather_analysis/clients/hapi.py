@@ -1,12 +1,15 @@
 import logging
+import socket
 import warnings
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
 from datetime import datetime
 from types import MappingProxyType
 from typing import Any, ClassVar
 
 import numpy as np
 import requests
+import urllib3
 from hapiclient import hapi
 from hapiclient.util import HAPIError
 
@@ -24,6 +27,27 @@ warnings.filterwarnings("ignore", message="The argument 'infer_datetime_format' 
 
 # The data and the /info response of one HAPI data request, as hapiclient returns them.
 HapiData = tuple[np.ndarray, dict[str, Any]]
+
+# Seconds a HAPI server may stay silent while connecting or answering
+HAPI_TIMEOUT_SECONDS = 120
+
+
+@contextmanager
+def _socket_timeout(seconds: float) -> Generator[None]:
+    """Sets the default timeout of new sockets for the duration of a block and restores the previous one afterwards.
+
+    hapiclient takes no timeout and its urllib3 connections fall back to this default, which otherwise waits without
+    limit. requests and pymongo set their timeouts on every socket themselves, so other threads are not affected.
+
+    Args:
+        seconds: The timeout of the sockets created within the block.
+    """
+    previous = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(seconds)
+    try:
+        yield
+    finally:
+        socket.setdefaulttimeout(previous)
 
 
 class HapiClient(DataClient[HapiData]):
@@ -45,19 +69,23 @@ class HapiClient(DataClient[HapiData]):
     HAPICLIENT_FAILURE_HINT = "hapi-server.org/servers"
     # Starts of the messages hapiclient raises when a server sent no answer: connection failed, refused or timed out
     HAPICLIENT_UNREACHABLE_PREFIXES = ("Connection error for", "Connection timeout for", "Failed to connect to", "Read timeout for")
+    # Starts of the messages hapiclient raises when a response could not be read, also when its body stopped arriving
+    HAPICLIENT_UNREADABLE_PREFIXES = ("Could not parse JSON from", "Malformed response?")
 
     # An empty parameter list makes the server deliver every parameter of the dataset.
     ALL_PARAMETERS = ""
 
-    def __init__(self, catalog_map: CatalogMap | None = None, retry_backoff_factor: float = 1.0) -> None:
+    def __init__(self, catalog_map: CatalogMap | None = None, retry_backoff_factor: float = 1.0, timeout: float = HAPI_TIMEOUT_SECONDS) -> None:
         """Initializes the client with the HAPI sources it may request data from.
 
         Args:
             catalog_map: The HAPI sources of each dataset, keyed by dataset ID; None for a client without sources.
             retry_backoff_factor: The wait in seconds before asking a transiently failing source again, doubled for every further try.
+            timeout: The seconds a server may stay silent while connecting or answering before it counts as unreachable.
         """
         self.catalog_map: CatalogMap = catalog_map if catalog_map is not None else {}
         self.retry_backoff_factor = retry_backoff_factor
+        self.timeout = timeout
 
     def fetch(self, dataset_id: str, start: datetime, stop: datetime) -> FetchResult[HapiData]:
         """Fetches every parameter of a dataset for a time range from the first catalog source that has data.
@@ -165,14 +193,18 @@ class HapiClient(DataClient[HapiData]):
         logger.info("HAPI request: %s [%s -> %s] at %s", dataset_id, start_text, stop_text, server_url)
 
         try:
-            data, meta = hapi(server_url, dataset_id, self.ALL_PARAMETERS, start_text, stop_text, **self.HAPI_OPTIONS)
+            with _socket_timeout(self.timeout):
+                data, meta = hapi(server_url, dataset_id, self.ALL_PARAMETERS, start_text, stop_text, **self.HAPI_OPTIONS)
         except HAPIError as error:
             self._raise_if_transient(error, server_url, dataset_id)
             # Servers also report that no data exists with a non-200 HTTP status
             logger.info("Server %s has no data for %s [%s -> %s]: %s", server_url, dataset_id, start_text, stop_text, error)
             return FetchResult(None, server_url)
-        except (requests.ConnectionError, requests.Timeout) as error:
+        # hapiclient reads the response body outside its own error handling, so a body that stops arriving surfaces as urllib3 error
+        except (requests.ConnectionError, requests.Timeout, urllib3.exceptions.TimeoutError) as error:
             raise SourceUnreachableError(f"{server_url} is unreachable for {dataset_id}: {error}") from error
+        except urllib3.exceptions.HTTPError as error:
+            raise DataRetrievalError(f"Request to {server_url} for {dataset_id} failed: {error}") from error
 
         if data is None or len(data) == 0:
             logger.info("Server %s returned no data for %s [%s -> %s].", server_url, dataset_id, start_text, stop_text)
@@ -190,9 +222,9 @@ class HapiClient(DataClient[HapiData]):
 
         Raises:
             SourceUnreachableError: If the error says that the server sent no answer.
-            DataRetrievalError: If the error carries the hint hapiclient adds to its own failures.
+            DataRetrievalError: If the error says that a response could not be read, or carries the hint hapiclient adds to its own failures.
         """
         if str(error).startswith(self.HAPICLIENT_UNREACHABLE_PREFIXES):
             raise SourceUnreachableError(f"{server_url} is unreachable for {dataset_id}: {error}") from error
-        if self.HAPICLIENT_FAILURE_HINT in str(error):
+        if str(error).startswith(self.HAPICLIENT_UNREADABLE_PREFIXES) or self.HAPICLIENT_FAILURE_HINT in str(error):
             raise DataRetrievalError(f"Request to {server_url} for {dataset_id} failed: {error}") from error
