@@ -174,10 +174,14 @@ def _open_field_map(tracer: tracing.PerformanceTracer, output: pfss.Output) -> S
     # The cell centres of the grid
     map_latitudes = np.arange(-90 + OPEN_MAP_STEP / 2, 90, OPEN_MAP_STEP)
     map_longitudes = np.arange(OPEN_MAP_STEP / 2, 360, OPEN_MAP_STEP)
-    traced = tracer.trace(_seeds(map_latitudes, map_longitudes, OPEN_MAP_RADIUS, output.coordinate_frame), output)
-    # The seeds run longitude fastest, so the polarities fold into one row per latitude; a closed line has polarity 0
-    polarities = np.asarray(traced.polarities, dtype=float).reshape(len(map_latitudes), len(map_longitudes))
-    return SurfaceMap(longitudes=map_longitudes.tolist(), latitudes=map_latitudes.tolist(), values=polarities.tolist())
+    # One trace per latitude row: the tracer keeps TRACER_STEPS points in memory for every seed of a trace, several
+    # gigabytes for all cells at once
+    rows = []
+    for latitude in map_latitudes:
+        traced = tracer.trace(_seeds(np.array([latitude]), map_longitudes, OPEN_MAP_RADIUS, output.coordinate_frame), output)
+        # A closed line has polarity 0
+        rows.append(np.asarray(traced.polarities, dtype=float))
+    return SurfaceMap(longitudes=map_longitudes.tolist(), latitudes=map_latitudes.tolist(), values=np.vstack(rows).tolist())
 
 
 def compute_field(synoptic: sunpy.map.GenericMap, magnetogram: Magnetogram) -> FieldModel:
