@@ -9,7 +9,7 @@ services:
   # Long-running background process for all recurring metadata requests, paced per provider host
   metadata-worker:
     build: .
-    restart: unless-stopped
+    restart: always
     depends_on:
       mongo:
         condition: service_healthy
@@ -18,13 +18,18 @@ services:
     volumes:
       - ./config:/app/config:ro # Curated metadata, laid over every metadata record the worker saves
     command: ["python", "-m", "catalog_collector.metadata_worker"]
+    healthcheck:
+      # The worker touches the file before each round, and a round runs at most one task
+      test: ["CMD-SHELL", "test -n \"$$(find /tmp/heartbeat -mmin -5)\""]
+      interval: 1m
+      start_period: 2m
     logging: *logging
     networks:
       - space-weather-net
 
   pipeline-service:
     build: .
-    restart: on-failure
+    restart: always
     # Peak about 2.4 GB while the coronal magnetic field model is computed
     mem_limit: 3g
     depends_on:
@@ -36,13 +41,18 @@ services:
       - ./data:/app/data # Persist downloads
       - ./config:/app/config:ro # Feed file and curated metadata, read on every start
     command: ["python", "-m", "pipeline_service.main"]
+    healthcheck:
+      # The watchdog touches the file every minute
+      test: ["CMD-SHELL", "test -n \"$$(find /tmp/heartbeat -mmin -5)\""]
+      interval: 1m
+      start_period: 2m
     logging: *logging
     networks:
       - space-weather-net
 
   frontend:
     build: .
-    restart: on-failure
+    restart: always
     depends_on:
       pipeline-service:
         condition: service_started
@@ -58,6 +68,10 @@ services:
         "src/streamlit_app/main.py",
         "--server.address=0.0.0.0",
       ]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=5)"]
+      interval: 1m
+      start_period: 1m
     logging: *logging
     networks:
       - space-weather-net
@@ -65,7 +79,7 @@ services:
   # Web dashboard, the same site as the public demo: writes the dashboard documents every minute and serves them
   dashboard:
     build: .
-    restart: unless-stopped
+    restart: always
     depends_on:
       mongo:
         condition: service_healthy
@@ -82,12 +96,17 @@ services:
       - SPASE_DICTIONARY_CACHE_PATH=/tmp/spase_dictionary.json
       - SPASE_RESOURCE_CACHE_PATH=/tmp/spase_resources.json
     command: ["python", "-m", "site_export.main", "--web", "web", "--output", "/tmp/site", "--serve", "8000"]
+    healthcheck:
+      # Served only after the first write of the documents
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/data/dashboard.json', timeout=5)"]
+      interval: 1m
+      start_period: 5m
     logging: *logging
     networks:
       - space-weather-net
 
   mongo:
-    image: mongo
+    image: mongo:9.0
     restart: always
     ports:
       # Reachable only from this host, for tools running outside Docker
@@ -110,7 +129,7 @@ services:
       - space-weather-net
 
   mongo-express:
-    image: mongo-express
+    image: mongo-express:1.0.2
     restart: always
     ports:
       # Reachable only from this host, as it logs in with the root account of the database

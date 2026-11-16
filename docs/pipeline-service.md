@@ -8,7 +8,7 @@ The pipeline service fetches the data of the project from its providers and stor
 
 The threads share nothing but the `jobs` collection. There is one lane for each source type: `HAPI`, `CDAWEB`, `GFZ_POTSDAM`, `LOCAL`, `SWPC`, `IMAGES`, `DONKI`, `HEK`, `GONG`, `EPHEMERIS` and `OVATION`. The lanes run in parallel, while each provider gets at most one request at a time, and a provider that does not answer holds up only its own lane.
 
-The main thread starts the other threads and then becomes the watchdog. A thread stuck in a request cannot be stopped from outside, so the watchdog ends the whole process when a lane is still inside a job it failed, and Docker Compose starts the service again (`restart: on-failure`).
+The main thread starts the other threads and then becomes the watchdog. A thread stuck in a request cannot be stopped from outside, so the watchdog ends the whole process when a lane is still inside a job it failed, and Docker Compose starts the service again (`restart: always`).
 
 ## The job queue
 

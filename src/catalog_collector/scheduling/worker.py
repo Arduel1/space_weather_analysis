@@ -11,6 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from catalog_collector.scheduling.models import MetadataTask, TaskKind
 from catalog_collector.scheduling.repository import MetadataTaskRepository
 from space_weather_analysis.util.error_handling import DataProcessingError, DataRetrievalError
+from space_weather_analysis.util.process import beat
 
 logger = logging.getLogger(__name__)
 
@@ -86,13 +87,14 @@ class MetadataWorker:
         self._next_plan_at: datetime | None = None
 
     def run_forever(self, sleep: Callable[[float], None] = time.sleep) -> None:
-        """Runs due tasks until the process ends, sleeping whenever none can run.
+        """Runs due tasks until the process ends, sleeping whenever none can run, and touches the heartbeat file before each round.
 
         Args:
             sleep: Waits the given number of seconds.
         """
         logger.info("Metadata worker started with kinds %s.", sorted(self.kinds))
         while True:
+            beat()
             if not self.run_once():
                 sleep(self.settings.idle_sleep_seconds)
 

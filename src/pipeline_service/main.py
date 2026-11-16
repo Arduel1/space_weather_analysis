@@ -19,6 +19,7 @@ from space_weather_analysis.config.errors import format_settings_error
 from space_weather_analysis.database.connection import connect_from_environment
 from space_weather_analysis.jobs.repository import JobRepository, MongoJobRepository
 from space_weather_analysis.logging.config import setup_logging
+from space_weather_analysis.util.process import stop_on_termination
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +101,7 @@ def _uncatalogued(catalog_repository: CatalogRepository, dataset_ids: list[str])
 def main() -> None:
     """Saves the missing static catalog items, then queues the feed jobs and runs them in their intervals, or once with PIPELINE_RUN_ONCE."""
     setup_logging(service_name="PipelineService")
+    stop_on_termination()
 
     try:
         settings = PipelineSettings()

@@ -9,7 +9,7 @@ from testcontainers.community.mongodb import MongoDbContainer
 from space_weather_analysis.config.mongo import MongoSettings
 
 # Same image as the 'mongo' service in docker-compose.yml.
-MONGO_IMAGE = "mongo"
+MONGO_IMAGE = "mongo:9.0"
 
 # Passed explicitly so the container ignores MONGO_INITDB_* from the environment.
 CONTAINER_USER = "test"

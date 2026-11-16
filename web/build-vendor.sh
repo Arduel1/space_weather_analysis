@@ -66,7 +66,9 @@ trap 'rm -f "$download_file"' EXIT
 download "$NATURAL_EARTH_URL" "$download_file" || fail "download of $NATURAL_EARTH_URL failed"
 echo "$NATURAL_EARTH_SHA256  $download_file" | sha256sum -c - >/dev/null 2>&1 \
     || fail "SHA-256 of $NATURAL_EARTH_URL differs from $NATURAL_EARTH_SHA256"
+# mktemp creates the file readable only by its owner, so the copy gets the mode of the other vendor files
 cp "$download_file" "$VENDOR_DIR/naturalearth/$NATURAL_EARTH_FILE"
+chmod 644 "$VENDOR_DIR/naturalearth/$NATURAL_EARTH_FILE"
 
 cat > "$VENDOR_DIR/naturalearth/LICENSE" <<EOF
 Natural Earth $NATURAL_EARTH_VERSION, $NATURAL_EARTH_FILE, from https://github.com/nvkelso/natural-earth-vector

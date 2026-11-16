@@ -21,6 +21,7 @@ from space_weather_analysis.logging.config import setup_logging
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
 from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository
 from space_weather_analysis.util.atomic_files import write_text_atomic
+from space_weather_analysis.util.process import stop_on_termination
 from space_weather_analysis.util.time_utils import parse_iso_duration
 
 logger = logging.getLogger(__name__)
@@ -180,6 +181,7 @@ def main(argv: list[str] | None = None) -> None:
         count = export_documents(reader, arguments.dashboard_dir, arguments.feeds_file, data_dir, arguments.media)
         logger.info("Wrote the layout and %d panel documents to %s", count, data_dir)
         if arguments.serve is not None:
+            stop_on_termination()
             _serve(arguments.output, arguments.serve)
             _rewrite_every(reader, arguments.dashboard_dir, arguments.feeds_file, data_dir, arguments.media, interval)
     except KeyboardInterrupt:

@@ -377,7 +377,7 @@ The full stack runs in Docker. uv and Node.js are only required for local develo
    | `pipeline-service` | Ingestion of feeds and fetch jobs | (no public port) |
    | `metadata-worker` | Catalog and metadata maintenance | (no public port) |
 
-   Only the dashboard is reachable from other devices in the network; the other ports are bound to this host. The published ports can be changed in `.env` (see `example.env`).
+   Only the dashboard is reachable from other devices in the network; the other ports are bound to this host. The published ports can be changed in `.env` (see `example.env`). The services run as the user with uid 1000, which must be able to write to `data/`; on a host whose user has another uid, run `sudo chown -R 1000 data` once. `docker compose ps` shows whether each service is healthy.
 
 4. Open the dashboard at <http://localhost:8502>. On a fresh database the metadata worker needs a few minutes to build the catalog; feeds whose datasets are not catalogued yet wait for it. The pipeline service downloads the local data files into `data/` itself.
 

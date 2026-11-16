@@ -16,6 +16,7 @@ from space_weather_analysis.catalog.repository import MongoCatalogRepository
 from space_weather_analysis.config.errors import format_settings_error
 from space_weather_analysis.database.connection import connect_from_environment
 from space_weather_analysis.logging.config import setup_logging
+from space_weather_analysis.util.process import stop_on_termination
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ def main() -> None:
     are retried and never end the process.
     """
     setup_logging(service_name="MetadataWorker")
+    stop_on_termination()
 
     try:
         worker_settings = WorkerSettings()
@@ -52,6 +54,8 @@ def main() -> None:
     ]
     try:
         MetadataWorker(MongoMetadataTaskRepository(db), kinds, worker_settings).run_forever()
+    except KeyboardInterrupt:
+        logger.info("Metadata worker stopped.")
     finally:
         connection.close()
 

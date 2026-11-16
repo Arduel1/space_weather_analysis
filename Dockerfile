@@ -24,6 +24,10 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# The services run as this user; uid 1000 is the first user of most Linux hosts, so files written into the mounted
+# data directory belong to that user on the host
+RUN useradd --uid 1000 --create-home app
+
 # Install the locked runtime dependencies into /app/.venv; this layer is rebuilt only when the lockfile or project metadata change.
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
@@ -32,13 +36,18 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-install-project
 
 COPY src ./src
-# Only the HAPI server list; the other local data files are downloaded at runtime into the mounted data directory
+# Only the HAPI server list; the other local data files are downloaded at runtime into the mounted data directory.
+# The directory belongs to the service user, as services without that mount keep their caches in it.
+RUN install -d -o app -g app ./data
 COPY data/hapi_config ./data/hapi_config
 COPY config ./config
 COPY web ./web
 COPY --from=vendor /web/vendor ./web/vendor
 
 ENV PATH="/app/.venv/bin:$PATH"
+
+# Code and dependencies stay owned by root, so the services can read but not change them
+USER app
 
 # Every Compose service sets its own command; the default starts the Streamlit dashboard.
 EXPOSE 8501

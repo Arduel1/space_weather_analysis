@@ -17,6 +17,7 @@ from space_weather_analysis.catalog.repository import CatalogRepository, MongoCa
 from space_weather_analysis.jobs.models import Job, JobStatus
 from space_weather_analysis.jobs.repository import JobRepository, MongoJobRepository
 from space_weather_analysis.util.error_handling import DatasetNotCataloguedError
+from space_weather_analysis.util.process import beat
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,8 @@ class JobRunner:
     def run_daemon(self) -> None:
         """Runs one lane thread per source type and a thread assigning jobs without source type, and watches for stale jobs here.
 
+        The watchdog touches the heartbeat file after every check.
+
         Raises:
             LaneBlockedError: If a lane is still inside a job that failed for lack of progress.
         """
@@ -100,6 +103,7 @@ class JobRunner:
         while True:
             time.sleep(self.WATCHDOG_INTERVAL_SECONDS)
             self.fail_stale_jobs()
+            beat()
 
     def fail_stale_jobs(self) -> None:
         """Fails the running jobs without progress for the stale job limit, so their feeds get new jobs.
