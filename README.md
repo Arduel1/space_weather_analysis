@@ -45,12 +45,12 @@ The data model follows the physical chain of space weather: phenomena originate 
 The system is a modular monolith: a shared core library (`space_weather_analysis`) plus four separately-runnable components. All components share one codebase and one Docker image and communicate through MongoDB rather than over the network.
 
 - Metadata Worker: a long-running background process that builds and maintains the master catalog and the dataset metadata. It repeats all metadata requests (HAPI metadata mirror, CDAWeb dataset list, per-dataset master files and SPASE (Space Physics Archive Search and Extract) records, dataset availability) on a schedule, one request at a time per provider host, keeping the last good state when a provider is unreachable.
-- Pipeline Service: keeps the feeds of `config/feeds.toml` current and processes the fetch jobs of the Streamlit app. A scheduler queues one job per feed on start and whenever its interval has passed; a job runner works off the jobs of each source type in its own lane. The dataset metadata is saved with the curated metadata of `config/metadata/` laid over it.
+- Pipeline Service: keeps the feeds of `config/feeds.toml` current and processes the fetch jobs of the Streamlit app. A scheduler queues one job per feed on start and whenever its interval has passed; a job runner works off the jobs of each source type in its own lane. The dataset metadata is saved with the curated metadata of `config/metadata/` laid over it. How jobs are processed and how failures are handled: [docs/pipeline-service.md](docs/pipeline-service.md).
 - Web dashboard: `site_export` writes the pages of `config/dashboard/` as JSON documents and serves them next to the static web frontend in `web/`; locally it writes them again every minute, the demo workflow every hour.
 - Streamlit app: a dataset explorer and a downloader that queues fetch jobs.
 - MongoDB: the shared data store, holding the master catalog, the metadata of each dataset and the raw provider metadata it is built from, one time series collection per dataset, the stored coverage and the chunk status of each dataset, the job queue and the task queue of the metadata worker. `mongo-express` provides a web admin UI.
 
-![Architecture diagram: external data sources feed the ingestion components, which write to MongoDB collections read by the consumers](docs/architecture.drawio.svg)
+![Architecture diagram: external data sources feed the ingestion components, which write to MongoDB collections read by the consumers](docs/diagrams/architecture.drawio.svg)
 
 Arrows point in the direction the data flows; double arrows mark collections a component reads and writes, with each label next to the arrowhead it describes. Dashed arrows show the job queue between the Streamlit app and the pipeline service. The diagram is an editable draw.io file.
 
@@ -419,7 +419,7 @@ Jupyter notebooks for exploratory analysis live in `notebooks/` (`uv run jupyter
 │   ├── metadata/               # Curated metadata per provider
 │   └── sources/                # SWPC products, image sequences, planets and spacecraft, static catalog items
 ├── data/                       # Local data files (not in the repository) and HAPI server list
-├── docs/                       # Architecture diagram and notes on the local data files
+├── docs/                       # Pipeline service and local data files; diagrams/ holds the draw.io diagrams
 ├── notebooks/                  # Jupyter notebooks
 ├── web/                        # Static web frontend of the dashboard
 │   ├── js/                     # ES modules, entry point main.js
