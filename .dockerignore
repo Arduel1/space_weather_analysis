@@ -23,6 +23,10 @@ notebooks
 tests
 docs
 
+# Downloaded at runtime into the mounted data directory; only the HAPI server list is part of the image
+data/*
+!data/hapi_config
+
 # Built in the vendor stage of the Dockerfile
 web/node_modules
 web/vendor

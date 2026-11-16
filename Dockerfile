@@ -32,7 +32,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-install-project
 
 COPY src ./src
-COPY data ./data
+# Only the HAPI server list; the other local data files are downloaded at runtime into the mounted data directory
+COPY data/hapi_config ./data/hapi_config
 COPY config ./config
 COPY web ./web
 COPY --from=vendor /web/vendor ./web/vendor

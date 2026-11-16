@@ -1,3 +1,10 @@
+# Log files rotated at 10 MB, five kept per container
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   # Long-running background process for all recurring metadata requests, paced per provider host
   metadata-worker:
@@ -11,12 +18,15 @@ services:
     volumes:
       - ./config:/app/config:ro # Curated metadata, laid over every metadata record the worker saves
     command: ["python", "-m", "catalog_collector.metadata_worker"]
+    logging: *logging
     networks:
       - space-weather-net
 
   pipeline-service:
     build: .
     restart: on-failure
+    # Peak about 2.4 GB while the coronal magnetic field model is computed
+    mem_limit: 3g
     depends_on:
       mongo:
         condition: service_healthy
@@ -26,30 +36,21 @@ services:
       - ./data:/app/data # Persist downloads
       - ./config:/app/config:ro # Feed file and curated metadata, read on every start
     command: ["python", "-m", "pipeline_service.main"]
+    logging: *logging
     networks:
       - space-weather-net
 
-  # app:
-  #   build: .
-  #   restart: on-failure
-  #   depends_on:
-  #     - mongo
-  #   env_file:
-  #     - .env
-  #   volumes:
-  #     - ./src:/app/src
-  #     - ./data:/app/data
-
   frontend:
     build: .
-    restart: always
+    restart: on-failure
     depends_on:
       pipeline-service:
         condition: service_started
     env_file:
       - .env
     ports:
-      - "${FRONTEND_HOST_PORT:-8501}:8501"
+      # Reachable only from this host, as it queues fetch jobs without a login
+      - "127.0.0.1:${FRONTEND_HOST_PORT:-8501}:8501"
     command:
       [
         "streamlit",
@@ -57,6 +58,7 @@ services:
         "src/streamlit_app/main.py",
         "--server.address=0.0.0.0",
       ]
+    logging: *logging
     networks:
       - space-weather-net
 
@@ -80,6 +82,7 @@ services:
       - SPASE_DICTIONARY_CACHE_PATH=/tmp/spase_dictionary.json
       - SPASE_RESOURCE_CACHE_PATH=/tmp/spase_resources.json
     command: ["python", "-m", "site_export.main", "--web", "web", "--output", "/tmp/site", "--serve", "8000"]
+    logging: *logging
     networks:
       - space-weather-net
 
@@ -87,7 +90,8 @@ services:
     image: mongo
     restart: always
     ports:
-      - "${MONGO_HOST_PORT:-27017}:27017"
+      # Reachable only from this host, for tools running outside Docker
+      - "127.0.0.1:${MONGO_HOST_PORT:-27017}:27017"
     environment:
       - MONGO_INITDB_ROOT_USERNAME=${MONGO_USER}
       - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASS}
@@ -101,6 +105,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    logging: *logging
     networks:
       - space-weather-net
 
@@ -108,7 +113,8 @@ services:
     image: mongo-express
     restart: always
     ports:
-      - "${MONGO_EXPRESS_HOST_PORT:-8081}:8081"
+      # Reachable only from this host, as it logs in with the root account of the database
+      - "127.0.0.1:${MONGO_EXPRESS_HOST_PORT:-8081}:8081"
     environment:
       - ME_CONFIG_BASICAUTH_USERNAME=${MONGO_EXPRESS_USER}
       - ME_CONFIG_BASICAUTH_PASSWORD=${MONGO_EXPRESS_PASS}
@@ -121,6 +127,7 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
+    logging: *logging
     networks:
       - space-weather-net
 
