@@ -118,7 +118,7 @@ def dataset_to_frame(dataset: xr.Dataset, variables: Sequence[str], start: datet
 
     axis_frames = [_unique_times(pd.concat(frames, axis=1)) for frames in frames_by_axis.values()]
     if axis_frames:
-        combined = pd.concat(axis_frames, axis=1, join="outer").sort_index()
+        combined = pd.concat(axis_frames, axis=1, join="outer", sort=False).sort_index()
         in_range = (combined.index >= _naive_utc(start)) & (combined.index < _naive_utc(stop))
         result.frame = combined[in_range]
     return result

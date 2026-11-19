@@ -190,8 +190,9 @@ def _reached_earth(reader: DashboardReader, earth: EarthArrivals, history: timed
         return pd.Series(False, index=times), pd.DatetimeIndex(frame.index).max().to_pydatetime()
     # The nearest named time of each event decides, so that one rounding minute apart still matches
     nearest = named.get_indexer(minutes, method="nearest")
-    distance = abs(named[nearest] - minutes)
-    reached = pd.Series(distance <= pd.Timedelta(ARRIVAL_MATCH), index=times)
+    offset = named[nearest] - minutes
+    limit = pd.Timedelta(ARRIVAL_MATCH)
+    reached = pd.Series((offset >= -limit) & (offset <= limit), index=times)
     return reached, pd.DatetimeIndex(frame.index).max().to_pydatetime()
 
 

@@ -90,7 +90,7 @@ def _read_cache(cache_path: pathlib.Path) -> dict[str, Any]:
     try:
         with cache_path.open(encoding="utf-8") as file:
             content = json.load(file)
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return {}
     return content if isinstance(content, dict) else {}
 

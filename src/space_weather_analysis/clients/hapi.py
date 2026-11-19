@@ -1,6 +1,5 @@
 import logging
 import socket
-import warnings
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from datetime import datetime
@@ -20,10 +19,6 @@ from space_weather_analysis.util.resilience import retry_interaction
 from space_weather_analysis.util.time_utils import calculate_time_intersection, parse_iso_time
 
 logger = logging.getLogger(__name__)
-
-# hapiclient up to 0.3.3 passes the deprecated pandas argument infer_datetime_format on every time conversion; the
-# strict parsing pandas applies instead reads the ISO 8601 times of HAPI the same way, so the warning carries no information.
-warnings.filterwarnings("ignore", message="The argument 'infer_datetime_format' is deprecated", category=UserWarning, module="hapiclient.hapitime")
 
 # The data and the /info response of one HAPI data request, as hapiclient returns them.
 HapiData = tuple[np.ndarray, dict[str, Any]]

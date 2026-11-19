@@ -20,7 +20,7 @@ TEST_DB_NAME = "space_weather_test"
 
 
 @pytest.fixture(scope="session")
-def mongo_container() -> Generator[MongoDbContainer, None, None]:
+def mongo_container() -> Generator[MongoDbContainer]:
     """Session-wide throwaway MongoDB; pinged first, as the image runs a temporary mongod during user setup."""
     with MongoDbContainer(MONGO_IMAGE, username=CONTAINER_USER, password=CONTAINER_PASSWORD) as container:
         client: MongoClient = MongoClient(container.get_connection_url(), serverSelectionTimeoutMS=30000)
@@ -45,7 +45,7 @@ def mongo_settings(mongo_container: MongoDbContainer) -> MongoSettings:
 
 
 @pytest.fixture(scope="session")
-def mongo_client(mongo_settings: MongoSettings) -> Generator[MongoClient, None, None]:
+def mongo_client(mongo_settings: MongoSettings) -> Generator[MongoClient]:
     """Session-wide client for the container; it reads stored times as timezone-aware UTC datetimes, as the services do."""
     client: MongoClient = MongoClient(mongo_settings.connection_uri(), serverSelectionTimeoutMS=2000, tz_aware=True, tzinfo=UTC)
 
@@ -57,7 +57,7 @@ def mongo_client(mongo_settings: MongoSettings) -> Generator[MongoClient, None, 
 
 
 @pytest.fixture(scope="function")
-def db(mongo_client: MongoClient) -> Generator[Database, None, None]:
+def db(mongo_client: MongoClient) -> Generator[Database]:
     """Test database, cleaned before and after each test."""
     database = mongo_client[TEST_DB_NAME]
 

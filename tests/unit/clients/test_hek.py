@@ -1,3 +1,5 @@
+import pandas as pd
+
 from space_weather_analysis.clients.hek import parse_regions
 
 
@@ -37,9 +39,9 @@ def test_hek_region_entries_need_a_time_and_a_region_number() -> None:
 
     regions = parse_regions(answer)
 
-    assert (len(regions), regions.iloc[0]["latitude"], regions.iloc[0]["mag_class"], regions.iloc[1]["spot_class"]) == (
+    assert (len(regions), regions.iloc[0]["latitude"], regions.iloc[0]["mag_class"], pd.isna(regions.iloc[1]["spot_class"])) == (
         2,
         -6,
         "BETA-GAMMA-DELTA",
-        None,
+        True,
     )

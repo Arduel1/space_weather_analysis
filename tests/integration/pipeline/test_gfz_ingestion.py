@@ -194,7 +194,7 @@ def test_gfz_second_run_replaces_preliminary_values(db: Database, gfz_server: Fa
 
     assert _requested_starts(httpserver) == [DAY_TWO.strftime(TIME_FORMAT)]
     assert db[INDEX].count_documents({}) == 16
-    assert _stored_kp_and_status(db, DAY_TWO) == pytest.approx([(kp_value, "def") for kp_value in KP_DAY_TWO_REVISED])
+    assert _stored_kp_and_status(db, DAY_TWO) == [(pytest.approx(kp_value), "def") for kp_value in KP_DAY_TWO_REVISED]
 
 
 @pytest.mark.integration
@@ -206,7 +206,7 @@ def test_gfz_second_run_completes_incomplete_chunk(db: Database, gfz_server: Fak
 
     _ingest(db, gfz_server)
 
-    assert _stored_kp_and_status(db, DAY_ONE) == pytest.approx([(kp_value, "def") for kp_value in KP_DAY_ONE])
+    assert _stored_kp_and_status(db, DAY_ONE) == [(pytest.approx(kp_value), "def") for kp_value in KP_DAY_ONE]
 
 
 # Address on which no server listens, so every connection is refused at once.
@@ -235,8 +235,8 @@ def test_gfz_failed_chunk_keeps_stored_documents_and_next_chunk_runs(db: Databas
 
     report = _ingest(db, gfz_server, end=DAY_THREE)
 
-    assert _stored_kp_and_status(db, DAY_ONE) == pytest.approx([(kp_value, "pre") for kp_value in KP_DAY_ONE])
-    assert _stored_kp_and_status(db, DAY_TWO) == pytest.approx([(kp_value, "def") for kp_value in KP_DAY_TWO])
+    assert _stored_kp_and_status(db, DAY_ONE) == [(pytest.approx(kp_value), "pre") for kp_value in KP_DAY_ONE]
+    assert _stored_kp_and_status(db, DAY_TWO) == [(pytest.approx(kp_value), "def") for kp_value in KP_DAY_TWO]
     assert ([(gap.start, gap.stop) for gap in report.gaps], report.chunks_total) == ([(DAY_ONE, DAY_TWO)], 2)
 
 
@@ -249,7 +249,7 @@ def test_gfz_no_data_message_keeps_stored_documents_without_gap(db: Database, gf
 
     report = _ingest(db, gfz_server)
 
-    assert (report.gaps, _stored_kp_and_status(db, DAY_ONE)) == ([], pytest.approx([(kp_value, "pre") for kp_value in KP_DAY_ONE]))
+    assert (report.gaps, _stored_kp_and_status(db, DAY_ONE)) == ([], [(pytest.approx(kp_value), "pre") for kp_value in KP_DAY_ONE])
 
 
 @pytest.mark.integration

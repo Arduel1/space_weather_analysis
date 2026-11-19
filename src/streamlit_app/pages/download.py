@@ -28,7 +28,7 @@ def parse_catalog_time(time_str: str | None, default: datetime) -> datetime:
         if dt.tzinfo is None:
             return dt.replace(tzinfo=UTC)
         return dt.astimezone(UTC)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return default.replace(tzinfo=UTC)
 
 

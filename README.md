@@ -332,7 +332,7 @@ Wilcox Solar Observatory data used in this study were obtained via the web site 
 
 ## Tech Stack
 
-- Language: Python 3.12
+- Language: Python 3.14
 - Dependency management: uv (with lockfile)
 - Configuration: pydantic-settings (environment variables) and TOML files in `config/`
 - Storage: MongoDB time series collections, browsed via mongo-express

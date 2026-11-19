@@ -141,7 +141,7 @@ def _bin_location(bin_location: Any) -> TimestampLocation:
         return DEFAULT_BIN_LOCATION
     try:
         position = float(np.ravel(bin_location)[0])
-    except (TypeError, ValueError, IndexError):
+    except TypeError, ValueError, IndexError:
         logger.warning("BIN_LOCATION '%s' is not a number; the time stamp location counts as other.", bin_location)
         return TimestampLocation.OTHER
     return BIN_LOCATIONS.get(position, TimestampLocation.OTHER)

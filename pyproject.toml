@@ -6,47 +6,46 @@ authors = [
     { name = "Patrick Heß", email = "hepa1041@h-ka.de" },
     { name = "Sebastian Straßner", email = "stse1032@h-ka.de" },
 ]
-requires-python = ">=3.12,<4"
+requires-python = ">=3.14,<4"
 readme = "README.md"
 dependencies = [
-    "matplotlib>=3.10.7,<4",
+    "numpy>=2.3.5,<3",
     "scipy>=1.16.3,<2",
     "cdflib>=1.3.6,<2",
-    "pandas>=2.2.3,<3",
+    "pandas>=3.1.1,<4",
     "pymongo>=4.12.0,<5",
-    "astropy>=7.1.1,<8",
-    "sunpy[asdf, dask, image, jpeg2000, map, net, timeseries, visualization]>=7.0.3,<8",
-    "lxml>=6.0.2,<7",
-    "zeep>=4.3.2,<5",
-    "drms>=0.9.0,<0.10",
+    "astropy>=8.0.2,<9",
+    "sunpy[asdf, dask, image, jpeg2000, map, net, timeseries, visualization]>=8.0.1,<9",
     "contourpy>=1.3.3,<2",
-    "mpl-animators>=1.2.4,<2",
-    "reproject>=0.18.0,<0.19",
+    # xarray engines, chosen by name when a downloaded NetCDF or HDF5 file is opened
     "h5netcdf>=1.7.3,<2",
-    "h5py>=3.15.1,<4",
-    "xarray>=2025.10.1,<2026",
     "netcdf4>=1.7.3,<2",
-    "pyarrow>=21.0.0,<22",
+    "xarray>=2025.10.1,<2027",
+    "requests>=2.32.5,<3",
+    "urllib3>=2.5.0,<3",
+    "python-dateutil>=4.0.0,<5",
+    "pydantic>=2.13.5,<3",
     "cdasws>=1.8.11,<2",
-    "hapiclient>=0.2.6,<0.3",
+    # From 0.2.7 on, every info request also downloads the whole server catalog
+    "hapiclient>=0.2.6,<0.2.7",
     "streamlit>=1.51.0,<2",
-    "plotly>=6.5.0,<7",
+    "plotly>=7.1.0,<8",
     "pydantic-settings>=2,<3",
-    "pillow>=12,<13",
+    "pillow>=13,<14",
     "sunkit-magex>=1,<2",
 ]
 
 [dependency-groups]
 dev = [
-    "pytest>=8.4.1,<9",
+    "pytest>=9.0.3,<10",
     "pytest-mock>=3.14.1,<4",
     "jupyterlab>=4.3.6,<5",
-    "pandas-stubs>=2.3.2.250926,<3",
+    "pandas-stubs>=3.1.0.261029,<4",
     "types-requests>=2.32.4.20250913,<3",
     "testcontainers[mongodb]>=4,<5",
     "pytest-httpserver>=1.1,<2",
     "hypothesis>=6,<7",
-    "pytest-cov>=6,<7",
+    "pytest-cov>=7,<8",
     "ruff>=0.17.2",
     "mypy>=2.4.0",
 ]
@@ -69,7 +68,7 @@ markers = [
 
 [tool.ruff]
 line-length = 150
-target-version = "py312"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = [
@@ -122,7 +121,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.14"
 files = ["src", "tests"]
 # Lets mypy understand pydantic models, including settings fields filled from the environment.
 plugins = ["pydantic.mypy"]
@@ -145,6 +144,6 @@ include = ["src", "tests"]
 extraPaths = ["src"]
 venvPath = "."
 venv = ".venv"
-pythonVersion = "3.12"
+pythonVersion = "3.14"
 # Type checking stays with mypy: Pyright does not know pydantic-settings fills fields from the environment.
 typeCheckingMode = "off"

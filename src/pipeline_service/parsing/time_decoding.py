@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, cast
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union, cast
 
 import numpy as np
 import pandas as pd
@@ -15,6 +15,8 @@ VALIDITY_WEIGHT = 0.6
 IN_RANGE_WEIGHT = 0.4
 # Lowest score a transform needs to be accepted.
 MIN_ACCEPTED_SCORE = 0.01
+# Units in which the numeric time conventions count
+NumericTimeUnit = Literal["s", "ms", "us", "D"]
 
 
 # --- Heuristic Time Discovery & Decoding ---
@@ -68,7 +70,7 @@ def attempt_numeric_time_conversions(
     SECONDS_PER_DAY = 86400.0
 
     # Strategy definition: (Name, Pandas Unit, Pandas Origin, Pre-processing Func)
-    strategies: List[Tuple[str, str, str, Optional[Callable[[np.ndarray], np.ndarray]]]] = [
+    strategies: List[Tuple[str, NumericTimeUnit, str, Optional[Callable[[np.ndarray], np.ndarray]]]] = [
         ("unix_seconds", "s", "unix", None),
         ("unix_millis", "ms", "unix", None),
         ("unix_micros", "us", "unix", None),
@@ -90,6 +92,9 @@ def attempt_numeric_time_conversions(
             dt = pd.to_datetime(input_index, unit=unit, origin=origin, errors="coerce")
 
             if isinstance(dt, pd.DatetimeIndex):
+                # Times before 1677 or after 2262 come from a wrong convention, such as Julian days read as days since 1970
+                # and count as invalid
+                dt = pd.DatetimeIndex(dt.where((dt >= pd.Timestamp.min) & (dt <= pd.Timestamp.max)))
                 stats = _score_dtindex(dt, plausible_year_min, plausible_year_max)
                 diagnostics["tried"].append({"transform": name, **stats})
                 transforms.append((name, dt, stats))
@@ -118,7 +123,7 @@ def _score_dtindex(dtindex: pd.DatetimeIndex, min_year: Optional[int], max_year:
     if total == 0:
         return {"non_na_frac": 0.0, "in_range_frac": 0.0, "valid_count": 0}
 
-    is_valid = ~dtindex.isna()
+    is_valid = np.asarray(dtindex.notna())
     valid_count = int(is_valid.sum())
 
     # NaT entries are excluded by is_valid, the year limits apply only if given.

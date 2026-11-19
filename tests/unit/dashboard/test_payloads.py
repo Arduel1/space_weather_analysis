@@ -348,7 +348,7 @@ def _storm_frame() -> pd.DataFrame:
     for day, depth in ((10, -150.0), (20, -300.0)):
         lowest = pd.Timestamp("2024-01-01", tz="UTC") + timedelta(days=day, hours=12)
         dst[lowest - timedelta(hours=2) : lowest + timedelta(hours=2)] = depth / 2
-        dst[lowest] = depth
+        dst.at[lowest] = depth
         speed[lowest - timedelta(hours=6) : lowest] = 700.0
     return pd.DataFrame({"dst": dst, "speed": speed})
 

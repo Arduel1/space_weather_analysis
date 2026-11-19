@@ -47,7 +47,7 @@ class WorkerSettings(BaseSettings):
     plan_interval_seconds: float = 3600.0
 
     @model_validator(mode="after")
-    def _pause_range_ordered(self) -> "WorkerSettings":
+    def _pause_range_ordered(self) -> WorkerSettings:
         """Rejects a pause range whose minimum lies above its maximum."""
         if self.host_pause_min_seconds > self.host_pause_max_seconds:
             raise ValueError("host_pause_min_seconds must not exceed host_pause_max_seconds")

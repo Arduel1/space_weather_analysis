@@ -1,4 +1,5 @@
 import pathlib
+from collections.abc import Hashable
 
 import pandas as pd
 import pytest
@@ -13,7 +14,7 @@ EVENT_TIMES = pd.DatetimeIndex(["2003-05-10 04:12:30", "2003-05-11 17:45:06", "2
 HEADER = "".join(SYNTHETIC_FILE.read_text().splitlines(keepends=True)[:4])
 
 
-def _event(frame: pd.DataFrame, position: int) -> dict[str, object]:
+def _event(frame: pd.DataFrame, position: int) -> dict[Hashable, object]:
     """Returns the fields of the event at the given position without its NA values."""
     return frame.iloc[position].dropna().to_dict()
 

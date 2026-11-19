@@ -259,7 +259,7 @@ def _flares(events: pd.DataFrame, footpoints: dict[str, pd.Series]) -> list[Flar
         angles: dict[str, float | None] = {}
         # The angle to each observer takes its footpoint of the hour nearest to the flare; -1 marks an observer without footpoints
         for name, series in footpoints.items():
-            nearest = series.index.get_indexer([moment], method="nearest")[0] if not series.empty else -1
+            nearest = series.index.get_indexer(pd.DatetimeIndex([moment]), method="nearest")[0] if not series.empty else -1
             # The angle is wrapped to +-180 degrees, so a flare just across the far side counts as close
             angles[name] = round(_wrapped_longitude(coordinates[1] - float(series.iloc[nearest])), 1) if nearest >= 0 else None
         # DONKI stores the IDs of the linked events in one text, joined by LINK_SEPARATOR

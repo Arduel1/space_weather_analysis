@@ -30,7 +30,7 @@ def sync_hapi_coverage(catalog_repository: CatalogRepository, metadata_repositor
     """
     sources = _refreshed_record_sources(catalog_repository)
     changed_count = 0
-    for batch in batched(sorted(sources), BATCH_SIZE):
+    for batch in batched(sorted(sources), BATCH_SIZE, strict=False):
         stored_records = metadata_repository.get_many(batch)
         changed: list[DatasetMetadata] = []
         for dataset_id in batch:

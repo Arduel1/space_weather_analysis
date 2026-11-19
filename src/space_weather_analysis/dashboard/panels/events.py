@@ -77,7 +77,16 @@ def _series_name(series: SeriesConfig, metadata: Mapping[str, Metadata]) -> tupl
 
 def _finite_or_none(values: np.ndarray) -> list[float | None]:
     """Turns an array into a list with None in place of every missing value."""
-    return [float(value) if np.isfinite(value) else None for value in values]
+    return [_chart_value(value) for value in values]
+
+
+def _chart_value(value: float) -> float | None:
+    """Returns one value for the chart: None if missing, and zero without sign, as the chart shows -0.0 as -0."""
+    if not np.isfinite(value):
+        return None
+    if value == 0:
+        return 0.0
+    return float(value)
 
 
 class EpochPanel(PanelConfig):

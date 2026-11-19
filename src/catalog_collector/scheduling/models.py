@@ -55,7 +55,7 @@ class MetadataTask(BaseModel):
     last_error: str | None = None
 
     @classmethod
-    def from_document(cls, document: Mapping[str, Any]) -> "MetadataTask":
+    def from_document(cls, document: Mapping[str, Any]) -> MetadataTask:
         """Builds a task from its MongoDB document.
 
         Args:

@@ -63,7 +63,7 @@ class StoredCoverage(BaseModel):
         return {"_id": self.dataset_id, **self.model_dump()}
 
     @classmethod
-    def from_document(cls, document: Mapping[str, Any]) -> "StoredCoverage":
+    def from_document(cls, document: Mapping[str, Any]) -> StoredCoverage:
         """Builds the coverage from a document written by to_document.
 
         Args:

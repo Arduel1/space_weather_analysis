@@ -188,7 +188,7 @@ class MongoTimeSeriesRepository(TimeSeriesRepository):
             The number of inserted documents.
         """
         inserted = 0
-        for batch in batched(documents, self.BATCH_SIZE):
+        for batch in batched(documents, self.BATCH_SIZE, strict=False):
             # ordered=False inserts the other documents of a batch even if one fails
             self.db[collection].insert_many(batch, ordered=False)
             inserted += len(batch)
@@ -226,7 +226,7 @@ class MongoTimeSeriesRepository(TimeSeriesRepository):
         obsolete_ids = [document_id for ids in stored_ids.values() for document_id in ids]
 
         inserted = self.insert(collection, new_documents)
-        for batch in batched(obsolete_ids, self.BATCH_SIZE):
+        for batch in batched(obsolete_ids, self.BATCH_SIZE, strict=False):
             self.db[collection].delete_many({"_id": {"$in": list(batch)}})
         logger.info("Replaced %s between %s and %s: %d inserted, %d deleted", collection, start, stop, inserted, len(obsolete_ids))
         return RangeChanges(inserted, len(obsolete_ids))

@@ -1,7 +1,70 @@
+# Every entry runs on the 1st and 15th of the month and proposes a version only once it is 14 days old, so that the
+# first fixes of a release are usually out by then. Security updates are not delayed.
 version: 2
 updates:
+  # Python dependencies of pyproject.toml and uv.lock; minor and patch updates come as one pull request, a new major
+  # version as its own
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: cron
+      cronjob: "0 6 1,15 * *"
+    cooldown:
+      default-days: 14
+    groups:
+      python:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      # From 0.2.7 on, every info request also downloads the whole server catalog
+      - dependency-name: hapiclient
+        versions: [">=0.2.7"]
+
+  # Base images of the Dockerfile
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: cron
+      cronjob: "0 6 1,15 * *"
+    cooldown:
+      default-days: 14
+    groups:
+      images:
+        patterns: ["*"]
+    ignore:
+      # h5py, which the timeseries part of sunpy needs, has no wheels for a newer Python
+      - dependency-name: python
+        update-types: [version-update:semver-major, version-update:semver-minor]
+
+  # Mongo Express of docker-compose.yml
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: cron
+      cronjob: "0 6 1,15 * *"
+    cooldown:
+      default-days: 14
+    ignore:
+      # A newer MongoDB release changes the data format of the database volume, which cannot be read by the older one again
+      - dependency-name: mongo
+
+  # Actions of the demo workflow
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: cron
+      cronjob: "0 6 1,15 * *"
+    cooldown:
+      default-days: 14
+    groups:
+      actions:
+        patterns: ["*"]
+
   # three.js and Plotly of the web frontend
   - package-ecosystem: npm
     directory: /web
     schedule:
-      interval: weekly
+      interval: cron
+      cronjob: "0 6 1,15 * *"
+    cooldown:
+      default-days: 14

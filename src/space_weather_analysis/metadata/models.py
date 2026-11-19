@@ -211,7 +211,7 @@ class VariableMetadata(BaseModel):
     field_sources: dict[str, MetadataSourceKind] = Field(default_factory=dict)
 
     @classmethod
-    def from_single_source(cls, kind: MetadataSourceKind, **field_values: Any) -> "VariableMetadata":
+    def from_single_source(cls, kind: MetadataSourceKind, **field_values: Any) -> VariableMetadata:
         """Builds a variable whose values all come from one kind of source.
 
         Args:
@@ -287,7 +287,7 @@ class DatasetMetadata(BaseModel):
         return document
 
     @classmethod
-    def from_document(cls, document: dict[str, Any]) -> "DatasetMetadata":
+    def from_document(cls, document: dict[str, Any]) -> DatasetMetadata:
         """Builds a record from a document written by to_document.
 
         Args:

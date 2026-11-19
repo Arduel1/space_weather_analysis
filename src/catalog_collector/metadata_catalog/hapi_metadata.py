@@ -137,7 +137,7 @@ class HapiMirrorMetadataRefresher:
                 summary.missing += 1
 
         retrieved_at = self.clock()
-        for batch in batched(candidates, BATCH_SIZE):
+        for batch in batched(candidates, BATCH_SIZE, strict=False):
             self._refresh_batch(batch, retrieved_at, summary)
 
         summary.untouched_servers = sorted(untouched_servers)

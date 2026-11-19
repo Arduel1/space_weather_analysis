@@ -13,7 +13,7 @@ from space_weather_analysis.database.connection import MongoConnection
 @pytest.mark.integration
 class TestMongoConnection:
     @pytest.fixture
-    def connection(self, mongo_settings: MongoSettings) -> Generator[MongoConnection, None, None]:
+    def connection(self, mongo_settings: MongoSettings) -> Generator[MongoConnection]:
         """Fresh connection per test, closed afterwards."""
         connection = MongoConnection(mongo_settings)
         yield connection

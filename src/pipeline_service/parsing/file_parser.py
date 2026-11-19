@@ -366,7 +366,8 @@ def _get_xarray_file_metadata(ds: xr.Dataset, variables_to_parse: List[str]) -> 
     vars_to_process = variables_to_parse
 
     if not vars_to_process:
-        vars_to_process = list(ds.data_vars)
+        # NetCDF variable names are strings; xarray types them as any hashable
+        vars_to_process = [str(name) for name in ds.data_vars]
         logger.info(f"No variables specified. Discovering all {len(vars_to_process)} variables from xarray Dataset.")
 
     for var in vars_to_process:

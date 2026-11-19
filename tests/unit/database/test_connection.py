@@ -17,7 +17,7 @@ def settings() -> MongoSettings:
 
 
 @pytest.fixture
-def mock_client_cls() -> Generator[MagicMock, None, None]:
+def mock_client_cls() -> Generator[MagicMock]:
     """Patches MongoClient in the connection module."""
     with patch("space_weather_analysis.database.connection.MongoClient") as client_cls:
         yield client_cls

@@ -22,7 +22,7 @@ class IngestionReport:
         """Whether the run tried at least one chunk and every one failed."""
         return self.chunks_total > 0 and len(self.gaps) == self.chunks_total
 
-    def merge(self, other: "IngestionReport") -> None:
+    def merge(self, other: IngestionReport) -> None:
         """Adds the chunks and gaps of another report to this one.
 
         Args:

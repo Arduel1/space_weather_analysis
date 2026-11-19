@@ -56,7 +56,7 @@ class TestFallbackDecodeTime:
     """Candidate selection and decoding in fallback_decode_time."""
 
     @pytest.fixture
-    def mock_attempt_conversion(self) -> Generator[MagicMock, None, None]:
+    def mock_attempt_conversion(self) -> Generator[MagicMock]:
         """Patches attempt_numeric_time_conversions in the netcdf module."""
         with patch("pipeline_service.parsing.netcdf.attempt_numeric_time_conversions") as mock:
             yield mock

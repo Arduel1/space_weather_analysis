@@ -3,7 +3,6 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from hapiclient.hapitime import hapitime2datetime
 
 from space_weather_analysis.util.error_handling import DataProcessingError
 from space_weather_analysis.util.hapi_parameters import null_string_to_none, parameter_columns, parameters_too_large_for_columns
@@ -12,6 +11,33 @@ logger = logging.getLogger(__name__)
 
 NUMERIC_PARAMETER_TYPES = ("double", "integer")
 TEXT_PARAMETER_TYPES = ("string", "isotime")
+
+# HAPI time in the day-of-year form, YYYY-DDD, alone or followed by the time of day, after the closing Z is removed
+DAY_OF_YEAR_TIME = r"^\d{4}-\d{3}(?:T|$)"
+
+
+def parse_hapi_times(values: np.ndarray) -> pd.DatetimeIndex:
+    """Converts the values of a HAPI time parameter into UTC times.
+
+    HAPI writes times in a restricted ISO 8601 form closed by Z: as calendar date (YYYY-MM-DD) or as day of the year
+    (YYYY-DDD), each cut off after any field. pandas reads the calendar date, so the day of the year is rewritten into it first.
+
+    Args:
+        values: The time values as bytes or strings, as hapiclient returns them.
+
+    Returns:
+        The times in UTC.
+
+    Raises:
+        ValueError: If a value is no HAPI time.
+    """
+    texts = pd.Series(values.astype(str)).str.removesuffix("Z")
+    day_of_year = texts.str.match(DAY_OF_YEAR_TIME)
+    if day_of_year.any():
+        rewritten = texts[day_of_year]
+        dates = pd.to_datetime(rewritten.str[:4], format="%Y") + pd.to_timedelta(rewritten.str[5:8].astype(int) - 1, unit="D")
+        texts[day_of_year] = dates.dt.strftime("%Y-%m-%d") + rewritten.str[8:]
+    return pd.DatetimeIndex(pd.to_datetime(texts, format="ISO8601", utc=True))
 
 
 def convert_hapi_to_frame(data: np.ndarray, meta: dict[str, Any]) -> pd.DataFrame:
@@ -38,10 +64,9 @@ def convert_hapi_to_frame(data: np.ndarray, meta: dict[str, Any]) -> pd.DataFram
 
     time_parameter_name = parameters[0].get("name")
     try:
-        time_values = hapitime2datetime(data[time_parameter_name])
+        time_index = parse_hapi_times(data[time_parameter_name]).rename(time_parameter_name)
     except (ValueError, TypeError, KeyError) as error:
         raise DataProcessingError(f"The time values of the HAPI time parameter '{time_parameter_name}' cannot be read: {error}") from error
-    time_index = pd.Index(time_values, name=time_parameter_name)
 
     too_large_names = parameters_too_large_for_columns(meta)
     data_frames: list[pd.DataFrame] = []

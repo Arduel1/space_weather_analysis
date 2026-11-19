@@ -45,7 +45,7 @@ def parse_iso_time(time_str: str) -> datetime | None:
     """
     try:
         dt = datetime.fromisoformat(time_str)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         logger.warning("Failed to parse time string: %r", time_str)
         return None
     return ensure_aware(dt)

@@ -74,7 +74,7 @@ class CdasMetadataRefresher:
 
         listed_cdas_ids = [cdas_id for cdas_id in sorted(datasets) if cdas_id in cdas_datasets]
         summary.missing = len(datasets) - len(listed_cdas_ids)
-        for batch in batched(listed_cdas_ids, BATCH_SIZE):
+        for batch in batched(listed_cdas_ids, BATCH_SIZE, strict=False):
             self._refresh_batch(batch, cdas_datasets, datasets, retrieved_at, summary)
 
         logger.info(

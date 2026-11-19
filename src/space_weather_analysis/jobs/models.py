@@ -99,7 +99,7 @@ class Job(BaseModel):
         return {"_id": ObjectId(self.id), **self.model_dump(exclude={"id"}, exclude_none=True)}
 
     @classmethod
-    def from_document(cls, document: Mapping[str, Any]) -> "Job":
+    def from_document(cls, document: Mapping[str, Any]) -> Job:
         """Builds a job from its MongoDB document.
 
         Args:
