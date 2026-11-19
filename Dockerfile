@@ -1,5 +1,5 @@
 # Third-party files of the web frontend, installed from the npm lockfile and copied into web/vendor
-FROM node:22.11.0-alpine AS vendor
+FROM node:26.12.1-alpine AS vendor
 
 WORKDIR /web
 
