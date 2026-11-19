@@ -150,6 +150,31 @@ services:
     networks:
       - space-weather-net
 
+  # One compressed dump of the database per day, the newest seven (scripts/backup.sh); restore: docs/operations.md
+  backup:
+    image: mongo:9.0
+    restart: always
+    # The dumps belong to the first user of the host, like the files the services write
+    user: "1000:1000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    env_file:
+      - .env
+    volumes:
+      - ${BACKUP_DIR:-./backups}:/backups
+      - ./scripts/backup.sh:/backup.sh:ro
+    entrypoint: ["sh", "/backup.sh"]
+    healthcheck:
+      # The script checks every hour for the dump of the day, so the newest dump is at most a day old while the stack runs
+      test: ["CMD-SHELL", "test -n \"$$(find /backups -maxdepth 1 -name '*.archive.gz' -mtime -2)\""]
+      interval: 1h
+      start_period: 15m
+      start_interval: 1m
+    logging: *logging
+    networks:
+      - space-weather-net
+
 volumes:
   mongo-data:
 

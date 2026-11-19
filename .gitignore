@@ -3,6 +3,9 @@
 # only the project's own HAPI server list is tracked.
 data/*
 !data/hapi_config/
+# Database dumps of the backup service; the directory itself is kept, so that it belongs to the user who cloned
+backups/*
+!backups/.gitkeep
 # Third-party files of the web frontend: installed by npm and copied by web/build-vendor.sh
 web/node_modules/
 web/vendor/

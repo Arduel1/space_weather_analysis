@@ -22,6 +22,7 @@ htmlcov
 notebooks
 tests
 docs
+backups
 
 # Downloaded at runtime into the mounted data directory; only the HAPI server list is part of the image
 data/*

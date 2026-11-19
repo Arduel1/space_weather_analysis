@@ -376,12 +376,13 @@ The full stack runs in Docker. uv and Node.js are only required for local develo
    | `mongo` | MongoDB database | `localhost:27017` |
    | `pipeline-service` | Ingestion of feeds and fetch jobs | (no public port) |
    | `metadata-worker` | Catalog and metadata maintenance | (no public port) |
+   | `backup` | Daily database dump into `backups/` | (no public port) |
 
-   Only the dashboard is reachable from other devices in the network; the other ports are bound to this host. The published ports can be changed in `.env` (see `example.env`). The services run as the user with uid 1000, which must be able to write to `data/`; on a host whose user has another uid, run `sudo chown -R 1000 data` once. `docker compose ps` shows whether each service is healthy.
+   Only the dashboard is reachable from other devices in the network; the other ports are bound to this host. The published ports can be changed in `.env` (see `example.env`). The services run as the user with uid 1000, which must be able to write to `data/` and `backups/`; on a host whose user has another uid, run `sudo chown -R 1000 data backups` once. `docker compose ps` shows whether each service is healthy.
 
 4. Open the dashboard at <http://localhost:8502>. On a fresh database the metadata worker needs a few minutes to build the catalog; feeds whose datasets are not catalogued yet wait for it. The pipeline service downloads the local data files into `data/` itself.
 
-5. Stop the stack with `docker compose down`; add `-v` to also remove the database volume.
+5. Stop the stack with `docker compose down`; add `-v` to also remove the database volume. Updates, logs, backups and the restore of a dump: [docs/operations.md](docs/operations.md).
 
 ### Local development
 
@@ -428,9 +429,10 @@ Jupyter notebooks for exploratory analysis live in `notebooks/` (`uv run jupyter
 │   ├── metadata/               # Curated metadata per provider
 │   └── sources/                # SWPC products, image sequences, planets and spacecraft, static catalog items
 ├── data/                       # Local data files (not in the repository) and HAPI server list
-├── docs/                       # Pipeline service and local data files; diagrams/ holds the draw.io diagrams
+├── backups/                    # Daily database dumps (not in the repository)
+├── docs/                       # Operations, pipeline service and local data files; diagrams/ holds the draw.io diagrams
 ├── notebooks/                  # Jupyter notebooks
-├── scripts/gate.sh             # Every check of the project in one command
+├── scripts/                    # gate.sh: every check of the project; backup.sh: the daily database dump
 ├── web/                        # Static web frontend of the dashboard
 │   ├── js/                     # ES modules, entry point main.js
 │   └── build-vendor.sh         # Writes the frontend libraries into vendor/ (not in the repository)
