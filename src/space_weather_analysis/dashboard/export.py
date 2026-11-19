@@ -200,7 +200,7 @@ class PanelFailure(BaseModel):
     """Why a panel could not be built.
 
     Attributes:
-        message: The reason in words.
+        message: The sentence the page shows in place of the panel.
     """
 
     model_config = PAYLOAD
@@ -228,10 +228,11 @@ def _built_payload(panel: PanelConfig, reader: DashboardReader, context: PanelCo
         return PANEL_TYPES[panel.type].build(panel, reader, context)
     except PyMongoError:
         raise
-    except Exception as error:
+    except Exception:
         # A fault in the data or the code of one panel type must not leave the whole dashboard without new documents
         logger.exception("Panel %s of type %s could not be built", panel.title, panel.type)
-        return FailedPanelPayload(type=panel.type, error=PanelFailure(message=f"{type(error).__name__}: {error}"))
+        # The page shows a fixed sentence, as the exception text may name paths or hosts and means nothing to a reader
+        return FailedPanelPayload(type=panel.type, error=PanelFailure(message="This panel could not be built from the stored data."))
 
 
 def _about(panel: PanelConfig, reader: DashboardReader) -> list[DatasetAbout]:

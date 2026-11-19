@@ -245,7 +245,7 @@ def test_panels_share_the_footnote_of_a_source_and_number_formulas_too() -> None
 
 
 def test_a_panel_whose_build_fails_gets_a_failure_document_while_the_others_are_built(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A fault in one panel type leaves its panel with the reason and the other panels with their data."""
+    """A fault in one panel type leaves its panel with a fixed note, not the exception text, and the other panels with their data."""
 
     def broken(panel: Any, reader: Any, context: Any) -> Any:
         raise ValueError("no frames")
@@ -265,7 +265,7 @@ def test_a_panel_whose_build_fails_gets_a_failure_document_while_the_others_are_
     _, payloads = build_dashboard(DashboardConfig.model_validate(content), FakeReader(frames, {"flux_set": FLUX_RECORD}), CONTEXT)
 
     assert (payloads["panel-0-0-0"].model_dump(mode="json")["error"]["message"], payloads["panel-0-1-0"].type) == (
-        "ValueError: no frames",
+        "This panel could not be built from the stored data.",
         "stack",
     )
 

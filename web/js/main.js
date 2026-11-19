@@ -144,7 +144,7 @@ function renderPanel(entry, panel) {
   const payload = state.payloadsById[entry.id];
   const render = RENDERERS[entry.type];
   if (payload.error !== undefined || render === undefined) {
-    panel.append(element("p", "note", payload.error !== undefined ? `Panel not available: ${payload.error.message}` : `Unknown panel type ${entry.type}`));
+    panel.append(element("p", "note", payload.error !== undefined ? payload.error.message : `Unknown panel type ${entry.type}`));
   } else {
     state.drawingPanel = { id: entry.id, charts: 0 };
     try {
