@@ -35,6 +35,7 @@ def _model(magnetogram: Magnetogram) -> FieldModel:
     )
 
 
+@pytest.mark.integration
 def test_without_an_answer_from_gong_the_model_comes_from_the_hmi_map_and_is_kept(
     db: Database, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

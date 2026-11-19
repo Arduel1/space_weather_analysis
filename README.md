@@ -76,13 +76,13 @@ Details on each file: [docs/local-data.md](docs/local-data.md).
 
 ### Web frontend libraries
 
-The web frontend loads these files from its own host. They are installed when the Docker image is built (see [Local development](#local-development) for a build outside Docker).
+The web frontend loads these files from its own host. They are installed when the Docker image is built (see [Local development](#local-development) for a build outside Docker); `web/package-lock.json` and `web/build-vendor.sh` pin their versions.
 
-| Library or data | Version | Source | License / terms |
-| --- | --- | --- | --- |
-| three.js | 0.186.1 | npm package `three` | [MIT](https://github.com/mrdoob/three.js/blob/dev/LICENSE) |
-| Plotly.js | 4.1.2 | npm package `plotly.js-dist-min` | [MIT](https://github.com/plotly/plotly.js/blob/master/LICENSE) |
-| Natural Earth coastlines (`ne_110m_coastline.geojson`) | 5.1.2 | [natural-earth-vector](https://github.com/nvkelso/natural-earth-vector) | Public domain ([terms of use](https://www.naturalearthdata.com/about/terms-of-use/)) |
+| Library or data | Source | License / terms |
+| --- | --- | --- |
+| three.js | npm package `three` | [MIT](https://github.com/mrdoob/three.js/blob/dev/LICENSE) |
+| Plotly.js | npm package `plotly.js-dist-min` | [MIT](https://github.com/plotly/plotly.js/blob/master/LICENSE) |
+| Natural Earth coastlines (`ne_110m_coastline.geojson`) | [natural-earth-vector](https://github.com/nvkelso/natural-earth-vector) | Public domain ([terms of use](https://www.naturalearthdata.com/about/terms-of-use/)) |
 
 ### Data retrieved at runtime
 
@@ -392,6 +392,14 @@ uv run pytest -m integration     # integration tests, start a throwaway MongoDB 
 uv run ruff check src tests
 uv run ruff format src tests
 uv run mypy                      # src and tests, as configured in pyproject.toml
+uv run sh scripts/gate.sh        # every check: ruff, mypy, all tests, pip-audit, deptry, node --check of web/js
+```
+
+The gate also runs in a container with every development tool, which needs neither uv nor Node on the host. The project is mounted read-only, and the Docker socket lets the integration tests start their MongoDB:
+
+```bash
+docker build --target qa -t space-weather-qa .
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v /var/run/docker.sock:/var/run/docker.sock --group-add "$(stat -c %g /var/run/docker.sock)" -v "$PWD":/work:ro space-weather-qa sh scripts/gate.sh
 ```
 
 To serve `web/` outside Docker, install its libraries into `web/vendor/` first:
@@ -409,8 +417,9 @@ Jupyter notebooks for exploratory analysis live in `notebooks/` (`uv run jupyter
 ```text
 .
 ├── .github/workflows/demo.yml  # Hourly build of the static dashboard demo on GitHub Pages
+├── .github/workflows/gate.yml  # Gate for every push to main and every pull request, without the integration tests
 ├── docker-compose.yml
-├── Dockerfile                  # Shared image for all components
+├── Dockerfile                  # Shared image for all components; stage qa holds the development tools
 ├── pyproject.toml, uv.lock     # Python dependencies and tool configuration
 ├── example.env                 # Template for the environment variables
 ├── config/
@@ -421,6 +430,7 @@ Jupyter notebooks for exploratory analysis live in `notebooks/` (`uv run jupyter
 ├── data/                       # Local data files (not in the repository) and HAPI server list
 ├── docs/                       # Pipeline service and local data files; diagrams/ holds the draw.io diagrams
 ├── notebooks/                  # Jupyter notebooks
+├── scripts/gate.sh             # Every check of the project in one command
 ├── web/                        # Static web frontend of the dashboard
 │   ├── js/                     # ES modules, entry point main.js
 │   └── build-vendor.sh         # Writes the frontend libraries into vendor/ (not in the repository)

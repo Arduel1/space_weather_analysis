@@ -48,6 +48,8 @@ dev = [
     "pytest-cov>=7,<8",
     "ruff>=0.17.2",
     "mypy>=2.4.0",
+    "pip-audit>=2.9.0,<3",
+    "deptry>=0.25.1,<0.26",
 ]
 
 [tool.uv]
@@ -147,3 +149,11 @@ venv = ".venv"
 pythonVersion = "3.14"
 # Type checking stays with mypy: Pyright does not know pydantic-settings fills fields from the environment.
 typeCheckingMode = "off"
+
+# Checks that every imported package is declared and every declared package is imported
+[tool.deptry]
+known_first_party = ["space_weather_analysis", "pipeline_service", "catalog_collector", "site_export", "streamlit_app"]
+
+[tool.deptry.per_rule_ignores]
+# xarray opens NetCDF files with h5netcdf, chosen by name in the file parser
+DEP002 = ["h5netcdf"]

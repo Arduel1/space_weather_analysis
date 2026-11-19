@@ -1,0 +1,33 @@
+name: Gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.13.5"
+          enable-cache: true
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26.12.1"
+
+      - name: Install the locked dependencies with every group
+        run: uv sync --locked --all-groups
+
+      # MongoDB of the version the stack runs does not start on the Linux kernels of the runner images
+      # (https://jira.mongodb.org/browse/SERVER-125742), so the integration tests run only locally
+      - name: Run the gate
+        run: uv run sh scripts/gate.sh --without-integration
