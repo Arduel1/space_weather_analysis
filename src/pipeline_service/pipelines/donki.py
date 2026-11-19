@@ -3,8 +3,9 @@ from datetime import datetime, timedelta
 import requests
 
 from pipeline_service.pipelines.base import ProgressCallback
-from pipeline_service.pipelines.chunks import refresh_coverage, require_single_dataset, resolve_time_range, run_single_dataset, save_minimal_metadata
 from pipeline_service.pipelines.report import IngestionReport
+from pipeline_service.pipelines.runs.run_steps import refresh_coverage, require_single_dataset, resolve_time_range, save_minimal_metadata
+from pipeline_service.pipelines.runs.simple_runs import run_single_dataset
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.clients.donki import DONKI_PAGE_URL, EVENT_FIELDS, fetch_events
 from space_weather_analysis.coverage.repository import CoverageRepository

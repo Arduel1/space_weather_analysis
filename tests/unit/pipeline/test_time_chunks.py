@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from pipeline_service.pipelines.chunks import GridChunk, chunk_unit_for_cadence, generate_time_chunks
+from pipeline_service.pipelines.runs.calendar_grid import GridChunk, chunk_unit_for_cadence, generate_time_chunks
 from space_weather_analysis.timeseries.models import TimeBucket
 
 

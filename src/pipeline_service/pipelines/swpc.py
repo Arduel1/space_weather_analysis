@@ -2,8 +2,9 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 from pipeline_service.pipelines.base import ProgressCallback
-from pipeline_service.pipelines.chunks import METADATA_SAVE_ERRORS, refresh_coverage, require_known_datasets, resolve_time_range, run_per_dataset
 from pipeline_service.pipelines.report import IngestionReport
+from pipeline_service.pipelines.runs.run_steps import METADATA_SAVE_ERRORS, refresh_coverage, require_known_datasets, resolve_time_range
+from pipeline_service.pipelines.runs.simple_runs import run_per_dataset
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.clients.swpc import SwpcClient
 from space_weather_analysis.coverage.repository import CoverageRepository

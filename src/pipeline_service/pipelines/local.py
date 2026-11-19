@@ -15,8 +15,9 @@ from pipeline_service.parsing.icme_list import ICME_PROVIDER_ID, parse_icme_list
 from pipeline_service.parsing.silso import SILSO_PROVIDER_ID, parse_silso_daily, parse_silso_monthly, parse_silso_monthly_hemispheric
 from pipeline_service.parsing.wso_polar import WSO_POLAR_PROVIDER_ID, parse_wso_polar_fields
 from pipeline_service.pipelines.base import ProgressCallback
-from pipeline_service.pipelines.chunks import METADATA_SAVE_ERRORS, ingest_or_record_gap, refresh_coverage
 from pipeline_service.pipelines.report import IngestionReport
+from pipeline_service.pipelines.runs.run_steps import METADATA_SAVE_ERRORS, refresh_coverage
+from pipeline_service.pipelines.runs.simple_runs import ingest_or_record_gap
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.clients.download import download_file
 from space_weather_analysis.coverage.repository import CoverageRepository

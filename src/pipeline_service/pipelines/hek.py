@@ -4,8 +4,9 @@ import requests
 
 from pipeline_service.chunk_status.repository import ChunkStatusRepository
 from pipeline_service.pipelines.base import ProgressCallback
-from pipeline_service.pipelines.chunks import require_single_dataset, run_chunked, save_minimal_metadata
 from pipeline_service.pipelines.report import IngestionReport
+from pipeline_service.pipelines.runs.chunked_run import run_chunked
+from pipeline_service.pipelines.runs.run_steps import require_single_dataset, save_minimal_metadata
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.clients.hek import HEK_PAGE_URL, REGION_ATTRIBUTES, fetch_regions
 from space_weather_analysis.coverage.repository import CoverageRepository

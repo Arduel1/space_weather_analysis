@@ -6,15 +6,9 @@ import pandas as pd
 import requests
 
 from pipeline_service.pipelines.base import ProgressCallback
-from pipeline_service.pipelines.chunks import (
-    CHUNK_ERRORS,
-    refresh_coverage,
-    replace_all_documents,
-    require_single_dataset,
-    run_single_dataset,
-    save_minimal_metadata,
-)
 from pipeline_service.pipelines.report import IngestionReport
+from pipeline_service.pipelines.runs.run_steps import CHUNK_ERRORS, refresh_coverage, require_single_dataset, save_minimal_metadata
+from pipeline_service.pipelines.runs.simple_runs import replace_all_documents, run_single_dataset
 from pipeline_service.pipelines.timestamped_files import MEDIA_KEEP, name_times, remove_files_before, timestamped_name
 from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.clients.gong import GONG_PAGE_URL, download_map, recent_maps
