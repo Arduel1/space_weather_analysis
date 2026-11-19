@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from space_weather_analysis.dashboard.labels import Metadata, variable_metadata
 from space_weather_analysis.dashboard.validity import describe_validity, valid_range
 from space_weather_analysis.metadata.models import MetadataSourceKind
+from space_weather_analysis.metadata.normalize import normalize_units
 from space_weather_analysis.metadata.spase.dictionary import spase_definition
 from space_weather_analysis.metadata.spase.resources import SPASE_ID_PREFIX, spase_resource
 from space_weather_analysis.util.time_utils import SecondsDuration, parse_iso_duration
@@ -136,7 +137,8 @@ def _field_about(metadata: Metadata, field: str) -> FieldAbout:
         name=field,
         label=variable.get("label"),
         description=variable.get("description"),
-        units=variable.get("units"),
+        # Records stored before a spelling was known still hold the provider's spelling
+        units=normalize_units(variable.get("units")),
         validity=validity,
         coordinate_system=variable.get("coordinate_system"),
         flag_meanings=variable.get("flag_meanings"),

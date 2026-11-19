@@ -212,7 +212,7 @@ class TestArrayParameters:
         assert described == [
             ("Field_Vector", "X", "X", "nT", "x", "GEO", "99999"),
             ("Field_Vector", "Y", "Y", "nT", "y", "GEO", "99999"),
-            ("Field_Vector", "D", "D", "deg", "longitude", "GEO", "99999"),
+            ("Field_Vector", "D", "D", "°", "longitude", "GEO", "99999"),
         ]
 
     def test_iswa_like_vector_without_labels_uses_indices(self) -> None:

@@ -14,7 +14,7 @@ FULL_RECORD: dict[str, Any] = {
     ("configured", "metadata", "expected"),
     [
         pytest.param(("Flux", "Wm-2", "Own title"), FULL_RECORD, ("Flux", "Wm-2", "Own title"), id="configured-wins"),
-        pytest.param(("", "", ""), FULL_RECORD, ("X-ray flux", "W/m^2", "GOES X-ray flux"), id="metadata-without-configuration"),
+        pytest.param(("", "", ""), FULL_RECORD, ("X-ray flux", "W m\u207b\u00b2", "GOES X-ray flux"), id="metadata-without-configuration"),
         pytest.param(("", "", ""), {"variables": [{"name": "other", "label": "Other"}]}, ("flux", "", ""), id="field-not-described"),
         pytest.param(("", "", ""), {}, ("flux", "", ""), id="no-metadata"),
     ],

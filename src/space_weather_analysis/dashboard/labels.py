@@ -2,6 +2,8 @@ from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlsplit
 
+from space_weather_analysis.metadata.normalize import normalize_units
+
 # A metadata record as JSON-compatible dictionary, as the read layer returns it; empty if the dataset has none
 type Metadata = Mapping[str, Any]
 
@@ -55,7 +57,8 @@ def field_unit(metadata: Metadata, field: str, configured: str = "") -> str:
     Returns:
         The unit; empty if neither gives one.
     """
-    return configured or variable_metadata(metadata, field).get("units") or ""
+    # Records stored before a spelling was known still hold the provider's spelling
+    return configured or normalize_units(variable_metadata(metadata, field).get("units")) or ""
 
 
 def with_unit(label: str, unit: str) -> str:

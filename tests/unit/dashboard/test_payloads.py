@@ -562,7 +562,7 @@ def test_magnetic_connection_measures_each_flare_from_the_foot_of_the_field_line
 
 
 def test_aurora_frames_carry_their_edges_and_the_rule_of_thumb_follows_kp() -> None:
-    """Each stored map becomes a frame with its file and edges, and each hourly Kp median gives the edge 66 - 2 Kp."""
+    """Each stored map becomes a frame with its file and edges, and each hourly Kp median gives the edge 66 - 2 Kp in whole degrees."""
     maps = pd.DataFrame(
         {
             "file": ["a.json", "b.json"],
@@ -581,7 +581,7 @@ def test_aurora_frames_carry_their_edges_and_the_rule_of_thumb_follows_kp() -> N
     assert ([frame.url for frame in payload.frames], payload.frames[1].edge_north, payload.kp_edges, payload.media_files()[0]) == (
         ["media/maps/a.json", "media/maps/b.json"],
         None,
-        [60.0, 57.34],
+        [60.0, 57.0],
         ("maps", "a.json"),
     )
 

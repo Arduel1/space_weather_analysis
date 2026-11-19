@@ -83,6 +83,9 @@ function createGlobeViewer(three, container, coast) {
   const renderer = new three.WebGLRenderer({ antialias: true, alpha: true });
   // Sharp on high-density screens, but at most twice the pixels per CSS pixel to keep the drawing fast
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  // A screen reader announces the canvas as one image with this description
+  renderer.domElement.setAttribute("role", "img");
+  renderer.domElement.setAttribute("aria-label", "Turnable 3D globe of the Earth with day and night side, the aurora map and the estimated edge of the aurora oval");
   container.append(renderer.domElement);
   const scene = new three.Scene();
   // Opening angle of 30 degrees, aspect ratio set on resize, near and far clipping planes in Earth radii

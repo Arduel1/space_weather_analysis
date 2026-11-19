@@ -89,7 +89,7 @@ def test_value_view_formats_the_newest_value_with_its_level(
             _value_panel(format="{:.1e}"),
             ValueView(
                 "Long flux",
-                "2.0e-05 W/m^2",
+                "2.0e-05 W m\u207b\u00b2",
                 VALUE_TIME,
                 None,
                 help_lines=("Flux of the long channel", "Dataset: Synthetic X-ray flux"),

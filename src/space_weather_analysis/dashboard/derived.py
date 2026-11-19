@@ -56,8 +56,11 @@ def _sun_earth_travel_days(speed: pd.Series) -> pd.Series:
 
 
 def _aurora_oval_edge(kp: pd.Series) -> pd.Series:
-    """Returns the approximate geomagnetic latitude of the equatorward edge of the auroral oval in degrees from Kp."""
-    return AURORA_EDGE_AT_KP0 - AURORA_EDGE_SHIFT_PER_KP * kp
+    """Returns the approximate geomagnetic latitude of the equatorward edge of the auroral oval in whole degrees from Kp.
+
+    The rule of thumb is no more exact than a degree, so decimals would claim a precision it does not have.
+    """
+    return (AURORA_EDGE_AT_KP0 - AURORA_EDGE_SHIFT_PER_KP * kp).round()
 
 
 # Derived quantities a series or tile can name, by name

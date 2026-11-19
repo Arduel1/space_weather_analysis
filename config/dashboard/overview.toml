@@ -57,7 +57,7 @@ title = "Earth: Kp (estimated)"
 row = 1
 dataset = "swpc_kp_estimated"
 field = "estimated_kp"
-format = "{:.2f}"
+format = "{:.1f}"
 scale = "noaa_g"
 sparkline = "PT24H"
 baseline = { dataset = "Kp", field = "Kp" }

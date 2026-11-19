@@ -10,7 +10,7 @@
   --live: #1a7f37;
   --delayed: #b35900;
   --stale: #c62828;
-  --static: #6e7781;
+  --static: #656d76;
   --running: #0b62c4;
   --series-1: #2a78d6;
   --series-2: #eb6834;
@@ -114,6 +114,26 @@
 
 * {
   box-sizing: border-box;
+}
+
+/* Every button is at least 24 CSS pixels in each direction, and 32 on touch screens, so that it can be hit without
+   precise pointing (WCAG 2.2, target size) */
+button {
+  min-width: 24px;
+  min-height: 24px;
+}
+
+@media (pointer: coarse) {
+  button {
+    min-width: 32px;
+    min-height: 32px;
+  }
+}
+
+/* A visible frame shows which control the keyboard reaches next */
+:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
 }
 
 body {

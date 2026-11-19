@@ -89,6 +89,9 @@ function createFieldViewer(three, container) {
   // The label renderer places HTML elements over the canvas at the screen position of their 3D point
   const labelRenderer = new three.CSS2DRenderer();
   labelRenderer.domElement.className = "field-labels";
+  // A screen reader announces the canvas as one image with this description
+  renderer.domElement.setAttribute("role", "img");
+  renderer.domElement.setAttribute("aria-label", "Turnable 3D model of the Sun with its coronal magnetic field lines, coronal holes, sunspot regions and recent events");
   container.append(renderer.domElement, labelRenderer.domElement);
   const scene = new three.Scene();
   // Opening angle of 35 degrees, aspect ratio set on resize, near and far clipping planes in solar radii
