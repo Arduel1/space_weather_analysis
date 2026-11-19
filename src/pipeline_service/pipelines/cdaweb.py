@@ -251,7 +251,7 @@ class CdawebChunkSource:
         """
         result = self.client.fetch(dataset_id, start, stop)
         if result.data is None:
-            logger.info("No data of %s for %s to %s", dataset_id, start, stop)
+            logger.debug("No data of %s for %s to %s", dataset_id, start, stop)
             return False
 
         dataset_frame = dataset_to_frame(result.data, self.client.variables(dataset_id), start, stop)
@@ -294,4 +294,4 @@ class CdawebChunkSource:
         except METADATA_SAVE_ERRORS:
             logger.exception("Failed to save metadata of %s", dataset_id)
             return
-        logger.info("Saved metadata of %s", dataset_id)
+        logger.debug("Saved metadata of %s", dataset_id)

@@ -15,8 +15,8 @@ from catalog_collector.worker_tasks.settings import CatalogSettings, TaskInterva
 from space_weather_analysis.catalog.repository import MongoCatalogRepository
 from space_weather_analysis.config.errors import format_settings_error
 from space_weather_analysis.database.connection import connect_from_environment
-from space_weather_analysis.logging.config import setup_logging
-from space_weather_analysis.util.process import stop_on_termination
+from space_weather_analysis.observability.logging_setup import setup_logging
+from space_weather_analysis.observability.process import stop_on_termination
 
 logger = logging.getLogger(__name__)
 

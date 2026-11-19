@@ -93,7 +93,7 @@ class SwpcClient(DataClient[pd.DataFrame]):
             raise ValueError(f"Unknown SWPC dataset '{dataset_id}'; known are {sorted(self.products)}.")
         start, stop = ensure_aware(start), ensure_aware(stop)
         url = self.base_url + _covering_file(product, start, self.clock())
-        logger.info("Fetching %s from SWPC: %s", dataset_id, url)
+        logger.debug("Fetching %s from SWPC: %s", dataset_id, url)
 
         content: Any = download_json(self.session, url, self.TIMEOUT, f"SWPC file of {dataset_id}")
         if not isinstance(content, list):

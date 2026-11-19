@@ -178,7 +178,7 @@ class GfzChunkSource:
         """
         result = self.client.fetch(dataset_id, start, stop)
         if result.data is None:
-            logger.info("No value of %s inside chunk %s to %s; stored documents are kept", dataset_id, start, stop)
+            logger.debug("No value of %s inside chunk %s to %s; stored documents are kept", dataset_id, start, stop)
             return False
 
         documents = frame_to_documents(result.data, source_identifier(SourceType.GFZ_POTSDAM, dataset_id))

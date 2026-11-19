@@ -141,7 +141,7 @@ class GfzClient(DataClient[pd.DataFrame]):
             "end": stop.astimezone(UTC).strftime(self.TIME_FORMAT),
             "index": dataset_id,
         }
-        logger.info("Fetching %s from GFZ: %s to %s", dataset_id, params["start"], params["end"])
+        logger.debug("Fetching %s from GFZ: %s to %s", dataset_id, params["start"], params["end"])
 
         try:
             response = self.session.get(self.base_url, params=params, timeout=self.TIMEOUT_SECONDS)
@@ -158,7 +158,7 @@ class GfzClient(DataClient[pd.DataFrame]):
         except ValueError as error:
             raise DataProcessingError(f"GFZ response for {dataset_id} is no JSON: {error}") from error
         if isinstance(body, dict) and str(body.get("message", "")).startswith(self.NO_DATA_MESSAGE_START):
-            logger.info("GFZ has no value of %s from %s to %s", dataset_id, params["start"], params["end"])
+            logger.debug("GFZ has no value of %s from %s to %s", dataset_id, params["start"], params["end"])
             return FetchResult(None, self.base_url)
         if not isinstance(body, dict) or "datetime" not in body or dataset_id not in body:
             raise DataProcessingError(f"GFZ response for {dataset_id} lacks the keys 'datetime' and '{dataset_id}'.")

@@ -24,11 +24,11 @@ def queue_feed_jobs(job_repository: JobRepository, feeds: Sequence[Feed], now: d
     """
     for feed in feeds:
         if job_repository.has_open_job(feed.name):
-            logger.info("Feed %s still has an open job, no further job queued", feed.name)
+            logger.debug("Feed %s still has an open job, no further job queued", feed.name)
             continue
         start, end = feed.time_range(now)
         job_id = job_repository.create(feed.datasets, start, end, feed.source_type, feed.name)
-        logger.info("Queued job %s of feed %s for %s from %s to %s", job_id, feed.name, feed.datasets, start, end)
+        logger.debug("Queued job %s of feed %s for %s from %s to %s", job_id, feed.name, feed.datasets, start, end)
 
 
 def due_feeds(feeds: Sequence[Feed], last_queued: Mapping[str, datetime], now: datetime) -> list[Feed]:

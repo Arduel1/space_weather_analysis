@@ -3,7 +3,7 @@ import signal
 
 import pytest
 
-from space_weather_analysis.util.process import stop_on_termination
+from space_weather_analysis.observability.process import stop_on_termination
 
 
 def test_sigterm_ends_the_main_thread_like_ctrl_c() -> None:

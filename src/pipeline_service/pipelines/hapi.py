@@ -278,7 +278,7 @@ class HapiChunkSource:
         except METADATA_SAVE_ERRORS:
             logger.exception("Failed to save metadata of %s", dataset_id)
             return
-        logger.info("Saved metadata of %s", dataset_id)
+        logger.debug("Saved metadata of %s", dataset_id)
 
 
 def hapi_source_identifier(server_url: str) -> str:

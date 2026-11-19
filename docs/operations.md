@@ -30,7 +30,9 @@ Every service restarts after a crash and after a restart of Docker (`restart: al
 | `mongo` | the database answers a ping |
 | `backup` | the newest dump is younger than 2 days |
 
-`docker compose logs -f {service}` follows the log of a service. Docker keeps five log files of 10 MB per container.
+`docker compose logs -f {service}` follows the log of a service. Docker keeps five log files of 10 MB per container. `LOG_LEVEL` in `.env` sets the lowest level written (`INFO` by default, `DEBUG` adds every routine step) and `LOG_FORMAT=json` writes one JSON object per line, with fields such as `feed` and `job_id`, for a log collector.
+
+At level `INFO` the pipeline service writes one summary per feed and hour (runs, failures, inserted and deleted documents, skipped chunks, gaps). A failure that repeats with the same cause is logged as warning once, its repeats at level `DEBUG`, and its end as `works again after {n} failures`.
 
 The "Data updates" panel on the overview page of the dashboard shows the state of each feed: its last run, the runs with gaps or failures and their causes. A job that reports no progress for 30 minutes is ended by the watchdog of the pipeline service (see [Pipeline Service](pipeline-service.md#failures)).
 

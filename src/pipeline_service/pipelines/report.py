@@ -12,10 +12,12 @@ class IngestionReport:
     Attributes:
         chunks_total: The chunks the run tried to ingest, without the chunks skipped as already stored.
         gaps: The chunks that failed.
+        chunks_skipped: The chunks not requested, as their last fetch is current.
     """
 
     chunks_total: int = 0
     gaps: list[ChunkGap] = field(default_factory=list)
+    chunks_skipped: int = 0
 
     @property
     def all_failed(self) -> bool:
@@ -23,10 +25,11 @@ class IngestionReport:
         return self.chunks_total > 0 and len(self.gaps) == self.chunks_total
 
     def merge(self, other: IngestionReport) -> None:
-        """Adds the chunks and gaps of another report to this one.
+        """Adds the chunks, gaps and skipped chunks of another report to this one.
 
         Args:
             other: The report of a further run.
         """
         self.chunks_total += other.chunks_total
         self.gaps.extend(other.gaps)
+        self.chunks_skipped += other.chunks_skipped

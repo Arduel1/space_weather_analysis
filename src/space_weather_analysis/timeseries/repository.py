@@ -1,7 +1,10 @@
 import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from collections.abc import Hashable, Mapping, Sequence
+from collections.abc import Generator, Hashable, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from itertools import batched
 from typing import Any, NamedTuple
@@ -28,6 +31,38 @@ class RangeChanges(NamedTuple):
 
     inserted: int
     deleted: int
+
+
+@dataclass
+class WriteCount:
+    """The documents the time series repositories wrote while a count_writes block ran.
+
+    Attributes:
+        inserted: The number of inserted documents.
+        deleted: The number of deleted documents.
+    """
+
+    inserted: int = 0
+    deleted: int = 0
+
+
+# The count of the running count_writes block; a new thread starts without one, so each lane of the job runner counts its own job
+_running_write_count: ContextVar[WriteCount | None] = ContextVar("running_write_count", default=None)
+
+
+@contextmanager
+def count_writes() -> Generator[WriteCount]:
+    """Counts the documents the time series repositories insert and delete in this thread while the block runs.
+
+    Yields:
+        The count, updated with every write of the block.
+    """
+    count = WriteCount()
+    token = _running_write_count.set(count)
+    try:
+        yield count
+    finally:
+        _running_write_count.reset(token)
 
 
 class TimeSeriesRepository(ABC):
@@ -193,6 +228,8 @@ class MongoTimeSeriesRepository(TimeSeriesRepository):
             self.db[collection].insert_many(batch, ordered=False)
             inserted += len(batch)
         logger.debug("Inserted %d documents into %s", inserted, collection)
+        if (count := _running_write_count.get()) is not None:
+            count.inserted += inserted
         return inserted
 
     def replace_range(self, collection: str, start: datetime, stop: datetime, documents: Sequence[TimeSeriesDocument]) -> RangeChanges:
@@ -228,7 +265,10 @@ class MongoTimeSeriesRepository(TimeSeriesRepository):
         inserted = self.insert(collection, new_documents)
         for batch in batched(obsolete_ids, self.BATCH_SIZE, strict=False):
             self.db[collection].delete_many({"_id": {"$in": list(batch)}})
-        logger.info("Replaced %s between %s and %s: %d inserted, %d deleted", collection, start, stop, inserted, len(obsolete_ids))
+        logger.debug("Replaced %s between %s and %s: %d inserted, %d deleted", collection, start, stop, inserted, len(obsolete_ids))
+        # insert counted the inserted documents
+        if (count := _running_write_count.get()) is not None:
+            count.deleted += len(obsolete_ids)
         return RangeChanges(inserted, len(obsolete_ids))
 
     def has_documents(self, collection: str, start: datetime, stop: datetime) -> bool:

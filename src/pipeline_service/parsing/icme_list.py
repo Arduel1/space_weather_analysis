@@ -144,5 +144,5 @@ def parse_icme_list(path: Path) -> pd.DataFrame:
     if not rows:
         raise DataProcessingError(f"{path} holds no ICME.")
     frame = pd.DataFrame(rows, index=pd.DatetimeIndex(times))
-    logger.info("Extracted %d ICMEs from %s.", len(frame), path)
+    logger.debug("Extracted %d ICMEs from %s.", len(frame), path)
     return frame[~frame.index.duplicated()].sort_index()

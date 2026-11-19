@@ -443,7 +443,7 @@ Jupyter notebooks for exploratory analysis live in `notebooks/` (`uv run jupyter
 │   │   ├── timeseries/, coverage/, jobs/
 │   │   ├── solar/, heliosphere/, geospace/  # Physics: solar images and magnetic field, CME propagation, aurora
 │   │   ├── dashboard/          # Dashboard configuration and panel documents (panels/: one module per panel type)
-│   │   └── config/, database/, logging/, scales/, util/
+│   │   └── config/, database/, observability/, scales/, util/
 │   ├── catalog_collector/      # Metadata worker (metadata_worker.py)
 │   ├── pipeline_service/       # Pipeline service (main.py): feeds, jobs, pipelines per source type, parsing
 │   ├── site_export/            # Writes and serves the dashboard documents (main.py)

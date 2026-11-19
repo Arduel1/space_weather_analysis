@@ -95,7 +95,7 @@ def _read_raw_rows(path: Path) -> pd.DataFrame:
             continue
         # Rows without remarks have one part less and get no remarks entry.
         parsed_rows.append(dict(zip(_COLUMN_NAMES, parts, strict=False)))
-    logger.info("Extracted %d rows from %s.", len(parsed_rows), path)
+    logger.debug("Extracted %d rows from %s.", len(parsed_rows), path)
     return pd.DataFrame(parsed_rows, columns=list(_COLUMN_NAMES))
 
 

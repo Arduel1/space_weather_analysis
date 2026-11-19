@@ -195,7 +195,7 @@ class ImagePipeline:
             self.timeseries.replace_range(collection, stored[0].time, stop, documents)
             refresh_coverage(self.coverage_repository, dataset_id, collection)
             self._save_metadata(dataset_id, collection, product.list_url)
-        logger.info("Image dataset %s: %d frames in the list range, %d fetched", dataset_id, len(frames), fetched)
+        logger.debug("Image dataset %s: %d frames in the list range, %d fetched", dataset_id, len(frames), fetched)
 
     def _ingest_zoom(self, dataset_id: str, product: ImageProduct, zoom: EventZoom, directory: pathlib.Path) -> None:
         """Stores the frames around the place of the newest event over the whole event, replacing those of earlier events.
@@ -220,7 +220,7 @@ class ImagePipeline:
         begin = pd.to_datetime(str(event.get(BEGIN_FIELD) or ""), utc=True, errors="coerce")
         end = pd.to_datetime(str(event.get(END_FIELD) or ""), utc=True, errors="coerce")
         if coordinates is None or pd.isna(begin) or pd.isna(end):
-            logger.info("The newest %s event of %s has no place, begin or end; no zoom", zoom.event_type, peak)
+            logger.debug("The newest %s event of %s has no place, begin or end; no zoom", zoom.event_type, peak)
             return
         # The place projected onto the disk seen from Earth at the peak; an event behind the limb gets no zoom
         west, north, visible = disk_position(np.array([coordinates[0]]), np.array([coordinates[1]]), solar_b0(pd.DatetimeIndex([peak])))
@@ -251,7 +251,7 @@ class ImagePipeline:
             index=pd.DatetimeIndex([time for _, time in stored]),
         )
         self._replace_all_documents(dataset_id, frame_table, HELIOVIEWER_SCREENSHOT_URL)
-        logger.info("Zoom %s on the %s event of %s at %s: %d frames", dataset_id, zoom.event_type, peak, event.get(LOCATION_FIELD), len(stored))
+        logger.debug("Zoom %s on the %s event of %s at %s: %d frames", dataset_id, zoom.event_type, peak, event.get(LOCATION_FIELD), len(stored))
 
     def _ingest_model_run(self, dataset_id: str, product: ImageProduct, directory: pathlib.Path) -> None:
         """Stores the frames of the newest run of a model, replacing the frames and documents of earlier runs.
@@ -280,7 +280,7 @@ class ImagePipeline:
         stored = [(name, frame.time) for name, frame in wanted.items() if (directory / name).exists()]
         frame_table = pd.DataFrame({FRAME_FILE_FIELD: [name for name, _ in stored]}, index=pd.DatetimeIndex([time for _, time in stored]))
         self._replace_all_documents(dataset_id, frame_table, product.list_url)
-        logger.info("Model run %s: %d of %d frames stored", dataset_id, len(stored), len(wanted))
+        logger.debug("Model run %s: %d of %d frames stored", dataset_id, len(stored), len(wanted))
 
     def _store_missing_frames(self, dataset_id: str, directory: pathlib.Path, wanted: Mapping[str, Frame], size: int) -> int:
         """Downloads the wanted frames not stored yet; a frame that fails is logged, left out and tried again on the next run.

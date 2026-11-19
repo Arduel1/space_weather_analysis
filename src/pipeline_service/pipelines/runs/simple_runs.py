@@ -1,17 +1,14 @@
-import logging
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 
 from pipeline_service.pipelines.base import ProgressCallback
 from pipeline_service.pipelines.report import IngestionReport
-from pipeline_service.pipelines.runs.run_steps import CHUNK_ERRORS, record_gap
+from pipeline_service.pipelines.runs.run_steps import CHUNK_ERRORS, DATASET_FAILURES, record_gap
 from space_weather_analysis.timeseries.documents import TimeSeriesDocument
 from space_weather_analysis.timeseries.models import Granularity
 from space_weather_analysis.timeseries.repository import TimeSeriesRepository
 from space_weather_analysis.util.error_handling import SourceUnreachableError
 from space_weather_analysis.util.types import TimeRange
-
-logger = logging.getLogger(__name__)
 
 
 def ingest_or_record_gap[T](report: IngestionReport, dataset_id: str, start: datetime, stop: datetime, ingest: Callable[[], T]) -> T | None:
@@ -31,11 +28,13 @@ def ingest_or_record_gap[T](report: IngestionReport, dataset_id: str, start: dat
     """
     report.chunks_total += 1
     try:
-        return ingest()
+        result = ingest()
     except CHUNK_ERRORS as error:
-        logger.warning("Chunk %s to %s of %s not ingested: %s", start, stop, dataset_id, error)
+        DATASET_FAILURES.failed(dataset_id, type(error).__name__, "Chunk %s to %s of %s not ingested: %s", start, stop, dataset_id, error)
         record_gap(report, dataset_id, start, stop, f"{type(error).__name__}: {error}")
         return None
+    DATASET_FAILURES.succeeded(dataset_id)
+    return result
 
 
 def run_single_dataset(
@@ -66,8 +65,10 @@ def run_single_dataset(
         gap_reason = ingest()
     except errors as error:
         # The log message starts a sentence with the subject
-        logger.warning("%s not stored: %s", what[:1].upper() + what[1:], error)
+        DATASET_FAILURES.failed(dataset_id, type(error).__name__, "%s not stored: %s", what[:1].upper() + what[1:], error)
         gap_reason = f"{type(error).__name__}: {error}"
+    else:
+        DATASET_FAILURES.succeeded(dataset_id)
     if gap_reason is not None:
         record_gap(report, dataset_id, start, stop, gap_reason)
     if progress_callback:
@@ -132,12 +133,16 @@ def run_per_dataset(
         try:
             ingest(dataset_id)
         except SourceUnreachableError as error:
-            logger.warning("%s unreachable, the remaining datasets of this run are not requested: %s", provider, error)
+            DATASET_FAILURES.failed(
+                dataset_id, type(error).__name__, "%s unreachable, the remaining datasets of this run are not requested: %s", provider, error
+            )
             record_gap(report, dataset_id, start, stop, f"{type(error).__name__}: {error}")
             unreachable = error
         except errors as error:
-            logger.warning("%s dataset %s not ingested: %s", capitalized_kind, dataset_id, error)
+            DATASET_FAILURES.failed(dataset_id, type(error).__name__, "%s dataset %s not ingested: %s", capitalized_kind, dataset_id, error)
             record_gap(report, dataset_id, start, stop, f"{type(error).__name__}: {error}")
+        else:
+            DATASET_FAILURES.succeeded(dataset_id)
         if progress_callback:
             progress_callback((dataset_index + 1) / len(datasets), f"Processed {dataset_kind} dataset {dataset_id}")
     return report

@@ -18,8 +18,8 @@ from space_weather_analysis.catalog.static_entries import load_static_catalog
 from space_weather_analysis.config.errors import format_settings_error
 from space_weather_analysis.database.connection import connect_from_environment
 from space_weather_analysis.jobs.repository import JobRepository, MongoJobRepository
-from space_weather_analysis.logging.config import setup_logging
-from space_weather_analysis.util.process import stop_on_termination
+from space_weather_analysis.observability.logging_setup import setup_logging
+from space_weather_analysis.observability.process import stop_on_termination
 
 logger = logging.getLogger(__name__)
 

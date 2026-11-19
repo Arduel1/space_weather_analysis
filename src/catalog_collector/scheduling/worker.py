@@ -10,8 +10,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from catalog_collector.scheduling.models import MetadataTask, TaskKind
 from catalog_collector.scheduling.repository import MetadataTaskRepository
+from space_weather_analysis.observability.process import beat
 from space_weather_analysis.util.error_handling import DataProcessingError, DataRetrievalError
-from space_weather_analysis.util.process import beat
 
 logger = logging.getLogger(__name__)
 
@@ -140,8 +140,9 @@ class MetadataWorker:
     def _execute(self, task: MetadataTask, kind: TaskKind, host: str) -> None:
         """Runs one task, records its outcome and starts the pause of its host, at least as long as a requested Retry-After.
 
-        A DataRetrievalError or DataProcessingError is an expected provider failure and is logged as warning; any other
-        exception is a bug and is logged with its traceback. Both are retried, so a long-running worker outlives every single task.
+        A DataRetrievalError or DataProcessingError is an expected provider failure, logged as warning on the first failure
+        in a row and at debug level on the further ones; any other exception is a bug and is logged with its traceback. Both
+        are retried, so a long-running worker outlives every single task. The first success after failures is logged at info level.
 
         Args:
             task: The due task.
@@ -156,7 +157,14 @@ class MetadataWorker:
             if isinstance(e, DataRetrievalError) and e.retry_after_seconds:
                 retry_after = timedelta(seconds=e.retry_after_seconds)
             finished_at, retry_at = self._record_failure(task, kind, e, retry_after)
-            logger.warning("Metadata task '%s' failed (%d in a row); retry at %s: %s", task.id, task.consecutive_failures + 1, retry_at, e)
+            logger.log(
+                logging.WARNING if task.consecutive_failures == 0 else logging.DEBUG,
+                "Metadata task '%s' failed (%d in a row); retry at %s: %s",
+                task.id,
+                task.consecutive_failures + 1,
+                retry_at,
+                e,
+            )
         except Exception as e:
             finished_at, retry_at = self._record_failure(task, kind, e, retry_after)
             logger.exception(
@@ -167,7 +175,9 @@ class MetadataWorker:
             jitter = 1.0 + self.rng.uniform(-self.settings.interval_jitter, self.settings.interval_jitter)
             next_due_at = finished_at + kind.interval * jitter
             self.repository.record_success(task.id, finished_at, next_due_at)
-            logger.info("Metadata task '%s' done in %.1f s; next run at %s.", task.id, (finished_at - started_at).total_seconds(), next_due_at)
+            logger.debug("Metadata task '%s' done in %.1f s; next run at %s.", task.id, (finished_at - started_at).total_seconds(), next_due_at)
+            if task.consecutive_failures > 0:
+                logger.info("Metadata task '%s' works again after %d failures", task.id, task.consecutive_failures)
         pause = timedelta(seconds=self.rng.uniform(self.settings.host_pause_min_seconds, self.settings.host_pause_max_seconds))
         self._host_ready_at[host] = finished_at + max(pause, retry_after)
 

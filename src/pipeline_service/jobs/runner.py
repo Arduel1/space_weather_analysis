@@ -9,6 +9,7 @@ from functools import partial
 from pymongo.database import Database
 from pymongo.errors import PyMongoError
 
+from pipeline_service.jobs.feed_activity import FeedActivity
 from pipeline_service.pipelines.base import Pipeline
 from pipeline_service.pipelines.factory import PipelineFactory
 from pipeline_service.pipelines.report import IngestionReport
@@ -16,8 +17,9 @@ from space_weather_analysis.catalog.models import SourceType
 from space_weather_analysis.catalog.repository import CatalogRepository, MongoCatalogRepository
 from space_weather_analysis.jobs.models import Job, JobStatus
 from space_weather_analysis.jobs.repository import JobRepository, MongoJobRepository
+from space_weather_analysis.observability.process import beat
+from space_weather_analysis.timeseries.repository import WriteCount, count_writes
 from space_weather_analysis.util.error_handling import DatasetNotCataloguedError
-from space_weather_analysis.util.process import beat
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,9 @@ CATALOG_RETRY_DELAY = timedelta(minutes=1)
 # Every pipeline reports progress after each chunk or dataset, which takes minutes at most, so a job silent for this
 # long hangs.
 STALE_JOB_LIMIT = timedelta(minutes=30)
+
+# Time between two summaries of what the jobs of each feed did; the line of a single feed job is logged at debug level
+FEED_SUMMARY_INTERVAL = timedelta(hours=1)
 
 
 class LaneBlockedError(RuntimeError):
@@ -85,11 +90,13 @@ class JobRunner:
         self.job_repository: JobRepository = MongoJobRepository(db)
         self.catalog_repository: CatalogRepository = MongoCatalogRepository(db)
         self.pipeline_for = pipeline_for if pipeline_for is not None else PipelineFactory(self.db, data_dir).get_pipeline
+        self.feed_activity = FeedActivity()
+        self._next_feed_summary_at = clock() + FEED_SUMMARY_INTERVAL
 
     def run_daemon(self) -> None:
         """Runs one lane thread per source type and a thread assigning jobs without source type, and watches for stale jobs here.
 
-        The watchdog touches the heartbeat file after every check.
+        The watchdog touches the heartbeat file after every check and logs the summary of each feed every FEED_SUMMARY_INTERVAL.
 
         Raises:
             LaneBlockedError: If a lane is still inside a job that failed for lack of progress.
@@ -103,6 +110,9 @@ class JobRunner:
         while True:
             time.sleep(self.WATCHDOG_INTERVAL_SECONDS)
             self.fail_stale_jobs()
+            if self.clock() >= self._next_feed_summary_at:
+                self.log_feed_summaries("in the last hour")
+                self._next_feed_summary_at += FEED_SUMMARY_INTERVAL
             beat()
 
     def fail_stale_jobs(self) -> None:
@@ -134,7 +144,28 @@ class JobRunner:
         took_job = True
         while took_job:
             took_job = self.dispatch_next_job() or any(self.process_next_job(source_type) for source_type in SourceType)
+        self.log_feed_summaries("in this run")
         logger.info("Job runner finished: no job is due.")
+
+    def log_feed_summaries(self, period: str) -> None:
+        """Logs one line per feed with what its jobs did since the last summary.
+
+        Args:
+            period: The time the summary covers, completing the log message.
+        """
+        for feed, totals in self.feed_activity.take().items():
+            logger.info(
+                "Feed %s: %d runs %s, %d failed, %d inserted, %d deleted, %d chunks skipped, %d gaps",
+                feed,
+                totals.runs,
+                period,
+                totals.failed_runs,
+                totals.inserted,
+                totals.deleted,
+                totals.chunks_skipped,
+                totals.gaps,
+                extra={"feed": feed},
+            )
 
     def _poll(self, take_next_job: Callable[[], bool]) -> None:
         """Takes jobs until the process ends, waiting POLLING_INTERVAL_SECONDS whenever no job was due.
@@ -206,9 +237,9 @@ class JobRunner:
         (first_type, first_datasets), *further_groups = groups.items()
         for source_type, datasets in further_groups:
             new_job_id = self.job_repository.create(datasets, job.parameters.start_time, job.parameters.end_time, source_type, job.feed)
-            logger.info("Job %s: datasets %s of source type %s moved to job %s", job.id, datasets, source_type, new_job_id)
+            logger.debug("Job %s: datasets %s of source type %s moved to job %s", job.id, datasets, source_type, new_job_id)
         self.job_repository.assign_source_type(job.id, first_type, first_datasets)
-        logger.info("Job %s assigned to source type %s: %s", job.id, first_type, first_datasets)
+        logger.debug("Job %s assigned to source type %s: %s", job.id, first_type, first_datasets)
         return True
 
     def _group_by_source_type(self, datasets: list[str]) -> dict[SourceType, list[str]]:
@@ -241,28 +272,59 @@ class JobRunner:
             job: The claimed job.
             source_type: The source type of the job.
         """
-        try:
-            logger.info("Processing job %s for source type %s: %s", job.id, source_type, job.parameters.datasets)
-            report = self._execute_pipeline(source_type, job.parameters.datasets, job.parameters.start_time, job.parameters.end_time, job_id=job.id)
-        except DatasetNotCataloguedError as error:
-            self._wait_for_catalog(job, error)
-            return
-        except INVALID_REQUEST_ERRORS as error:
-            logger.warning("Job %s rejected: %s", job.id, error)
-            self.job_repository.finish(job.id, JobStatus.FAILED, str(error))
-            return
-        except Exception as error:
-            # The daemon must outlive a failing job; the traceback shows the cause
-            logger.exception("Job %s failed", job.id)
-            self.job_repository.finish(job.id, JobStatus.FAILED, f"{type(error).__name__}: {error}")
-            return
+        started = time.monotonic()
+        with count_writes() as writes:
+            try:
+                logger.debug("Processing job %s for source type %s: %s", job.id, source_type, job.parameters.datasets)
+                report = self._execute_pipeline(
+                    source_type, job.parameters.datasets, job.parameters.start_time, job.parameters.end_time, job_id=job.id
+                )
+            except DatasetNotCataloguedError as error:
+                self._wait_for_catalog(job, error)
+                return
+            except INVALID_REQUEST_ERRORS as error:
+                logger.warning("Job %s rejected: %s", job.id, error)
+                self.job_repository.finish(job.id, JobStatus.FAILED, str(error))
+                self._record_job(job, None, writes)
+                return
+            except Exception as error:
+                # The daemon must outlive a failing job; the traceback shows the cause
+                logger.exception("Job %s failed", job.id)
+                self.job_repository.finish(job.id, JobStatus.FAILED, f"{type(error).__name__}: {error}")
+                self._record_job(job, None, writes)
+                return
 
         if report.all_failed:
             logger.warning("Job %s failed: all %d chunks failed.", job.id, report.chunks_total)
             self.job_repository.finish(job.id, JobStatus.FAILED, f"All {report.chunks_total} chunks failed.", report.gaps)
-            return
-        logger.info("Job %s completed: %d chunks tried, %d missing.", job.id, report.chunks_total, len(report.gaps))
-        self.job_repository.finish(job.id, JobStatus.COMPLETED, missing_chunks=report.gaps)
+        else:
+            self.job_repository.finish(job.id, JobStatus.COMPLETED, missing_chunks=report.gaps)
+        # A job of a feed is one of many in the hourly summary; a job of the Streamlit app was asked for by hand
+        logger.log(
+            logging.DEBUG if job.feed is not None else logging.INFO,
+            "Job %s of feed %s: %d datasets, %d inserted, %d deleted, %d chunks skipped, %d gaps, %.1f s",
+            job.id,
+            job.feed,
+            len(job.parameters.datasets),
+            writes.inserted,
+            writes.deleted,
+            report.chunks_skipped,
+            len(report.gaps),
+            time.monotonic() - started,
+            extra={"feed": job.feed, "job_id": job.id},
+        )
+        self._record_job(job, report, writes)
+
+    def _record_job(self, job: Job, report: IngestionReport | None, writes: WriteCount) -> None:
+        """Adds a finished job of a feed to the feed summaries; a job without feed is left out.
+
+        Args:
+            job: The finished job.
+            report: The report of its pipeline run; None if it failed without one.
+            writes: The documents it wrote.
+        """
+        if job.feed is not None:
+            self.feed_activity.record(job.feed, report, writes)
 
     def _wait_for_catalog(self, job: Job, error: DatasetNotCataloguedError) -> None:
         """Puts a job naming a dataset not yet in the catalog back into the queue, or fails it once the wait is over.
@@ -276,7 +338,7 @@ class JobRunner:
             logger.warning("Job %s failed: %s, still after %s", job.id, error, self.catalog_wait_limit)
             self.job_repository.finish(job.id, JobStatus.FAILED, f"{error} The catalog did not list it within {self.catalog_wait_limit}.")
             return
-        logger.info("Job %s waits for the catalog: %s", job.id, error)
+        logger.debug("Job %s waits for the catalog: %s", job.id, error)
         self.job_repository.requeue(job.id, now + CATALOG_RETRY_DELAY, str(error))
 
     def _execute_pipeline(
@@ -299,7 +361,7 @@ class JobRunner:
         def progress_callback(progress: float, message: str) -> None:
             """Stores the progress of a job or logs that of a manual run."""
             if job_id is None:
-                logger.info("Manual job progress: %.1f%% - %s", progress * 100, message)
+                logger.debug("Manual job progress: %.1f%% - %s", progress * 100, message)
                 return
             try:
                 self.job_repository.update_progress(job_id, progress, message)

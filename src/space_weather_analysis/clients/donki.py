@@ -261,5 +261,5 @@ def fetch_events(session: requests.Session, start: datetime, stop: datetime) -> 
             rows.extend({str(name): value for name, value in record.items()} for record in frame.to_dict("records"))
             times.extend(frame.index)
     events = pd.DataFrame(rows, columns=list(EVENT_FIELDS), index=pd.DatetimeIndex(times, tz=UTC))
-    logger.info("Fetched %d DONKI events from %s to %s", len(events), start, stop)
+    logger.debug("Fetched %d DONKI events from %s to %s", len(events), start, stop)
     return events.sort_index()

@@ -490,10 +490,11 @@ def test_hapi_metadata_variables_match_stored_fields(db: Database, serve_dataset
 
 @pytest.mark.integration
 def test_repeated_hapi_ingestion_does_not_duplicate_documents(db: Database, serve_dataset: ServeDataset) -> None:
-    """A second run over the same range keeps one document per data row."""
+    """A second run over the same settled range skips its one chunk and keeps one document per data row."""
     server_url = serve_dataset()
     _ingest(db, [server_url])
 
-    _pipeline(db).run([DATASET_ID], RUN_START, RUN_END)
+    second_report = _pipeline(db).run([DATASET_ID], RUN_START, RUN_END)
 
+    assert (second_report.chunks_skipped, second_report.chunks_total) == (1, 0)
     assert db[DATASET_ID].count_documents({}) == len(ROW_TIMES)

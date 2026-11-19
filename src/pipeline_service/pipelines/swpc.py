@@ -138,7 +138,7 @@ class SwpcPipeline:
         fetch_start = start if product.reaches_ahead else self._fetch_start(dataset_id, collection, start)
         result = self.client.fetch(dataset_id, fetch_start, stop)
         if result.data is None:
-            logger.info("SWPC file of %s holds no value between %s and %s", dataset_id, fetch_start, stop)
+            logger.debug("SWPC file of %s holds no value between %s and %s", dataset_id, fetch_start, stop)
             return False
         frame = result.data
         documents = frame_to_documents(frame, source_identifier(SourceType.SWPC, product.provider_id))
@@ -173,7 +173,7 @@ class SwpcPipeline:
         except METADATA_SAVE_ERRORS:
             logger.exception("Failed to save metadata of %s", dataset_id)
             return
-        logger.info("Saved metadata of %s", dataset_id)
+        logger.debug("Saved metadata of %s", dataset_id)
 
     def _fetch_start(self, dataset_id: str, collection: str, start: datetime) -> datetime:
         """Determines where a run fetches from: shortly before the newest stored document if the stored ones reach back to the start.

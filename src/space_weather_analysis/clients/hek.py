@@ -129,5 +129,5 @@ def fetch_regions(session: requests.Session, start: datetime, stop: datetime) ->
     regions = pd.concat(pages) if len(pages) > 1 else pages[0]
     # The HEK also returns entries that only overlap the range
     regions = regions[(regions.index >= start) & (regions.index < stop)]
-    logger.info("Fetched %d HEK region entries from %s to %s", len(regions), start, stop)
+    logger.debug("Fetched %d HEK region entries from %s to %s", len(regions), start, stop)
     return regions

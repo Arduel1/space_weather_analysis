@@ -17,11 +17,11 @@ from space_weather_analysis.dashboard.panels.images import MEDIA_DIRECTORY
 from space_weather_analysis.dashboard.reading import RepositoryReader
 from space_weather_analysis.database.connection import connect_from_environment
 from space_weather_analysis.jobs.repository import MongoJobRepository
-from space_weather_analysis.logging.config import setup_logging
 from space_weather_analysis.metadata.repository import MongoMetadataRepository
+from space_weather_analysis.observability.logging_setup import setup_logging
+from space_weather_analysis.observability.process import stop_on_termination
 from space_weather_analysis.timeseries.repository import MongoTimeSeriesRepository
 from space_weather_analysis.util.atomic_files import write_text_atomic
-from space_weather_analysis.util.process import stop_on_termination
 from space_weather_analysis.util.time_utils import parse_iso_duration
 
 logger = logging.getLogger(__name__)

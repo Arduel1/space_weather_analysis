@@ -8,7 +8,7 @@ from pipeline_service.chunk_status.repository import ChunkStatusRepository
 from pipeline_service.pipelines.base import ProgressCallback
 from pipeline_service.pipelines.report import IngestionReport
 from pipeline_service.pipelines.runs.calendar_grid import GridChunk, generate_time_chunks
-from pipeline_service.pipelines.runs.run_steps import CHUNK_ERRORS, record_gap, refresh_coverage
+from pipeline_service.pipelines.runs.run_steps import CHUNK_ERRORS, DATASET_FAILURES, record_gap, refresh_coverage
 from space_weather_analysis.coverage.repository import CoverageRepository
 from space_weather_analysis.metadata.repository import MetadataRepository
 from space_weather_analysis.timeseries.models import Granularity, TimeBucket
@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 # Time after the end of a fetched range from which data of an archive or real-time feed count as stable;
 # real-time feeds add late records and replace preliminary ones within hours after the measurement.
 SETTLE_DELAY = timedelta(days=2)
+
+# More chunks fetched for one dataset in one run mark its first load or a long outage, worth a line at info level
+MANY_CHUNKS = 10
 
 
 class ChunkSource(Protocol):
@@ -134,35 +137,53 @@ def run_chunked(
         unit = source.chunk_unit(dataset_id)
         grid_chunks = generate_time_chunks(start, stop, unit)
         collection = source.collection_for(dataset_id)
-        logger.info("Dataset %s: ingesting %s to %s in %d chunks of one %s", dataset_id, start, stop, len(grid_chunks), unit)
+        logger.debug("Dataset %s: ingesting %s to %s in %d chunks of one %s", dataset_id, start, stop, len(grid_chunks), unit)
         timeseries.ensure_collection(collection, source.granularity)
 
         delivered_any_chunk = False
+        fetched_chunks = 0
+        dataset_failed = False
         unreachable: SourceUnreachableError | None = None
         for chunk_index, chunk in enumerate(grid_chunks):
             status = chunk_status.get(dataset_id, chunk.cell_start)
             if status is not None and status.is_current(chunk.start, chunk.stop, clock()):
-                logger.info("Skipping chunk %s to %s of %s: its last fetch is current", chunk.start, chunk.stop, dataset_id)
+                logger.debug("Skipping chunk %s to %s of %s: its last fetch is current", chunk.start, chunk.stop, dataset_id)
+                report.chunks_skipped += 1
             elif unreachable is not None:
                 report.chunks_total += 1
                 record_gap(report, dataset_id, chunk.start, chunk.stop, f"Not requested, the provider was unreachable: {unreachable}")
             else:
                 fetch_start, fetch_stop = _fetch_range(chunk, status)
                 report.chunks_total += 1
+                fetched_chunks += 1
                 try:
                     if _fetch_chunk(source, chunk_status, dataset_id, collection, chunk.cell_start, (fetch_start, fetch_stop), clock):
                         delivered_any_chunk = True
                 except SourceUnreachableError as error:
-                    logger.warning("Provider of %s unreachable, the remaining chunks of this run are not requested: %s", dataset_id, error)
+                    DATASET_FAILURES.failed(
+                        dataset_id,
+                        type(error).__name__,
+                        "Provider of %s unreachable, the remaining chunks of this run are not requested: %s",
+                        dataset_id,
+                        error,
+                    )
                     record_gap(report, dataset_id, fetch_start, fetch_stop, f"{type(error).__name__}: {error}")
                     unreachable = error
+                    dataset_failed = True
                 except CHUNK_ERRORS as error:
-                    logger.warning("Chunk %s to %s of %s not ingested: %s", fetch_start, fetch_stop, dataset_id, error)
+                    DATASET_FAILURES.failed(
+                        dataset_id, type(error).__name__, "Chunk %s to %s of %s not ingested: %s", fetch_start, fetch_stop, dataset_id, error
+                    )
                     record_gap(report, dataset_id, fetch_start, fetch_stop, f"{type(error).__name__}: {error}")
+                    dataset_failed = True
             _report_chunk_progress(
                 progress_callback, dataset_id, dataset_position=(dataset_index, len(time_ranges)), chunks_done=(chunk_index + 1, len(grid_chunks))
             )
 
+        if fetched_chunks > MANY_CHUNKS:
+            logger.info("Dataset %s: fetched %d chunks of one %s between %s and %s", dataset_id, fetched_chunks, unit, start, stop)
+        if fetched_chunks and not dataset_failed:
+            DATASET_FAILURES.succeeded(dataset_id)
         source.save_metadata(dataset_id, collection)
         if delivered_any_chunk:
             refresh_coverage(coverage_repository, dataset_id, collection)

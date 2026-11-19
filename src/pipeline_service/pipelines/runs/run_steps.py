@@ -12,6 +12,7 @@ from space_weather_analysis.jobs.models import ChunkGap
 from space_weather_analysis.metadata.minimal import build_minimal_metadata
 from space_weather_analysis.metadata.overlays.layering import save_with_overlays
 from space_weather_analysis.metadata.repository import MetadataRepository
+from space_weather_analysis.observability.failures import RepeatedFailures
 from space_weather_analysis.timeseries.documents import TIME_FIELD
 from space_weather_analysis.util.error_handling import DataProcessingError, DataRetrievalError
 from space_weather_analysis.util.time_utils import ensure_aware
@@ -24,6 +25,10 @@ CHUNK_ERRORS = (DataRetrievalError, DataProcessingError, PyMongoError)
 
 # Failures of a metadata save, which leave the stored data documents valid.
 METADATA_SAVE_ERRORS = (PyMongoError, ValidationError, ValueError)
+
+# Failed chunks and datasets of every run, by dataset ID: a provider that stays down is logged as warning once, not in
+# every run of its feed
+DATASET_FAILURES = RepeatedFailures(logger)
 
 
 def resolve_time_range(start_time: datetime | None, end_time: datetime | None, lookback: timedelta) -> TimeRange:
@@ -139,4 +144,4 @@ def refresh_coverage(coverage_repository: CoverageRepository, dataset_id: str, c
     except PyMongoError:
         logger.exception("Failed to refresh the coverage of %s", dataset_id)
         return
-    logger.info("Refreshed coverage of %s: %d documents in %d intervals", dataset_id, coverage.document_count, len(coverage.intervals))
+    logger.debug("Refreshed coverage of %s: %d documents in %d intervals", dataset_id, coverage.document_count, len(coverage.intervals))

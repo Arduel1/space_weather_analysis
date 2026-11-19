@@ -105,7 +105,7 @@ class HapiClient(DataClient[HapiData]):
         unreachable_count = 0
         for source_number, entry in enumerate(entries, start=1):
             server_url = entry.get("source_id", "")
-            logger.info("Trying source %d/%d for %s: %s", source_number, len(entries), dataset_id, server_url)
+            logger.debug("Trying source %d/%d for %s: %s", source_number, len(entries), dataset_id, server_url)
             try:
                 result = self._fetch_from_source(dataset_id, entry, start, stop)
             except DataRetrievalError as error:
@@ -124,7 +124,7 @@ class HapiClient(DataClient[HapiData]):
             if unreachable_count == len(entries):
                 raise SourceUnreachableError(message)
             raise DataRetrievalError(message)
-        logger.info("No source has data for %s between %s and %s.", dataset_id, start, stop)
+        logger.debug("No source has data for %s between %s and %s.", dataset_id, start, stop)
         return FetchResult(None)
 
     def _fetch_from_source(self, dataset_id: str, entry: CatalogEntryDict, start: datetime, stop: datetime) -> FetchResult[HapiData]:
@@ -185,7 +185,7 @@ class HapiClient(DataClient[HapiData]):
         # HAPI requires the UTC designator 'Z'
         start_text = valid_range[0].isoformat(timespec="seconds").replace("+00:00", "Z")
         stop_text = valid_range[1].isoformat(timespec="seconds").replace("+00:00", "Z")
-        logger.info("HAPI request: %s [%s -> %s] at %s", dataset_id, start_text, stop_text, server_url)
+        logger.debug("HAPI request: %s [%s -> %s] at %s", dataset_id, start_text, stop_text, server_url)
 
         try:
             with _socket_timeout(self.timeout):
@@ -193,7 +193,7 @@ class HapiClient(DataClient[HapiData]):
         except HAPIError as error:
             self._raise_if_transient(error, server_url, dataset_id)
             # Servers also report that no data exists with a non-200 HTTP status
-            logger.info("Server %s has no data for %s [%s -> %s]: %s", server_url, dataset_id, start_text, stop_text, error)
+            logger.debug("Server %s has no data for %s [%s -> %s]: %s", server_url, dataset_id, start_text, stop_text, error)
             return FetchResult(None, server_url)
         # hapiclient reads the response body outside its own error handling, so a body that stops arriving surfaces as urllib3 error
         except (requests.ConnectionError, requests.Timeout, urllib3.exceptions.TimeoutError) as error:
@@ -202,9 +202,9 @@ class HapiClient(DataClient[HapiData]):
             raise DataRetrievalError(f"Request to {server_url} for {dataset_id} failed: {error}") from error
 
         if data is None or len(data) == 0:
-            logger.info("Server %s returned no data for %s [%s -> %s].", server_url, dataset_id, start_text, stop_text)
+            logger.debug("Server %s returned no data for %s [%s -> %s].", server_url, dataset_id, start_text, stop_text)
             return FetchResult(None, server_url)
-        logger.info("Fetched %d records of %s from %s", len(data), dataset_id, server_url)
+        logger.debug("Fetched %d records of %s from %s", len(data), dataset_id, server_url)
         return FetchResult((data, meta), server_url)
 
     def _raise_if_transient(self, error: HAPIError, server_url: str, dataset_id: str) -> None:

@@ -65,5 +65,5 @@ def parse_wso_polar_fields(path: Path) -> pd.DataFrame:
         raise DataProcessingError(f"{path} holds no WSO polar field observation.")
     times = pd.DatetimeIndex([time for time, _ in observations])
     values = pd.DataFrame([row for _, row in observations], columns=list(_FIELDS), index=times).astype(int)
-    logger.info("Extracted %d polar field observations from %s.", len(values), path)
+    logger.debug("Extracted %d polar field observations from %s.", len(values), path)
     return values[~values.index.duplicated()].sort_index()

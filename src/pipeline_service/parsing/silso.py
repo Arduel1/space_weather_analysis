@@ -150,7 +150,7 @@ def _read_raw_rows(path: Path, column_names: tuple[str, ...]) -> pd.DataFrame:
         )
     except (OSError, UnicodeDecodeError, pd.errors.ParserError) as error:
         raise DataProcessingError(f"SILSO data file {path} cannot be read: {error}") from error
-    logger.info("Extracted %d rows from %s.", len(raw_rows), path)
+    logger.debug("Extracted %d rows from %s.", len(raw_rows), path)
     return raw_rows
 
 
