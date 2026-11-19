@@ -210,6 +210,7 @@ function renderPage(keep = false) {
     let previous = null;
     for (const entry of row) {
       const panel = element("section", `panel panel-${entry.type}`);
+      panel.dataset.panelId = entry.id;
       panel.style.flexGrow = entry.width;
       if (entry.below && previous !== null) {
         // A panel below the previous one shares its column, which takes over the width of that panel
@@ -242,12 +243,32 @@ function renderPage(keep = false) {
   if (keep) window.scrollTo(0, scroll);
 }
 
-/** Reads the documents of every panel of every page into payloadsById. */
-async function loadPayloads() {
-  const entries = state.layout.pages.flatMap((page) => page.rows.flat());
-  // A document that cannot be read is kept as its error, which its panel shows instead of the page failing
+/**
+ * Reads the documents of the panels of a page that are not loaded in the version the layout names.
+ * @param {object} page A page of the layout.
+ * @returns {Promise<Map<string, object>>} The read documents by panel ID; a document that cannot be read is its error,
+ *   which its panel shows instead of the page failing.
+ */
+async function loadChangedPayloads(page) {
+  const entries = page.rows.flat().filter((entry) => state.payloadVersions[entry.id] !== entry.version);
   const payloads = await Promise.all(entries.map((entry) => loadJson(`panels/${entry.id}.json`).catch((error) => ({ error }))));
-  state.payloadsById = Object.fromEntries(entries.map((entry, index) => [entry.id, payloads[index]]));
+  return new Map(entries.map((entry, index) => [entry.id, payloads[index]]));
+}
+
+/** Keeps a read document of a panel with its version; a document that failed to load is read again the next time. */
+function storePayload(entry, payload) {
+  state.payloadsById[entry.id] = payload;
+  state.payloadVersions[entry.id] = payload.error === undefined ? entry.version : null;
+}
+
+/** Reads the documents of the selected page that are missing or outdated and draws the page. */
+async function showSelectedPage() {
+  const page = selectedPage();
+  const loaded = await loadChangedPayloads(page);
+  for (const entry of page.rows.flat()) {
+    if (loaded.has(entry.id)) storePayload(entry, loaded.get(entry.id));
+  }
+  renderPage();
 }
 
 /** Writes when the documents were built and the legend of the freshness labels. */
@@ -266,11 +287,10 @@ function renderBuildInfo() {
   );
 }
 
-/** Reads the layout and the documents of every panel of every page and draws the selected page. */
+/** Reads the layout and the documents of the selected page and draws it. */
 async function renderDashboard() {
   state.layout = await loadJson("dashboard.json");
-  await loadPayloads();
-  renderPage();
+  await showSelectedPage();
   renderCredits(state.layout.credits);
   renderBuildInfo();
 }
@@ -281,27 +301,32 @@ function layoutShape(dashboardLayout) {
 }
 
 /**
- * Takes over a newer build of the documents in place: only panels whose document changed are drawn again, a playing
- * video keeps playing with its frames until it stops, and a running replay goes on.
+ * Takes over a newer build of the documents in place: only the documents of the shown page with a new version are read
+ * and their panels drawn again, a playing video keeps playing with its frames until it stops, and a running replay goes
+ * on. The other pages read their changed documents when they are shown. Nothing is read while the tab is hidden.
  */
 async function updateIfRebuilt() {
+  if (document.hidden) return;
   try {
     const latest = await loadJson("dashboard.json");
     if (latest.generated_at === state.layout.generated_at) return;
     const arrangementChanged = layoutShape(latest) !== layoutShape(state.layout);
-    const previous = state.payloadsById;
     state.layout = latest;
-    await loadPayloads();
+    const page = selectedPage();
+    const loaded = await loadChangedPayloads(page);
     if (arrangementChanged) {
+      for (const entry of page.rows.flat()) {
+        if (loaded.has(entry.id)) storePayload(entry, loaded.get(entry.id));
+      }
       renderPage(true);
     } else {
-      for (const { entry, panel } of shownPanels) {
-        if (JSON.stringify(previous[entry.id]) === JSON.stringify(state.payloadsById[entry.id])) continue;
-        // A playing video keeps its document; the next build after it stops brings it up to date
-        if (panel.isPlaying?.()) {
-          state.payloadsById[entry.id] = previous[entry.id];
-          continue;
-        }
+      for (const { panel } of shownPanels) {
+        // The shown panels keep their old layout entries; the new entry carries the new version
+        const entry = page.rows.flat().find((candidate) => candidate.id === panel.dataset.panelId);
+        if (entry === undefined || !loaded.has(entry.id)) continue;
+        // A playing video keeps its document and old version; the next build after it stops brings it up to date
+        if (panel.isPlaying?.()) continue;
+        storePayload(entry, loaded.get(entry.id));
         renderPanel(entry, panel);
       }
       const span = pageReplaySpan();
@@ -352,9 +377,10 @@ async function start() {
   }
   // The ages of the freshness labels grow while the page is open: updated every 30 seconds
   setInterval(() => state.freshnessLabels.forEach(({ label, items }) => updateFreshness(label, items)), 30 * 1000);
-  // A newer build of the documents is looked for once a minute
+  // A newer build of the documents is looked for once a minute, and at once when a hidden tab is shown again
   setInterval(updateIfRebuilt, 60 * 1000);
-  window.addEventListener("hashchange", () => renderPage());
+  document.addEventListener("visibilitychange", updateIfRebuilt);
+  window.addEventListener("hashchange", () => showSelectedPage());
 }
 
 start();

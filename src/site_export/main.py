@@ -1,5 +1,6 @@
 import argparse
 import functools
+import json
 import logging
 import pathlib
 import shutil
@@ -58,7 +59,8 @@ def export_documents(
 ) -> int:
     """Reads the dashboard configuration and the stored data and writes the layout, one payload per panel and the media files they show.
 
-    The configuration is read on every call, so a changed dashboard shows with the next write.
+    The configuration is read on every call, so a changed dashboard shows with the next write. A payload is written only
+    if its file is missing or its version differs from the one the previous layout names.
 
     Args:
         reader: The reader of data, metadata and jobs, kept between writes so that long histories are read once an hour.
@@ -68,7 +70,7 @@ def export_documents(
         media_dir: The directory of the stored frames of the image sequences.
 
     Returns:
-        The number of panel documents written.
+        The number of panel documents written, without the unchanged ones.
 
     Raises:
         OSError: If a configuration file cannot be read or a document cannot be written.
@@ -87,11 +89,34 @@ def export_documents(
     _copy_media(media_dir, data_dir / MEDIA_DIRECTORY, {file for payload in payloads.values() for file in payload.media_files()})
     panels_dir = data_dir / PANELS_DIRECTORY
     panels_dir.mkdir(parents=True, exist_ok=True)
-    for panel_id, payload in payloads.items():
-        write_text_atomic(panels_dir / f"{panel_id}.json", payload.model_dump_json())
+    written_versions = _layout_versions(data_dir / LAYOUT_FILE)
+    written = 0
+    for page in layout.pages:
+        for entry in (entry for row in page.rows for entry in row):
+            panel_file = panels_dir / f"{entry.id}.json"
+            if panel_file.exists() and written_versions.get(entry.id) == entry.version:
+                continue
+            write_text_atomic(panel_file, payloads[entry.id].model_dump_json())
+            written += 1
     # The layout last, so it names only panel documents that are already written
     write_text_atomic(data_dir / LAYOUT_FILE, layout.model_dump_json())
-    return len(payloads)
+    return written
+
+
+def _layout_versions(layout_file: pathlib.Path) -> dict[str, str]:
+    """Reads the version of each panel payload from a written layout.
+
+    Args:
+        layout_file: The layout document.
+
+    Returns:
+        The versions by panel ID; empty if the file is missing or unreadable, so that every payload is written.
+    """
+    try:
+        layout = json.loads(layout_file.read_text(encoding="utf-8"))
+        return {entry["id"]: entry.get("version", "") for page in layout["pages"] for row in page["rows"] for entry in row}
+    except OSError, ValueError, KeyError, TypeError:
+        return {}
 
 
 def _copy_media(source_dir: pathlib.Path, target_dir: pathlib.Path, files: set[tuple[str, str]]) -> None:

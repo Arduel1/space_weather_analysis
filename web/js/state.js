@@ -4,8 +4,10 @@ export const state = {
   freshnessLabels: [],
   // The layout document of the dashboard with its pages; null until it is loaded
   layout: null,
-  // The loaded panel documents of every page, by panel ID
+  // The loaded panel documents, by panel ID; the documents of a page are loaded when it is first shown
   payloadsById: {},
+  // The layout version of each loaded panel document, by panel ID; null for a document that failed to load
+  payloadVersions: {},
   // Panels of the shown page that follow the replay time: panel ID and a function taking the time in milliseconds,
   // null for now
   replayListeners: [],

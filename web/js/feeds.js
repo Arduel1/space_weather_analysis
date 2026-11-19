@@ -24,8 +24,8 @@ function datasetOrder() {
   const order = new Map();
   for (const page of state.layout.pages) {
     for (const entry of page.rows.flat()) {
-      for (const about of state.payloadsById[entry.id]?.about ?? []) {
-        if (!order.has(about.dataset)) order.set(about.dataset, order.size);
+      for (const dataset of entry.datasets) {
+        if (!order.has(dataset)) order.set(dataset, order.size);
       }
     }
   }

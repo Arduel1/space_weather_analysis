@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from collections.abc import Iterator
 from datetime import datetime
@@ -26,6 +27,8 @@ class PanelEntry(BaseModel):
         width: The width of the panel relative to the other panels of its row.
         below: Whether the panel is drawn below the previous panel of its row, in the same column.
         credits: The positions in the credits of the layout of the sources and formulas the panel shows, its footnotes.
+        version: Changes whenever the payload of the panel changes, so that the export and the web frontend skip unchanged payloads.
+        datasets: The IDs of the datasets the panel shows, in the order of its info view.
     """
 
     model_config = PAYLOAD
@@ -35,6 +38,8 @@ class PanelEntry(BaseModel):
     width: float
     below: bool = False
     credits: list[int] = Field(default_factory=list)
+    version: str = ""
+    datasets: list[str] = Field(default_factory=list)
 
 
 class Credit(BaseModel):
@@ -161,19 +166,34 @@ def _build_rows(
     for row_number, row in enumerate(rows):
         row_entries = []
         for column_number, panel in enumerate(row):
-            payload = _built_payload(panel, reader, context)
+            built = _built_payload(panel, reader, context)
+            # The info view of every panel describes its datasets, also of a panel whose build failed
+            payload = built.model_copy(update={"about": _about(panel, reader)})
             entry = PanelEntry(
                 id=panel_id(page_number, row_number, column_number),
                 type=panel.type,
                 width=panel.width,
                 below=panel.below,
-                credits=_footnotes(panel, payload, reader, credits),
+                credits=_footnotes(panel, built, reader, credits),
+                version=payload_version(payload),
+                datasets=[about.dataset for about in payload.about],
             )
-            # The info view of every panel describes its datasets, also of a panel whose build failed
-            payloads[entry.id] = payload.model_copy(update={"about": _about(panel, reader)})
+            payloads[entry.id] = payload
             row_entries.append(entry)
         entries.append(row_entries)
     return entries
+
+
+def payload_version(payload: PanelPayload) -> str:
+    """Derives the version of a panel payload from its JSON document.
+
+    Args:
+        payload: The payload.
+
+    Returns:
+        The first 16 hexadecimal digits of the SHA-256 hash of the document, equal for equal documents.
+    """
+    return hashlib.sha256(payload.model_dump_json().encode("utf-8")).hexdigest()[:16]
 
 
 class PanelFailure(BaseModel):
