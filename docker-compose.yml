@@ -163,8 +163,9 @@ services:
       - .env
     volumes:
       - ${BACKUP_DIR:-./backups}:/backups
-      - ./scripts/backup.sh:/backup.sh:ro
-    entrypoint: ["sh", "/backup.sh"]
+      # Docker Desktop cannot mount a single file again after its own restart, which would leave the service stopped
+      - ./scripts:/scripts:ro
+    entrypoint: ["sh", "/scripts/backup.sh"]
     healthcheck:
       # The script checks every hour for the dump of the day, so the newest dump is at most a day old while the stack runs
       test: ["CMD-SHELL", "test -n \"$$(find /backups -maxdepth 1 -name '*.archive.gz' -mtime -2)\""]

@@ -8,6 +8,7 @@ from space_weather_analysis.dashboard.panels.base import collection_of
 from space_weather_analysis.jobs.models import FeedJobSummary
 from space_weather_analysis.jobs.repository import JobRepository
 from space_weather_analysis.metadata.repository import MetadataRepository
+from space_weather_analysis.timeseries.documents import TIME_FIELD
 from space_weather_analysis.timeseries.repository import TimeSeriesRepository
 
 
@@ -76,7 +77,8 @@ class RepositoryReader:
         """Reads the documents of a span ending with the newest document from the repository."""
         latest = self.latest(dataset, fields)
         if latest is None:
-            return pd.DataFrame()
+            # Empty like a range read without documents, so that callers can compare and subtract times
+            return pd.DataFrame(columns=list(fields), index=pd.DatetimeIndex([], tz=UTC, name=TIME_FIELD))
         newest, _ = latest
         # The stop is exclusive, so the newest document needs a stop just after it; MongoDB keeps whole milliseconds
         return self._timeseries.read_range(collection_of(dataset), newest - span, newest + timedelta(milliseconds=1), fields)
